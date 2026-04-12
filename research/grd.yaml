@@ -1,0 +1,44 @@
+# GRD (Get Research Done) project descriptor.
+# Referenced by https://github.com/Rome-1/get-research-done workflows.
+# This is a scaffold; adjust keys to match the GRD version in use.
+project:
+  title: "LLM Inference Routing Strategies: A KV-Cache-Aware Comparison"
+  slug: "llm-routing-comparison"
+  authors:
+    - name: "TBD"
+  status: "draft"
+  abstract: |
+    We systematize the fragmented space of LLM inference routing strategies
+    through a unified experiment harness. Eleven policies — spanning
+    cache-oblivious load balancers, KV-cache-aware routers, Preble-style
+    hotspot-aware routing, PD-disaggregated dispatchers, VTC fairness, and
+    session affinity — are evaluated against a common workload, cluster,
+    and cost model. We characterize the tradeoff between maximizing KV
+    reuse and minimizing end-to-end latency, accounting for second-order
+    costs: KV transport bandwidth, scheduling overhead, queueing, and
+    hotspot formation.
+
+inputs:
+  - path: "../results/index.json"
+    kind: "sweep-index"
+  - path: "../configs/example_sweep.yaml"
+    kind: "sweep-config"
+  - path: "../docs/harness_overview.md"
+    kind: "methodology"
+
+outputs:
+  report: "reports/routing-comparison.md"
+  figures_dir: "figures/"
+  tables_dir: "tables/"
+
+placeholders:
+  # These are filled in post-run by `grd fill` or the project-specific
+  # aggregation step.
+  - key: "table_headline"
+    description: "Per-policy p50/p95/p99 + capture_rate + skew (mean over seeds)."
+  - key: "figure_reuse_vs_latency"
+    description: "Scatter: capture_rate vs p95 latency, one point per (policy, config)."
+  - key: "figure_hotspot_mitigation"
+    description: "Load-skew vs Zipf s for prefix-cache vs preble."
+  - key: "figure_pd_vs_colocated"
+    description: "P99 latency: PD policy vs prefix-cache on colocated topology."
