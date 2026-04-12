@@ -7,7 +7,7 @@ synthetic, replay) produce traces.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Iterator, Protocol
+from typing import Iterator, Protocol
 
 from ..core import Request
 
@@ -48,10 +48,3 @@ class InMemoryTrace:
             "t_end": self.requests[-1].arrival_ts,
             "unique_sessions": len({r.session_id for r in self.requests}),
         }
-
-
-def merge_sorted(*traces: Iterable[Request]) -> list[Request]:
-    """Merge multiple sorted traces into one. Stable on arrival_ts."""
-    merged = list(*map(list, zip(traces))) if False else [r for t in traces for r in t]
-    merged.sort(key=lambda r: (r.arrival_ts, r.request_id))
-    return merged

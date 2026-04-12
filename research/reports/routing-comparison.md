@@ -261,6 +261,44 @@ At what ratio of prefill:decode cost does disaggregation help?
    workloads will shift prefix-reuse distributions materially and are
    out of scope here.
 
+### 9.1 Known simulation biases (surfaced in peer review v1)
+
+Each item below is acknowledged as a model-fidelity limitation, with
+the *direction* of the resulting bias called out so readers know which
+policies are favored or penalized by the approximation. The harness is
+correct enough to support relative comparisons on the axes these biases
+treat symmetrically; absolute numbers are not claimed.
+
+- **Queueing formula is not M/M/1.** A reviewer estimated the current
+  linear formula under-estimates queueing latency by ~8× at high load.
+  *Direction:* under-reports absolute p99; relative ordering at tails
+  is preserved because the term scales with `active_prefill` for every
+  policy.
+- **Decode throughput is constant; no batch-size dependence.**
+  *Direction:* over-states decode latency under high concurrency and
+  therefore biases *against* policies that batch well (e.g. PD with
+  batched decode pods).
+- **KV pull is synchronous, no RDMA pipelining.** *Direction:*
+  over-penalizes small cross-pod pulls and therefore biases *against*
+  fine-grained prefix-sharing policies.
+- **lmsys mock tokenizer (0.25 tokens/char vs. ~0.75 real English).**
+  *Direction:* under-estimates prompt length, which under-estimates
+  available reuse and biases *against* prefix-aware policies on lmsys.
+- **Non-consecutive block residency.** `owners_of` only checks
+  per-block presence, not whether a pod owns a *consecutive* prefix.
+  *Direction:* over-estimates usable cross-pod reuse and biases
+  *toward* pull-heavy policies.
+- **`active_prefill` / `active_decode` retirement approximation.** The
+  simulator now increments on dispatch and retires on projected
+  completion via a heap, giving a non-monotonic load signal; it is
+  still not a true event-driven scheduler. *Direction:* acceptable for
+  p99 comparison at moderate concurrency; absolute throughput numbers
+  should not be read off.
+- **Taxonomy axis overlap.** Statefulness and cache-awareness in §3
+  are partially collinear (stateful policies are usually
+  cache-aware). Revising the taxonomy into orthogonal axes is deferred
+  to a follow-up.
+
 ## 10. How to fill this report
 
 Once runs are permitted:

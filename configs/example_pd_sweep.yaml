@@ -1,0 +1,21 @@
+# PD-specific sweep. Uses the disaggregated topology as the base so the
+# `pd` policy actually exercises its prefill/decode handoff path instead
+# of silently degrading to prefix-cache on a colocated cluster (which is
+# what happens with `example_sweep.yaml` + `example_run.yaml`).
+name: "pd-disaggregated-sweep"
+base: "example_pd_run.yaml"
+grid:
+  "policy.policy_id":
+    - "pd"
+    - "prefix-cache"
+    - "prefix-cache-preble"
+    - "least-busy-time"
+    - "random"
+  "workload.params.arrival_rate_qps":
+    - 8.0
+    - 16.0
+    - 32.0
+  "workload.params.zipf_s":
+    - 0.7
+    - 1.1
+    - 1.5

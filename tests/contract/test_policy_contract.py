@@ -56,14 +56,25 @@ def test_policy_handles_empty_cluster(policy_id, kv_cache):
 @pytest.mark.parametrize("policy_id", POLICY_IDS)
 def test_policy_does_not_mutate_cluster(policy_id, cluster, kv_cache):
     policy = _instantiate(policy_id)
-    snapshot = {
+    cluster_snap = {
         pid: (p.active_prefill, p.active_decode, p.queued, p.ewma_latency_ms)
         for pid, p in cluster.pods.items()
+    }
+    # Snapshot KV cache contents + byte accounting so we catch policies
+    # that accidentally mutate cache state (install / touch / evict).
+    kv_snap = {
+        pid: (pc.bytes_used, tuple(pc.entries.keys()))
+        for pid, pc in kv_cache.pods.items()
     }
     for req in shared_prefix_trace():
         policy.decide(req, cluster, kv_cache)
-    after = {
+    cluster_after = {
         pid: (p.active_prefill, p.active_decode, p.queued, p.ewma_latency_ms)
         for pid, p in cluster.pods.items()
     }
-    assert snapshot == after
+    kv_after = {
+        pid: (pc.bytes_used, tuple(pc.entries.keys()))
+        for pid, pc in kv_cache.pods.items()
+    }
+    assert cluster_snap == cluster_after
+    assert kv_snap == kv_after

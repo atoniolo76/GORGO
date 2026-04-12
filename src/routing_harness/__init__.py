@@ -9,4 +9,6 @@ See docs/harness_overview.md for architecture and design rationale.
 
 from __future__ import annotations
 
+from . import policies as _policies  # noqa: F401 — side-effect: registers policies
+
 __version__ = "0.1.0"

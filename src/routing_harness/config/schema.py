@@ -11,7 +11,7 @@ error on YAML files with a missing dependency.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -140,12 +140,6 @@ def _build_topology(raw: dict) -> TopologyConfig:
             peer_ids=tuple(p.get("peer_ids", [])),
         ))
     return TopologyConfig(pods=tuple(pods))
-
-
-def _build_dc(dc: type, raw: dict, context: str) -> Any:
-    required = [f.name for f in fields(dc) if f.default is field().default and f.default_factory is field().default_factory]  # type: ignore[misc]
-    _require(raw, *required, context=context)
-    return dc(**{f.name: raw.get(f.name, getattr(dc, f.name, None)) for f in fields(dc) if f.name in raw or hasattr(dc, f.name)})
 
 
 def load_run(path: str | Path) -> RunConfig:

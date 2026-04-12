@@ -2,11 +2,13 @@
 name = "GORGO"
 version = "0.1.0"
 dependencies = [
-    "modal>=1.4.0",
     "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
+modal = [
+    "modal>=1.4.0",
+]
 dev = [
     "pytest>=7.0",
 ]

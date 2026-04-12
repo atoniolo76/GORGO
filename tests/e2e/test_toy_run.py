@@ -78,7 +78,10 @@ def test_prefix_cache_beats_random_on_capture_rate(
     pfx = run_single("prefix-cache", {"block_size": 16}, **common)
     # On a small shared-prefix trace, random may occasionally match; we
     # assert weak dominance of capture_rate on average. Using sum of
-    # captured blocks as a robust proxy.
+    # captured blocks as a robust proxy, and requiring the prefix-aware
+    # run to actually capture *something* (otherwise "both zero" would
+    # pass vacuously).
     rnd_cap = rnd["metrics"]["kv"]["reuse_captured_blocks"]
     pfx_cap = pfx["metrics"]["kv"]["reuse_captured_blocks"]
     assert pfx_cap >= rnd_cap
+    assert pfx_cap > 0, "prefix-cache captured zero blocks on a shared-prefix trace"
