@@ -1,0 +1,27 @@
+# Example sweep config. References a base run via relative path and
+# expands a Cartesian grid of overrides. Dotted paths navigate the
+# base config. Values are lists.
+name: "policy-vs-reuse-sweep"
+base: "example_run.yaml"
+grid:
+  "policy.policy_id":
+    - "random"
+    - "least-request"
+    - "throughput"
+    - "prefix-cache"
+    - "least-busy-time"
+    - "least-kv-cache"
+    - "least-latency"
+    - "prefix-cache-preble"
+    - "vtc-basic"
+    - "pd"
+    - "session-affinity"
+  "workload.params.arrival_rate_qps":
+    - 4.0
+    - 8.0
+    - 16.0
+    - 32.0
+  "workload.params.zipf_s":
+    - 0.7
+    - 1.1
+    - 1.5

@@ -1,0 +1,75 @@
+# Example PD-disaggregated topology: 2 prefill + 2 decode pods.
+name: "pd-disaggregated-baseline"
+
+policy:
+  policy_id: "pd"
+  params:
+    block_size: 16
+
+topology:
+  pods:
+    - pod_id: "pf0"
+      role: "prefill"
+      gpu_count: 1
+      kv_cache_bytes: 8589934592  # 8 GiB — more headroom on prefill side
+      max_concurrent_prefill: 8
+      max_concurrent_decode: 0
+      peer_ids: ["dc0", "dc1"]
+    - pod_id: "pf1"
+      role: "prefill"
+      gpu_count: 1
+      kv_cache_bytes: 8589934592
+      max_concurrent_prefill: 8
+      max_concurrent_decode: 0
+      peer_ids: ["dc0", "dc1"]
+    - pod_id: "dc0"
+      role: "decode"
+      gpu_count: 1
+      kv_cache_bytes: 4294967296
+      max_concurrent_prefill: 0
+      max_concurrent_decode: 32
+      peer_ids: ["pf0", "pf1"]
+    - pod_id: "dc1"
+      role: "decode"
+      gpu_count: 1
+      kv_cache_bytes: 4294967296
+      max_concurrent_prefill: 0
+      max_concurrent_decode: 32
+      peer_ids: ["pf0", "pf1"]
+
+compute:
+  prefill_ms_per_token: 0.08
+  decode_ms_per_token: 6.0
+  prefill_overhead_ms: 5.0
+  decode_overhead_ms: 2.0
+
+network:
+  client_rtt_ms: 5.0
+  inter_pod_rtt_ms: 0.2
+  inter_pod_bandwidth_gbps: 200.0
+  kv_bytes_per_token: 131072
+  serialization_overhead_ms: 0.5
+
+scheduler:
+  base_routing_ms: 0.3
+  per_pod_consideration_us: 5.0
+
+engine:
+  kv_ewma_alpha: 0.2
+  block_size: 16
+  initial_warm_latency_ms: 5.0
+
+workload:
+  kind: "synthetic"
+  params:
+    n_requests: 2000
+    arrival_rate_qps: 12.0
+    n_prefix_families: 64
+    zipf_s: 1.1
+    prompt_len_min: 512
+    prompt_len_max: 4096
+    max_output_tokens: 256
+    n_sessions: 200
+
+seeds: [0, 1]
+output_dir: "results/pd-disaggregated-baseline"
