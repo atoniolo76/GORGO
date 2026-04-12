@@ -1,0 +1,88 @@
+"""Per-policy targeted behavior tests.
+
+Contract tests cover shared invariants; these tests pin down the
+behavior that distinguishes each policy.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from routing_harness import policies  # noqa: F401
+from routing_harness.core import Decision, PodSpec, Phase, Request
+from routing_harness.cluster import ClusterState
+from routing_harness.kv_cache import KVCacheState, PrefixEntry, enumerate_prefix_hashes
+from routing_harness.policy import get_policy
+
+
+def test_random_is_deterministic_under_seed(cluster, kv_cache):
+    p1 = get_policy("random", seed=42)
+    p2 = get_policy("random", seed=42)
+    req = Request("r", "s", 0.0, (1, 2, 3), 4)
+    assert p1.decide(req, cluster, kv_cache).prefill_pod_id == p2.decide(req, cluster, kv_cache).prefill_pod_id
+
+
+def test_least_request_picks_min_load(pod_specs, kv_cache):
+    cluster = ClusterState.from_specs(pod_specs)
+    cluster.pods["p0"].active_prefill = 5
+    cluster.pods["p1"].active_prefill = 0
+    cluster.pods["p2"].active_prefill = 2
+    p = get_policy("least-request")
+    d = p.decide(Request("r", "s", 0.0, (1, 2), 1), cluster, kv_cache)
+    assert d.prefill_pod_id == "p1"
+
+
+def test_prefix_cache_routes_to_owner(cluster, kv_cache):
+    tokens = tuple(range(32))
+    hashes = enumerate_prefix_hashes(tokens, block_size=16)
+    for h in hashes:
+        kv_cache.install("p2", PrefixEntry(h, 16, 1024), now=1.0)
+    p = get_policy("prefix-cache", block_size=16)
+    d = p.decide(Request("r", "s", 2.0, tokens, 4), cluster, kv_cache)
+    assert d.prefill_pod_id == "p2"
+
+
+def test_prefix_cache_preble_avoids_hotspot(pod_specs, kv_cache):
+    cluster = ClusterState.from_specs(pod_specs)
+    tokens = tuple(range(32))
+    hashes = enumerate_prefix_hashes(tokens, block_size=16)
+    for h in hashes:
+        # Prefix lives on p0 AND p1.
+        kv_cache.install("p0", PrefixEntry(h, 16, 1024), now=1.0)
+        kv_cache.install("p1", PrefixEntry(h, 16, 1024), now=1.0)
+    # p0 is a hotspot.
+    cluster.pods["p0"].active_prefill = 100
+    cluster.pods["p0"].queued = 100
+    p = get_policy("prefix-cache-preble", block_size=16, alpha=1.0, beta=0.5, hotspot_threshold=0.5)
+    d = p.decide(Request("r", "s", 3.0, tokens, 4), cluster, kv_cache)
+    assert d.prefill_pod_id != "p0"
+
+
+def test_session_affinity_sticks(cluster, kv_cache):
+    p = get_policy("session-affinity", stickiness_ttl_s=3600.0)
+    req1 = Request("r1", "sX", 1.0, (1, 2, 3), 4)
+    req2 = Request("r2", "sX", 2.0, (9, 8, 7), 4)
+    d1 = p.decide(req1, cluster, kv_cache)
+    d2 = p.decide(req2, cluster, kv_cache)
+    assert d1.prefill_pod_id == d2.prefill_pod_id
+
+
+def test_pd_separates_roles(pd_specs, kv_cache):
+    cluster = ClusterState.from_specs(pd_specs)
+    kv_cache = KVCacheState.from_specs({s.pod_id: s.kv_cache_bytes for s in pd_specs})
+    p = get_policy("pd", block_size=16)
+    d = p.decide(Request("r", "s", 0.0, tuple(range(32)), 8), cluster, kv_cache)
+    assert cluster.pods[d.prefill_pod_id].spec.role == Phase.PREFILL
+    assert cluster.pods[d.decode_pod_id].spec.role == Phase.DECODE
+
+
+def test_vtc_fairness_annotation(cluster, kv_cache):
+    p = get_policy("vtc-basic")
+    # After observing a big consumer, VTC should score them lower.
+    r_heavy = Request("r1", "sA", 0.0, (1, 2), 1)
+    p.observe_completion(r_heavy, tokens_consumed=1_000_000)
+    r_light = Request("r2", "sB", 0.1, (1, 2), 1)
+    d_heavy = p.decide(r_heavy, cluster, kv_cache)
+    d_light = p.decide(r_light, cluster, kv_cache)
+    # Score is -tokens_consumed; heavy should be more negative.
+    assert (d_heavy.score or 0) < (d_light.score or 0)
