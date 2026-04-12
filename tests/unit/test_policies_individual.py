@@ -78,11 +78,19 @@ def test_pd_separates_roles(pd_specs, kv_cache):
 
 def test_vtc_fairness_annotation(cluster, kv_cache):
     p = get_policy("vtc-basic")
-    # After observing a big consumer, VTC should score them lower.
+    # Route a heavy tenant's request first so the engine records their
+    # tokens against a specific pod, then observe completion.
     r_heavy = Request("r1", "sA", 0.0, (1, 2), 1)
-    p.observe_completion(r_heavy, tokens_consumed=1_000_000)
+    d_first = p.decide(r_heavy, cluster, kv_cache)
+    p.observe_completion(r_heavy, d_first, tokens_consumed=1_000_000)
     r_light = Request("r2", "sB", 0.1, (1, 2), 1)
     d_heavy = p.decide(r_heavy, cluster, kv_cache)
     d_light = p.decide(r_light, cluster, kv_cache)
-    # Score is -tokens_consumed; heavy should be more negative.
+    # Score reflects the heavy tenant's global counter (-tokens); the
+    # light tenant has zero.
     assert (d_heavy.score or 0) < (d_light.score or 0)
+    # The heavy tenant should now be steered *away* from the pod where
+    # they just consumed tokens, while the light tenant has no debt to
+    # avoid — so the two decisions should differ on at least the
+    # heavy-tenant's former pod.
+    assert d_heavy.prefill_pod_id != d_first.prefill_pod_id or len(cluster.pods) == 1

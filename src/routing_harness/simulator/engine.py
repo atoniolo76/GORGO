@@ -6,14 +6,22 @@ records metrics. It is deliberately simple (no priority queue, no
 preemption) — the point is a deterministic comparison harness, not a
 cycle-accurate simulator. More sophisticated scheduling can be added
 behind the same interface without touching policies.
+
+Load-counter approximation: because the engine is one-pass without a
+true time advance, `active_prefill` / `active_decode` are incremented
+on `decide` and decremented once the next request's arrival_ts is
+past the projected completion. This gives load-aware policies a
+non-degenerate load signal while remaining deterministic. Documented as
+an approximation in docs/peer_review_v1.md §7.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from heapq import heappop, heappush
 
 from ..cluster import ClusterState
-from ..core import PodRuntime, Request
+from ..core import Phase, PodRuntime, Request
 from ..cost_model import CostModel, NetworkParams
 from ..kv_cache import KVCacheState, PrefixEntry, enumerate_prefix_hashes
 from ..policy import RoutingPolicy
@@ -36,6 +44,10 @@ class SimulationEngine:
     network: NetworkParams
     config: EngineConfig
     metrics: MetricsCollector
+    _pending: list[tuple[float, int, str, str, Request, "object"]] = field(
+        default_factory=list
+    )
+    _seq: int = 0
 
     def __post_init__(self) -> None:
         for p in self.cluster.pods.values():
@@ -49,14 +61,36 @@ class SimulationEngine:
             req.prompt_tokens, block_size=self.config.block_size
         )
 
+    def _retire_up_to(self, now_s: float) -> None:
+        """Retire in-flight requests whose projected completion is past.
+
+        Drains the pending heap, decrements pod active counters, and
+        invokes the policy's optional `observe_completion` hook.
+        """
+        hook = getattr(self.policy, "observe_completion", None)
+        while self._pending and self._pending[0][0] <= now_s:
+            _, _, prefill_id, decode_id, req, decision = heappop(self._pending)
+            pod_p = self.cluster.pods.get(prefill_id)
+            if pod_p is not None and pod_p.active_prefill > 0:
+                pod_p.active_prefill -= 1
+            pod_d = self.cluster.pods.get(decode_id)
+            if pod_d is not None and pod_d.active_decode > 0:
+                pod_d.active_decode -= 1
+            if hook is not None:
+                tokens = len(req.prompt_tokens) + req.max_output_tokens
+                hook(req, decision, float(tokens))
+
     def run(self, trace) -> MetricsCollector:
         now = 0.0
         for req in trace:
             now = max(now, req.arrival_ts)
+            self._retire_up_to(now)
             decision = self.policy.decide(req, self.cluster, self.kv_cache)
             if decision.prefill_pod_id == "__none__":
                 continue
             pod = self.cluster.get(decision.prefill_pod_id)
+            decode_pod_id = decision.decode_pod_id
+            decode_pod = self.cluster.pods.get(decode_pod_id, pod)
             hashes = self._prefix_hashes(req)
 
             reuse_avail_blocks = sum(
@@ -74,22 +108,40 @@ class SimulationEngine:
             # pull if there is a strictly longer cluster-wide prefix available).
             owner_pull_bytes = 0
             owner = None
+            pull_blocks = 0
             if captured < reuse_avail_blocks:
                 for h in hashes[captured:]:
                     owners = self.kv_cache.owners_of(h)
                     if owners:
-                        owner = max(owners, key=lambda pid: self.kv_cache.pods[pid].entries[h].last_access_ts)
+                        owner = max(
+                            owners,
+                            key=lambda pid: self.kv_cache.pods[pid].entries[h].last_access_ts,
+                        )
                         break
                 if owner and owner != pod.spec.pod_id:
-                    pull_blocks = 0
                     for h in hashes[captured:]:
                         if self.kv_cache.has(owner, h):
                             pull_blocks += 1
                         else:
                             break
-                    owner_pull_bytes = pull_blocks * self.config.block_size * self.network.kv_bytes_per_token
+                    owner_pull_bytes = (
+                        pull_blocks
+                        * self.config.block_size
+                        * self.network.kv_bytes_per_token
+                    )
                     cached_prefix_tokens += pull_blocks * self.config.block_size
                     captured += pull_blocks
+
+            # PD-disaggregation handoff: if prefill and decode pods differ,
+            # the computed KV must cross the fabric to the decode pod.
+            pd_handoff_bytes = 0
+            if (
+                decode_pod_id != pod.spec.pod_id
+                and decode_pod_id in self.cluster.pods
+            ):
+                pd_handoff_bytes = (
+                    len(req.prompt_tokens) * self.network.kv_bytes_per_token
+                )
 
             cost = self.cost_model.estimate(
                 request=req,
@@ -97,10 +149,21 @@ class SimulationEngine:
                 cluster=self.cluster,
                 kv_cache=self.kv_cache,
                 cached_prefix_tokens=cached_prefix_tokens,
-                kv_transport_bytes=owner_pull_bytes,
+                kv_transport_bytes=owner_pull_bytes + pd_handoff_bytes,
             )
 
-            self._apply_side_effects(pod, req, hashes, now, captured, cost.total_ms)
+            self._apply_side_effects(
+                pod=pod,
+                decode_pod=decode_pod,
+                req=req,
+                hashes=hashes,
+                now=now,
+                captured_blocks=captured,
+                pull_blocks_from_peer=pull_blocks,
+                pd_handoff=pd_handoff_bytes > 0,
+                observed_latency_ms=cost.total_ms,
+                decision=decision,
+            )
 
             self.metrics.observe(
                 RequestRecord(
@@ -110,20 +173,28 @@ class SimulationEngine:
                     cached_prefix_tokens=cached_prefix_tokens,
                     reuse_available_blocks=reuse_avail_blocks,
                     reuse_captured_blocks=captured,
-                    kv_transport_bytes=owner_pull_bytes,
+                    kv_transport_bytes=owner_pull_bytes + pd_handoff_bytes,
                     migrated=decision.prefill_pod_id != decision.decode_pod_id,
                 )
             )
+
+        # Drain any still-pending completions at end-of-trace so that
+        # observe_completion fires for every request.
+        self._retire_up_to(float("inf"))
         return self.metrics
 
     def _apply_side_effects(
         self,
         pod: PodRuntime,
+        decode_pod: PodRuntime,
         req: Request,
         hashes: list[str],
         now: float,
         captured_blocks: int,
+        pull_blocks_from_peer: int,
+        pd_handoff: bool,
         observed_latency_ms: float,
+        decision,
     ) -> None:
         alpha = self.config.kv_ewma_alpha
         pod.ewma_latency_ms = (1 - alpha) * pod.ewma_latency_ms + alpha * observed_latency_ms
@@ -133,18 +204,64 @@ class SimulationEngine:
         pod.ewma_throughput_tps = (1 - alpha) * pod.ewma_throughput_tps + alpha * throughput
         pod.last_update_ts = now
 
-        # Install block-level prefix entries up to and including what was used.
+        # Record the in-flight arrival on both pods for load-aware policies.
+        pod.active_prefill += 1
+        decode_pod.active_decode += 1
+        # Schedule retirement at now + observed latency (ms → s).
+        self._seq += 1
+        heappush(
+            self._pending,
+            (
+                now + observed_latency_ms / 1000.0,
+                self._seq,
+                pod.spec.pod_id,
+                decode_pod.spec.pod_id,
+                req,
+                decision,
+            ),
+        )
+
+        # Install block-level prefix entries up to and including what was
+        # used. For PD handoff and for peer-pulled blocks, also install on
+        # the *destination* cache so subsequent reuse claims are honest.
+        byte_size = self.config.block_size * self.network.kv_bytes_per_token
         for i, h in enumerate(hashes, start=1):
             tokens_so_far = i * self.config.block_size
-            byte_size = self.config.block_size * self.network.kv_bytes_per_token
-            self.kv_cache.install(
-                pod.spec.pod_id,
-                PrefixEntry(
-                    prefix_hash=h,
-                    token_count=self.config.block_size,
-                    byte_size=byte_size,
-                ),
-                now,
+            entry = PrefixEntry(
+                prefix_hash=h,
+                token_count=self.config.block_size,
+                byte_size=byte_size,
             )
+            self.kv_cache.install(pod.spec.pod_id, entry, now)
+            if pd_handoff and decode_pod.spec.pod_id != pod.spec.pod_id:
+                # Decode pod materializes the same prefix blocks it just
+                # received so it can be a reuse source for future requests.
+                self.kv_cache.install(
+                    decode_pod.spec.pod_id,
+                    PrefixEntry(
+                        prefix_hash=h,
+                        token_count=self.config.block_size,
+                        byte_size=byte_size,
+                    ),
+                    now,
+                )
             if tokens_so_far >= len(req.prompt_tokens):
                 break
+
+        # Peer-pulled blocks must be installed on the destination pod's
+        # cache. Without this the capture-rate metric claims credit for
+        # blocks that were never actually materialized locally, and
+        # subsequent requests route as if the prefix were cached when it
+        # is not. (Defect found in peer review v1 §3.)
+        if pull_blocks_from_peer > 0:
+            start = captured_blocks - pull_blocks_from_peer
+            for h in hashes[start : start + pull_blocks_from_peer]:
+                self.kv_cache.install(
+                    pod.spec.pod_id,
+                    PrefixEntry(
+                        prefix_hash=h,
+                        token_count=self.config.block_size,
+                        byte_size=byte_size,
+                    ),
+                    now,
+                )

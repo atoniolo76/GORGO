@@ -1,16 +1,23 @@
-"""Preble-style prefix-cache routing with hotspot-aware load balancing.
+"""Preble-*inspired* prefix-cache routing with hotspot-aware balancing.
 
-Inspired by Preble's observation (arXiv 2303.06865 et al.) that naive
-prefix-locality routing concentrates load on whichever pod happens to
-hold a popular prefix. This policy scores pods as:
+Deliberately simplified formulation, not a faithful reimplementation of
+Preble. The published Preble system optimizes routing over a reuse
+graph with load prediction; this policy reduces that to a linear
+combination:
 
     score = alpha * prefix_match_blocks - beta * load_factor
 
 where load_factor is normalized (active + queued)/capacity. Hotspot
 mitigation: if the top-scoring pod's load_factor exceeds
 `hotspot_threshold`, defer to a less-loaded pod that already has *some*
-prefix overlap, even if shorter. Assumptions are documented so empirical
-tuning can replace them.
+prefix overlap, even if shorter. The coefficients (alpha, beta,
+hotspot_threshold) are magic numbers chosen to expose the trade-off in
+this harness; empirical tuning is expected before drawing any
+conclusion about Preble-the-system from this policy.
+
+The registered id `prefix-cache-preble` is intentionally kept stable
+(config compatibility). Refer to this class name or docstring when
+citing the algorithm.
 """
 
 from __future__ import annotations

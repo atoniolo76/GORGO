@@ -1,11 +1,11 @@
 """VTC-basic: Virtual Token Counter fairness policy.
 
-Tracks per-session (or per-tenant) token consumption and prefers sessions
-with lower consumption. Pod selection is delegated to least-busy-time;
-VTC's contribution is admission ordering and tenant fairness. In this
-harness we expose VTC as a routing policy that (a) picks a pod via
-least-busy-time and (b) annotates the request with a VTC priority for
-the simulator's queue to honor.
+Tracks per-tenant (or per-session) token consumption and penalizes pods
+that are currently serving heavy tenants. Each pod has a per-tenant
+"debt" implicit in its in-flight mix; VTC routes the request to the pod
+whose aggregate debt for the request's tenant is lowest, breaking ties
+by least-busy-time. The engine's `observe_completion` hook updates
+counters when requests finish.
 """
 
 from __future__ import annotations
@@ -24,15 +24,30 @@ from ..policy import register_policy
 class VTCBasicPolicy:
     fairness_key: str = "session_id"  # or "tenant" if set in metadata
     counters: dict[str, float] = field(default_factory=lambda: defaultdict(float))
+    pod_tenant_tokens: dict[str, dict[str, float]] = field(
+        default_factory=lambda: defaultdict(lambda: defaultdict(float))
+    )
 
     def _key(self, r: Request) -> str:
         if self.fairness_key == "session_id":
             return r.session_id
         return str(r.metadata.get(self.fairness_key, r.session_id))
 
-    def observe_completion(self, request: Request, tokens_consumed: float) -> None:
-        """Simulator calls this when a request completes to update counters."""
-        self.counters[self._key(request)] += tokens_consumed
+    def observe_completion(
+        self,
+        request: Request,
+        decision: Decision,
+        tokens_consumed: float,
+    ) -> None:
+        """Engine calls this when a request finishes.
+
+        Updates the global per-tenant counter (for observability/score
+        reporting) and the per-pod×tenant counter (used by `decide` as
+        the primary selection priority).
+        """
+        k = self._key(request)
+        self.counters[k] += tokens_consumed
+        self.pod_tenant_tokens[decision.prefill_pod_id][k] += tokens_consumed
 
     def decide(
         self,
@@ -49,10 +64,13 @@ class VTCBasicPolicy:
         def busy(p):
             return p.ewma_latency_ms * (p.active_prefill + p.active_decode + p.queued)
 
-        pick = min(cands, key=lambda p: (busy(p), p.spec.pod_id))
+        def tenant_debt(p):
+            return self.pod_tenant_tokens.get(p.spec.pod_id, {}).get(k, 0.0)
+
+        pick = min(cands, key=lambda p: (tenant_debt(p), busy(p), p.spec.pod_id))
         return Decision(
             pick.spec.pod_id,
             pick.spec.pod_id,
-            rationale=f"vtc k={k} tokens={vtc_score:.0f}",
+            rationale=f"vtc k={k} tokens={vtc_score:.0f} debt={tenant_debt(pick):.0f}",
             score=-vtc_score,
         )

@@ -76,7 +76,7 @@ class AnalyticCostModel:
         kv_transport_bytes: int,
     ) -> CostBreakdown:
         prompt_len = len(request.prompt_tokens)
-        unchached = max(0, prompt_len - cached_prefix_tokens)
+        uncached = max(0, prompt_len - cached_prefix_tokens)
         pod = cluster.get(decision.prefill_pod_id)
         occupancy = (
             pod.active_prefill / max(1, pod.spec.max_concurrent_prefill)
@@ -90,7 +90,7 @@ class AnalyticCostModel:
         )
         compute_prefill = (
             self.compute.prefill_overhead_ms
-            + unchached * self.compute.prefill_ms_per_token
+            + uncached * self.compute.prefill_ms_per_token
         )
         compute_decode = (
             self.compute.decode_overhead_ms

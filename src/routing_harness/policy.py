@@ -43,6 +43,13 @@ class RoutingPolicy(Protocol):
         """
         ...
 
+    # Optional hook: the engine invokes `observe_completion` (if
+    # defined) after each request finishes, passing the request, the
+    # decision that was made, and the total tokens consumed
+    # (prompt + decode). Fairness policies (VTC) and learning policies
+    # use it to update internal state. Implementations are optional;
+    # policies that do not define it are silently skipped.
+
 
 _REGISTRY: dict[str, Callable[..., RoutingPolicy]] = {}
 

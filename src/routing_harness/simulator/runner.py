@@ -31,10 +31,21 @@ from .metrics import MetricsCollector
 
 
 def _to_jsonable(obj: Any) -> Any:
+    # Exclude private (leading-underscore) fields so runtime state like
+    # policy `_bindings` maps cannot leak into config snapshots and
+    # silently change the content-addressed run_id.
     if is_dataclass(obj):
-        return {k: _to_jsonable(v) for k, v in asdict(obj).items()}
+        return {
+            k: _to_jsonable(v)
+            for k, v in asdict(obj).items()
+            if not k.startswith("_")
+        }
     if isinstance(obj, dict):
-        return {k: _to_jsonable(v) for k, v in obj.items()}
+        return {
+            k: _to_jsonable(v)
+            for k, v in obj.items()
+            if not (isinstance(k, str) and k.startswith("_"))
+        }
     if isinstance(obj, (list, tuple)):
         return [_to_jsonable(v) for v in obj]
     if isinstance(obj, (str, int, float, bool)) or obj is None:
@@ -161,8 +172,12 @@ def _append_index(path: Path, run_id: str, snapshot: dict, summary: dict) -> Non
         "p50_ms": summary.get("latency_ms", {}).get("p50"),
         "p95_ms": summary.get("latency_ms", {}).get("p95"),
         "p99_ms": summary.get("latency_ms", {}).get("p99"),
+        "ttft_p50_ms": summary.get("ttft_ms", {}).get("p50"),
+        "ttft_p95_ms": summary.get("ttft_ms", {}).get("p95"),
+        "ttft_p99_ms": summary.get("ttft_ms", {}).get("p99"),
         "hit_rate": summary.get("kv", {}).get("hit_rate"),
-        "capture_rate": summary.get("kv", {}).get("capture_rate"),
+        "capture_rate_micro": summary.get("kv", {}).get("capture_rate_micro"),
+        "capture_rate_macro": summary.get("kv", {}).get("capture_rate_macro"),
         "skew": summary.get("load", {}).get("skew"),
     })
     path.write_text(json.dumps(existing, indent=2))
