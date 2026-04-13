@@ -1,6 +1,24 @@
 [project]
 name = "GORGO"
 version = "0.1.0"
+requires-python = ">=3.12"
 dependencies = [
+    "guidellm>=0.6.0",
     "modal>=1.4.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["engine"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "W"]
+
+[tool.ruff.format]
+quote-style = "double"
