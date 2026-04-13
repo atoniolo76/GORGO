@@ -23,7 +23,13 @@ from typing import Any
 
 from ..cluster import ClusterState
 from ..core import PodSpec
-from ..cost_model import AnalyticCostModel, ComputeParams, NetworkParams, SchedulerParams
+from ..cost_model import (
+    AnalyticCostModel,
+    ComputeParams,
+    InstrumentedCostModel,
+    NetworkParams,
+    SchedulerParams,
+)
 from ..kv_cache import KVCacheState
 from ..policy import get_policy
 from .engine import EngineConfig, SimulationEngine
@@ -75,10 +81,16 @@ def run_single(
     engine_cfg: EngineConfig,
     output_root: Path | None = None,
     run_meta: dict | None = None,
+    observations: dict[str, float] | None = None,
 ) -> dict:
     cluster, cache = build_cluster_and_cache(topology)
     policy = get_policy(policy_id, **policy_kwargs)
-    cost_model = AnalyticCostModel(compute=compute, network=network, scheduler=scheduler)
+    analytic = AnalyticCostModel(compute=compute, network=network, scheduler=scheduler)
+    cost_model = (
+        InstrumentedCostModel.from_observations(analytic, observations)
+        if observations
+        else analytic
+    )
     engine = SimulationEngine(
         cluster=cluster,
         kv_cache=cache,
@@ -101,6 +113,7 @@ def run_single(
         "engine": asdict(engine_cfg),
         "trace": trace.describe() if hasattr(trace, "describe") else {},
         "meta": run_meta or {},
+        "observations": dict(sorted(observations.items())) if observations else {},
     }
     rid = _run_id(snapshot)
     result = {"run_id": rid, "config": snapshot, "metrics": summary}

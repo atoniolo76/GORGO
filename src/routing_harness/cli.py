@@ -15,7 +15,12 @@ from pathlib import Path
 from .config.schema import RunConfig, load_run, load_sweep
 from .config.sweep import expand
 from .core import PodSpec, Phase
-from .cost_model import ComputeParams, NetworkParams, SchedulerParams
+from .cost_model import (
+    ComputeParams,
+    NetworkParams,
+    SchedulerParams,
+    load_observations_csv,
+)
 from .simulator.engine import EngineConfig
 from .simulator.runner import run_single
 from . import policies  # noqa: F401 — registers policies
@@ -101,7 +106,7 @@ def _build_trace(workload_cfg, seed: int):
     raise ValueError(f"unknown workload kind: {kind}")
 
 
-def _execute(rc: RunConfig) -> list[dict]:
+def _execute(rc: RunConfig, observations: dict[str, float] | None = None) -> list[dict]:
     out: list[dict] = []
     for seed in rc.seeds:
         topology = _topology_to_specs(rc.topology)
@@ -117,23 +122,32 @@ def _execute(rc: RunConfig) -> list[dict]:
             engine_cfg=EngineConfig(**asdict(rc.engine)),
             output_root=Path(rc.output_dir),
             run_meta={"name": rc.name, "seed": seed},
+            observations=observations,
         )
         out.append(result)
     return out
 
 
+def _load_instrumentation(path: str | None) -> dict[str, float] | None:
+    if not path:
+        return None
+    return load_observations_csv(path)
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     rc = load_run(args.config)
-    results = _execute(rc)
+    observations = _load_instrumentation(args.instrumentation_log)
+    results = _execute(rc, observations=observations)
     print(json.dumps([{"run_id": r["run_id"], "metrics": r["metrics"]} for r in results], indent=2))
     return 0
 
 
 def _cmd_sweep(args: argparse.Namespace) -> int:
     sweep = load_sweep(args.config)
+    observations = _load_instrumentation(args.instrumentation_log)
     all_results: list[dict] = []
     for axis, rc in expand(sweep):
-        results = _execute(rc)
+        results = _execute(rc, observations=observations)
         for r in results:
             r["axis"] = axis
         all_results.extend(results)
@@ -153,10 +167,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser("run", help="run a single configured experiment")
     run.add_argument("--config", required=True)
+    run.add_argument(
+        "--instrumentation-log",
+        default=None,
+        help="CSV of (key,value_ms) observations to override analytic estimates "
+        "(see docs/harness_overview.md for the key schema)",
+    )
     run.set_defaults(func=_cmd_run)
 
     sweep = sub.add_parser("sweep", help="run a parameter sweep")
     sweep.add_argument("--config", required=True)
+    sweep.add_argument(
+        "--instrumentation-log",
+        default=None,
+        help="CSV of (key,value_ms) observations applied to every run in the sweep",
+    )
     sweep.set_defaults(func=_cmd_sweep)
 
     lp = sub.add_parser("list-policies", help="list registered policy ids")

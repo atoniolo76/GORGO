@@ -233,25 +233,142 @@ class AnalyticCostModel:
         )
 
 
+def decode_batch_bucket(batch: int) -> int:
+    """Power-of-two floor bucket for decode batch size.
+
+    Decode throughput curves saturate roughly logarithmically in batch,
+    so we key observations by doubling bands (1, 2, 4, 8, 16, ...) rather
+    than exact counts — this keeps the observation table small and lets
+    a single sample cover a plausible throughput plateau. `batch` is the
+    inclusive count (the request being scheduled counts as 1); callers
+    that already subtract the request should add it back before calling.
+    """
+    if batch <= 1:
+        return 1
+    return 1 << (int(batch).bit_length() - 1)
+
+
+def load_observations_csv(path) -> dict[str, float]:
+    """Load (key, value_ms) pairs from a CSV file.
+
+    Accepts an optional header row (`key,value_ms`). Blank lines and
+    lines starting with `#` are ignored. Later values override earlier
+    ones for the same key.
+    """
+    import csv
+    from pathlib import Path as _Path
+
+    observations: dict[str, float] = {}
+    with _Path(path).open(newline="") as fh:
+        reader = csv.reader(fh)
+        for row in reader:
+            if not row or not row[0].strip() or row[0].lstrip().startswith("#"):
+                continue
+            if len(row) < 2:
+                raise ValueError(f"instrumentation row needs 2 columns: {row!r}")
+            key = row[0].strip()
+            if key == "key":  # header
+                continue
+            observations[key] = float(row[1])
+    return observations
+
+
 class InstrumentedCostModel:
-    """Placeholder for a future cost model backed by real measurements.
+    """Cost model that blends measured values with analytic estimates.
 
-    Design intent: a decorator around AnalyticCostModel that, when a
-    run is executed against a real server, overrides any component it
-    has observed (e.g. measured prefill latency per token) while falling
-    back to analytic estimates for unobserved components.
+    Decorator around `AnalyticCostModel`. For each request it consults
+    the observation table and, when a matching key has been recorded,
+    substitutes the measured coefficient into the corresponding
+    component; components without a matching observation fall through to
+    the analytic estimate unchanged.
 
-    Not implemented — instrumentation hooks live here so the interface
-    is stable.
+    Observation-key schema (all values in milliseconds):
+      - `prefill_ms_per_token:<pod_id>` — per-token prefill rate on the
+        prefill pod. Replaces `ComputeParams.prefill_ms_per_token` only
+        for the matching pod; `prefill_overhead_ms` and the uncached-
+        token count are still taken from the analytic path.
+      - `decode_ms_per_token:<pod_id>:<batch_bucket>` — per-token decode
+        rate for the decode pod at a given batch bucket (power-of-two
+        floor of the inclusive concurrent decode count; see
+        `decode_batch_bucket`). When present, replaces the batched
+        analytic decode cost for that (pod, bucket) combination.
+      - `queueing_ms:<pod_id>` — measured mean wait for the prefill pod.
+        Replaces the M/M/1 estimate as a flat value (the analytic model
+        is itself a steady-state approximation, so a directly measured
+        mean is the apples-to-apples replacement).
+
+    Components without an override — routing, network, kv_transport —
+    pass through from the analytic model. Use `record(key, value_ms)` to
+    add observations at runtime, or construct via `from_observations`.
     """
 
     def __init__(self, inner: AnalyticCostModel) -> None:
         self.inner = inner
         self._observed: dict[str, float] = {}
 
+    @classmethod
+    def from_observations(
+        cls, inner: AnalyticCostModel, observations: dict[str, float]
+    ) -> "InstrumentedCostModel":
+        m = cls(inner)
+        for k, v in observations.items():
+            m.record(k, v)
+        return m
+
     def record(self, key: str, value_ms: float) -> None:
         self._observed[key] = value_ms
 
-    def estimate(self, *args, **kwargs) -> CostBreakdown:  # pragma: no cover
-        # Future: blend observed with analytic. For now, delegate.
-        return self.inner.estimate(*args, **kwargs)
+    def estimate(
+        self,
+        request: Request,
+        decision: Decision,
+        cluster: ClusterState,
+        kv_cache: KVCacheState,
+        cached_prefix_tokens: int,
+        kv_transport_bytes: int,
+        concurrent_kv_transport_bytes: int | None = None,
+    ) -> CostBreakdown:
+        base = self.inner.estimate(
+            request,
+            decision,
+            cluster,
+            kv_cache,
+            cached_prefix_tokens,
+            kv_transport_bytes,
+            concurrent_kv_transport_bytes,
+        )
+        compute_prefill = base.compute_prefill_ms
+        compute_decode = base.compute_decode_ms
+        queueing = base.queueing_ms
+
+        prefill_key = f"prefill_ms_per_token:{decision.prefill_pod_id}"
+        if prefill_key in self._observed:
+            uncached = max(0, len(request.prompt_tokens) - cached_prefix_tokens)
+            compute_prefill = (
+                self.inner.compute.prefill_overhead_ms
+                + uncached * self._observed[prefill_key]
+            )
+
+        decode_pod = cluster.pods.get(
+            decision.decode_pod_id, cluster.get(decision.prefill_pod_id)
+        )
+        bucket = decode_batch_bucket(decode_pod.active_decode + 1)
+        decode_key = f"decode_ms_per_token:{decision.decode_pod_id}:{bucket}"
+        if decode_key in self._observed:
+            compute_decode = (
+                self.inner.compute.decode_overhead_ms
+                + request.max_output_tokens * self._observed[decode_key]
+            )
+
+        queue_key = f"queueing_ms:{decision.prefill_pod_id}"
+        if queue_key in self._observed:
+            queueing = self._observed[queue_key]
+
+        return CostBreakdown(
+            routing_ms=base.routing_ms,
+            queueing_ms=queueing,
+            compute_prefill_ms=compute_prefill,
+            compute_decode_ms=compute_decode,
+            network_ms=base.network_ms,
+            kv_transport_ms=base.kv_transport_ms,
+        )

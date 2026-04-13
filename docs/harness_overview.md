@@ -126,6 +126,48 @@ All chat adapters share the same tokenizer dispatch (`"mock"` default,
 `"tiktoken:<encoding>"` opt-in via the `tokenizers` extra) so switching
 workloads never switches tokenizers as a confound.
 
+## Instrumentation: blending measured values into the cost model
+
+`cost_model.InstrumentedCostModel` wraps `AnalyticCostModel` and, for each
+request, substitutes a measured coefficient into a single component while
+leaving unobserved components on the analytic path. This is the integration
+point for running the harness against real hardware: observations collected
+live (per-pod prefill throughput, per-bucket decode throughput, queueing
+waits) can be layered on without touching policies or the simulator.
+
+### Observation-key schema
+
+All values are milliseconds. Keys are colon-separated and case-sensitive.
+
+| Key | Effect |
+| --- | --- |
+| `prefill_ms_per_token:<pod_id>` | Replaces `ComputeParams.prefill_ms_per_token` for the prefill pod. Overhead (`prefill_overhead_ms`) and uncached-token count still come from the analytic path. |
+| `decode_ms_per_token:<pod_id>:<batch_bucket>` | Replaces the batched analytic decode-per-token rate for the decode pod when its active batch falls in the given bucket. `batch_bucket` is the power-of-two floor of the inclusive concurrent decode count — `1`, `2`, `4`, `8`, `16`, ... (see `cost_model.decode_batch_bucket`). |
+| `queueing_ms:<pod_id>` | Flat replacement for the M/M/1 queue-wait estimate on the prefill pod. Use this when you have a measured mean wait; the analytic form is itself a steady-state approximation. |
+
+Routing, network, and kv-transport components have no override today —
+they pass through from the analytic model.
+
+### CLI wiring
+
+`routing-harness run --instrumentation-log obs.csv --config ...` loads a
+CSV of `(key, value_ms)` pairs and wraps the analytic cost model with
+`InstrumentedCostModel`. Blank lines and `#`-prefixed comments are
+ignored; a `key,value_ms` header row is optional. The same flag is
+accepted by `sweep` and applies to every run in the sweep. Observations
+are recorded in the run snapshot, so runs with different override sets
+produce distinct content-addressed `run_id`s.
+
+Example `obs.csv`:
+
+```
+key,value_ms
+prefill_ms_per_token:pf0,0.08
+decode_ms_per_token:dc0:8,3.2
+decode_ms_per_token:dc0:16,2.7
+queueing_ms:pf0,4.1
+```
+
 ## What this harness intentionally does NOT do (yet)
 
 - Real GPU measurement or Modal deploy integration.
