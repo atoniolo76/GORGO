@@ -93,9 +93,12 @@ each with a direction-of-error annotation so readers know the bias:
   at high load). *Direction:* favors all policies equally at the tail,
   but under-reports absolute p99.
 - **Decode throughput is constant; batch-size dependency absent.**
-  *Direction:* overstates decode latency at high concurrency →
-  biases *against* policies that batch well (PD with batched decode
-  pods).
+  *Status (go-24m):* now configurable via
+  `ComputeParams.decode_batch_k`. Default `k=0` preserves the constant
+  behavior (and pinned run_ids); `k>0` amortizes per-token decode
+  sublinearly with the decode pod's concurrent batch. Remaining gap is
+  calibration of `k` against measured serving data — see §9.1 of
+  research/reports/routing-comparison.md.
 - **KV pull is synchronous, no RDMA pipelining.** *Direction:*
   over-penalizes small cross-pod pulls → biases *against* policies
   that exploit fine-grained prefix sharing.
@@ -127,5 +130,7 @@ each with a direction-of-error annotation so readers know the bias:
 - ~~Real-tokenizer (tiktoken or model-native) lmsys adapter.~~
   Addressed in go-pf8 via optional `tokenizers` extra and
   `TraceParams.tokenizer` flag.
-- Batch-size-dependent decode cost + continuous-batching model.
+- ~~Batch-size-dependent decode cost + continuous-batching model.~~
+  Addressed in go-24m — `ComputeParams.decode_batch_k` with logarithmic
+  amortization; default 0.0 preserves legacy run_ids.
 - Network-contention model for concurrent KV pulls.

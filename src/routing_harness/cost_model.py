@@ -3,7 +3,8 @@
 The default `AnalyticCostModel` is closed-form and dependency-free. It
 charges:
   - compute_prefill_ms proportional to (prompt_tokens - cached_prefix),
-  - compute_decode_ms proportional to max_output_tokens,
+  - compute_decode_ms proportional to max_output_tokens, optionally
+    amortized by continuous-batching when `decode_batch_k > 0`,
   - network_ms from a simple (latency + bytes/bandwidth) model,
   - kv_transport_ms when a prefix must be pulled from a peer pod,
   - routing_ms = constant policy-specific budget,
@@ -16,6 +17,7 @@ the future, where measured values replace analytic estimates.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -26,10 +28,31 @@ from .kv_cache import KVCacheState
 
 @dataclass(frozen=True)
 class ComputeParams:
+    """Compute-cost coefficients.
+
+    `decode_batch_k` controls the continuous-batching amortization of
+    per-request decode latency. At k=0 (default), decode is charged at a
+    constant `decode_ms_per_token` regardless of concurrency — the
+    original, deliberately-pessimistic behavior preserved for
+    backwards-compatible run_ids. At k>0, the effective per-token decode
+    cost is
+
+        decode_ms_per_token / (1 + k * log(1 + max(0, batch - 1)))
+
+    where `batch` is the number of concurrent decodes on the decode pod
+    (inclusive of the request being scheduled). The formula is pinned so
+    batch=1 reproduces the single-request baseline, and growth is
+    logarithmic (sublinear) in batch — matching observed continuous-
+    batching throughput curves on vLLM / TRT-LLM until calibration.
+    Reasonable values land in roughly [0.3, 1.5]; the exact number needs
+    to be fit to real hardware.
+    """
+
     prefill_ms_per_token: float
     decode_ms_per_token: float
     prefill_overhead_ms: float
     decode_overhead_ms: float
+    decode_batch_k: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -92,9 +115,21 @@ class AnalyticCostModel:
             self.compute.prefill_overhead_ms
             + uncached * self.compute.prefill_ms_per_token
         )
+        decode_pod = cluster.pods.get(decision.decode_pod_id, pod)
+        # Concurrent decode batch at dispatch time, inclusive of this
+        # request. See ComputeParams.decode_batch_k for the rationale.
+        decode_batch = decode_pod.active_decode + 1
+        k = self.compute.decode_batch_k
+        if k > 0.0:
+            amortization = 1.0 + k * math.log(1 + max(0, decode_batch - 1))
+            effective_decode_ms_per_token = (
+                self.compute.decode_ms_per_token / amortization
+            )
+        else:
+            effective_decode_ms_per_token = self.compute.decode_ms_per_token
         compute_decode = (
             self.compute.decode_overhead_ms
-            + request.max_output_tokens * self.compute.decode_ms_per_token
+            + request.max_output_tokens * effective_decode_ms_per_token
         )
         network_ms = (
             2 * self.network.client_rtt_ms

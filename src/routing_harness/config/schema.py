@@ -42,6 +42,12 @@ class ComputeConfig:
     decode_ms_per_token: float
     prefill_overhead_ms: float
     decode_overhead_ms: float
+    # Continuous-batching amortization strength for decode.
+    # 0.0 = constant per-token decode (legacy). >0 amortizes per-token
+    # decode time by 1/(1 + k*log(1 + max(0, batch-1))). See
+    # cost_model.ComputeParams for detail. Optional; defaults to 0.0 so
+    # existing configs keep their historical run_ids unless updated.
+    decode_batch_k: float = 0.0
 
 
 @dataclass(frozen=True)

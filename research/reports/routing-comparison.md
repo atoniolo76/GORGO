@@ -277,9 +277,16 @@ treat symmetrically; absolute numbers are not claimed.
   is preserved because the term scales with `active_prefill` for every
   policy.
 - **Decode throughput is constant; no batch-size dependence.**
-  *Direction:* over-states decode latency under high concurrency and
-  therefore biases *against* policies that batch well (e.g. PD with
-  batched decode pods).
+  *Status:* addressed in cost_model.py via `ComputeParams.decode_batch_k`
+  (go-24m). At `k=0` (default, preserved for back-compat run_ids) the
+  constant-decode model still applies. At `k>0` the effective per-token
+  decode cost is `decode_ms_per_token / (1 + k · log(1 + max(0, batch -
+  1)))`, where `batch` is the decode pod's concurrent decode count
+  inclusive of the request. Sublinear by construction; batch=1
+  reproduces the baseline. *Residual bias at `k=0`:* over-states decode
+  latency at high concurrency, biases *against* policies that batch
+  well (e.g. PD with batched decode pods). *Next step:* calibrate `k`
+  against a measured vLLM / TRT-LLM decode-latency curve.
 - **KV pull is synchronous, no RDMA pipelining.** *Direction:*
   over-penalizes small cross-pod pulls and therefore biases *against*
   fine-grained prefix-sharing policies.
