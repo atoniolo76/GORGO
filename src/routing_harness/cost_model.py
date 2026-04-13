@@ -8,7 +8,16 @@ charges:
   - network_ms from a simple (latency + bytes/bandwidth) model,
   - kv_transport_ms when a prefix must be pulled from a peer pod,
   - routing_ms = constant policy-specific budget,
-  - queueing_ms = function of pod active_prefill / max_concurrent_prefill.
+  - queueing_ms from an M/M/1 single-server approximation of the pod's
+    prefill slots: W_q = rho/(1-rho) * S, where rho is slot occupancy
+    (active_prefill / max_concurrent_prefill) clamped below 1.0, and S
+    is the representative prefill service time for the workload.
+
+The queueing term superlinearly diverges near saturation — which is
+the point: prior linear scaling under-reported absolute p99 by ~8x at
+high load (peer review v1, critic C). Relative ordering across
+policies is preserved because every policy sees the same formula; the
+change is that saturation is now penalized non-linearly.
 
 KV transport uses a fluid fair-share fabric model: when multiple
 transfers overlap on the inter-pod fabric, each sees effective
@@ -93,6 +102,31 @@ class CostModel(Protocol):
         ...
 
 
+# Clamp utilization below 1.0 before applying the M/M/1 waiting-time
+# formula. Without this the expression diverges at saturation; real
+# systems don't stop responding at rho=1, they just back up quickly.
+# 0.99 is a pragmatic cap — high enough that tails still explode
+# superlinearly, low enough to stay finite when a pod momentarily
+# exceeds its concurrency budget (which active_prefill can, since it
+# is a soft count, not a hard admission limit).
+_RHO_MAX = 0.99
+
+
+def _mm1_wait_ms(active: int, capacity: int, service_ms: float) -> float:
+    """Mean queue-wait under an M/M/1 approximation.
+
+    Treats a pod's prefill slots as one aggregate server with utilization
+    rho = active / capacity. Returns 0 when idle or service_ms <= 0.
+    """
+    if service_ms <= 0.0 or active <= 0:
+        return 0.0
+    c = max(1, capacity)
+    rho = active / c
+    if rho >= _RHO_MAX:
+        rho = _RHO_MAX
+    return (rho / (1.0 - rho)) * service_ms
+
+
 @dataclass
 class AnalyticCostModel:
     compute: ComputeParams
@@ -112,11 +146,20 @@ class AnalyticCostModel:
         prompt_len = len(request.prompt_tokens)
         uncached = max(0, prompt_len - cached_prefix_tokens)
         pod = cluster.get(decision.prefill_pod_id)
-        occupancy = (
-            pod.active_prefill / max(1, pod.spec.max_concurrent_prefill)
+        # Representative prefill service time for M/M/1 wait: use the
+        # current request's *uncached* prefill cost as a proxy. Cache
+        # hits ahead in the queue shorten S, so it's correct that cached
+        # requests contribute less to downstream wait. Guard with a
+        # tiny floor so a pure cache hit with a non-empty queue still
+        # records the overhead-driven wait.
+        avg_service_ms = (
+            self.compute.prefill_overhead_ms
+            + max(1, uncached) * self.compute.prefill_ms_per_token
         )
-        queueing_ms = occupancy * self.compute.prefill_ms_per_token * max(
-            1, prompt_len // 4
+        queueing_ms = _mm1_wait_ms(
+            pod.active_prefill,
+            pod.spec.max_concurrent_prefill,
+            avg_service_ms,
         )
         routing_ms = (
             self.scheduler.base_routing_ms

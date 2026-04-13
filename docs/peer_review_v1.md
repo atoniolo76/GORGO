@@ -89,9 +89,11 @@ issues; the severity scale below collapses all three.
 Moved into `research/reports/routing-comparison.md` §9 explicitly,
 each with a direction-of-error annotation so readers know the bias:
 
-- **Queueing formula is not M/M/1** (Critic C: under-estimates by ~8×
-  at high load). *Direction:* favors all policies equally at the tail,
-  but under-reports absolute p99.
+- ~~**Queueing formula is not M/M/1**~~ (Critic C: under-estimates by
+  ~8× at high load). *Addressed in go-4lp.* `AnalyticCostModel` now
+  uses `W_q = ρ/(1-ρ) · S` with ρ clamped at 0.99 and S = this
+  request's uncached prefill cost. Residual: service-time proxy is
+  per-request rather than a workload-wide average.
 - **Decode throughput is constant; batch-size dependency absent.**
   *Status (go-24m):* now configurable via
   `ComputeParams.decode_batch_k`. Default `k=0` preserves the constant
@@ -126,7 +128,9 @@ each with a direction-of-error annotation so readers know the bias:
 ## New beads filed (out-of-scope for this iteration)
 
 - PD sweep topology + PD ablation experiment design.
-- M/M/1 queueing model implementation + calibration.
+- ~~M/M/1 queueing model implementation + calibration.~~
+  Addressed in go-4lp via `_mm1_wait_ms` with ρ clamped at 0.99;
+  calibration vs. measured serving data remains.
 - ~~Real-tokenizer (tiktoken or model-native) lmsys adapter.~~
   Addressed in go-pf8 via optional `tokenizers` extra and
   `TraceParams.tokenizer` flag.

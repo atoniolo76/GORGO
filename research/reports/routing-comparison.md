@@ -345,11 +345,17 @@ policies are favored or penalized by the approximation. The harness is
 correct enough to support relative comparisons on the axes these biases
 treat symmetrically; absolute numbers are not claimed.
 
-- **Queueing formula is not M/M/1.** A reviewer estimated the current
-  linear formula under-estimates queueing latency by ~8× at high load.
-  *Direction:* under-reports absolute p99; relative ordering at tails
-  is preserved because the term scales with `active_prefill` for every
-  policy.
+- **Queueing formula is now M/M/1 (go-4lp).** Previously a linear
+  occupancy × service formula; reviewer C estimated it under-reported
+  queueing latency by ~8× at high load. Replaced with a single-server
+  M/M/1 waiting-time approximation `W_q = ρ/(1-ρ) · S`, where ρ is
+  slot occupancy (clamped at 0.99 for numerical stability at
+  saturation) and S is the request's own prefill service time as a
+  proxy for average service. *Residual bias:* service-time proxy is
+  per-request, not a workload-wide average, so highly variable
+  prompt lengths bias the wait estimate toward the incoming request
+  rather than toward true queue composition. Relative ordering across
+  policies is preserved.
 - **Decode throughput is constant; no batch-size dependence.**
   *Status:* addressed in cost_model.py via `ComputeParams.decode_batch_k`
   (go-24m). At `k=0` (default, preserved for back-compat run_ids) the
