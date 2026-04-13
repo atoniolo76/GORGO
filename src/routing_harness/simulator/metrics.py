@@ -50,13 +50,13 @@ class MetricsCollector:
         if not self.records:
             return {"n": 0}
         totals = [r.cost.total_ms for r in self.records]
-        # TTFT: time to first token. Sum of everything before decode,
-        # i.e. the user-perceived latency before streaming begins.
+        # TTFT: time to first token. Everything before decode, with
+        # KV transport overlapped against prefill (max, not sum) to
+        # match total_ms's prefill/transport bottleneck model.
         ttfts = [
             r.cost.routing_ms
             + r.cost.queueing_ms
-            + r.cost.compute_prefill_ms
-            + r.cost.kv_transport_ms
+            + r.cost.prefill_block_ms
             + r.cost.network_ms
             for r in self.records
         ]

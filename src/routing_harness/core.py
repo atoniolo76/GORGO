@@ -112,10 +112,17 @@ class Decision:
 class CostBreakdown:
     """Per-request latency decomposition, in milliseconds.
 
-    Sum should equal the observed end-to-end latency in the simulator.
+    Fields hold raw component measurements for transparency — each is
+    the uncombined cost of its phase. `total_ms` composes them into
+    an end-to-end latency under the assumption that KV transport and
+    prefill compute overlap: an async/RDMA pull initiated at dispatch
+    runs in parallel with prefill work, so the bottleneck is
+    `max(compute_prefill_ms, kv_transport_ms)` rather than their sum.
+
     All components are non-negative; `kv_transport_ms` is nonzero only
     when a request is routed to a pod that must pull KV state from a
-    peer.
+    peer. When `kv_transport_ms == 0`, `total_ms` reduces to the plain
+    sum of the remaining components.
     """
 
     routing_ms: float
@@ -126,12 +133,22 @@ class CostBreakdown:
     kv_transport_ms: float
 
     @property
+    def prefill_block_ms(self) -> float:
+        """Effective prefill-phase cost after KV-transport overlap.
+
+        Returns `max(compute_prefill_ms, kv_transport_ms)`. Prefill on
+        uncached tail tokens and the KV pull of the cached prefix are
+        assumed to proceed in parallel; the phase completes when the
+        slower of the two finishes.
+        """
+        return max(self.compute_prefill_ms, self.kv_transport_ms)
+
+    @property
     def total_ms(self) -> float:
         return (
             self.routing_ms
             + self.queueing_ms
-            + self.compute_prefill_ms
+            + self.prefill_block_ms
             + self.compute_decode_ms
             + self.network_ms
-            + self.kv_transport_ms
         )

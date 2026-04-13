@@ -28,6 +28,18 @@ plus the bytes of transfers still in flight when this one starts —
 and the single-transfer case (no overlap) recovers the uncontended
 formula `rtt + bytes/B`.
 
+Prefill/transport overlap: `kv_transport_ms` in the returned
+`CostBreakdown` is the raw wire time of the pull. `total_ms`
+composes it with prefill under an async-initiation assumption: the
+pull starts at dispatch and runs in parallel with prefill compute,
+so the prefill phase completes in `max(compute_prefill_ms,
+kv_transport_ms)` — the slower of the two. This narrows a prior
+synchronous-pull bias (go-npl) that over-penalized small cross-pod
+pulls by charging transport strictly additively. The fabric is
+still occupied for the full `kv_transport_ms` (compute overlap does
+not free the wire), so concurrency tracking in the engine is
+unchanged.
+
 All coefficients are explicit in NetworkParams / ComputeParams. No
 silent defaults. An `InstrumentedCostModel` subclass is scaffolded for
 the future, where measured values replace analytic estimates.

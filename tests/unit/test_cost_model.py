@@ -186,3 +186,68 @@ def test_fabric_contention_floor_on_self_bytes(cost_model, cluster, kv_cache):
     bytes_per_ms = cost_model.network.inter_pod_bandwidth_gbps * 1e9 / 8.0 / 1000.0
     expected_own = cost_model.network.inter_pod_rtt_ms + 1_000_000 / bytes_per_ms
     assert abs(c.kv_transport_ms - expected_own) < 1e-6
+
+
+def test_kv_transport_overlaps_prefill_when_shorter(cost_model, cluster, kv_cache):
+    """go-npl: a small cross-pod pull that completes before prefill does
+    must not add to end-to-end latency. The transport runs in parallel
+    with prefill compute, so the phase bottleneck is the longer of the
+    two. Here transport is tiny (~0.28 ms) versus prefill on 128 tokens
+    (~16.8 ms) — total_ms must equal the no-transport total."""
+    r = _req(prompt_len=128)
+    d = Decision("p0", "p0", "test")
+    no_pull = cost_model.estimate(r, d, cluster, kv_cache, 0, 0)
+    small_pull = cost_model.estimate(r, d, cluster, kv_cache, 0, 1_000_000)
+    # Transport is strictly shorter than prefill in this regime.
+    assert small_pull.kv_transport_ms > 0.0
+    assert small_pull.kv_transport_ms < small_pull.compute_prefill_ms
+    # Overlap absorbs the transport entirely.
+    assert abs(small_pull.total_ms - no_pull.total_ms) < 1e-9
+
+
+def test_kv_transport_dominates_when_longer(cost_model, cluster, kv_cache):
+    """When the pull is slower than prefill (large bytes, low bandwidth-
+    relative cost), total_ms is driven by transport, not prefill.
+    Prefill on a short prompt is absorbed by the pull latency."""
+    r = _req(prompt_len=32)  # prefill ~ 4 + 32*0.1 = 7.2 ms
+    d = Decision("p0", "p0", "test")
+    # 100 MB pull at 100 Gbps => 0.2 + 100_000_000/12_500_000 = 8.2 ms > 7.2
+    huge_pull = cost_model.estimate(r, d, cluster, kv_cache, 0, 100_000_000)
+    assert huge_pull.kv_transport_ms > huge_pull.compute_prefill_ms
+    # Prefill-block cost is pinned to transport, not the sum.
+    assert huge_pull.prefill_block_ms == huge_pull.kv_transport_ms
+    # total_ms excludes the overlapped prefill portion.
+    expected = (
+        huge_pull.routing_ms
+        + huge_pull.queueing_ms
+        + huge_pull.kv_transport_ms
+        + huge_pull.compute_decode_ms
+        + huge_pull.network_ms
+    )
+    assert abs(huge_pull.total_ms - expected) < 1e-9
+
+
+def test_total_ms_monotone_in_transport_above_prefill(cost_model, cluster, kv_cache):
+    """Once transport exceeds prefill, further growth in transport bytes
+    translates into proportional latency growth (no more free overlap)."""
+    r = _req(prompt_len=32)
+    d = Decision("p0", "p0", "test")
+    a = cost_model.estimate(r, d, cluster, kv_cache, 0, 100_000_000)
+    b = cost_model.estimate(r, d, cluster, kv_cache, 0, 200_000_000)
+    # Both are transport-dominated in this regime.
+    assert a.kv_transport_ms > a.compute_prefill_ms
+    assert b.kv_transport_ms > b.compute_prefill_ms
+    # Latency grows 1-for-1 with added transport bytes.
+    bytes_per_ms = cost_model.network.inter_pod_bandwidth_gbps * 1e9 / 8.0 / 1000.0
+    extra_transport = 100_000_000 / bytes_per_ms
+    assert abs((b.total_ms - a.total_ms) - extra_transport) < 1e-6
+
+
+def test_prefill_block_ms_zero_transport_is_prefill(cost_model, cluster, kv_cache):
+    """`prefill_block_ms` reduces to compute_prefill_ms when no pull
+    occurs — the overlap model is a no-op for colocated requests."""
+    r = _req(prompt_len=64)
+    d = Decision("p0", "p0", "test")
+    c = cost_model.estimate(r, d, cluster, kv_cache, 0, 0)
+    assert c.kv_transport_ms == 0.0
+    assert c.prefill_block_ms == c.compute_prefill_ms

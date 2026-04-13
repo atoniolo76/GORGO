@@ -376,9 +376,24 @@ treat symmetrically; absolute numbers are not claimed.
   now biases *against* pull-heavy policies when the fabric saturates;
   when only one transfer is in flight the formula reduces to the
   uncontended `rtt + bytes/B`, so low-concurrency runs are unchanged.
-- **KV pull is still synchronous — no RDMA pipelining.** *Direction:*
-  over-penalizes small cross-pod pulls even with contention tracking,
-  because setup cost is paid in full per transfer.
+- **KV pull now overlaps with prefill compute (go-npl).** *Status:*
+  addressed. `CostBreakdown.total_ms` composes the prefill phase as
+  `max(compute_prefill_ms, kv_transport_ms)` rather than their sum —
+  the pull is modeled as async-initiated at dispatch (RDMA / NCCL
+  style) and therefore runs in parallel with prefill on the uncached
+  tail. The phase bottleneck is the slower of the two. The raw wire
+  time is still reported in the `kv_transport_ms` field and the
+  fabric-contention heap in the engine still charges the full
+  transport duration against the inter-pod bandwidth (concurrency
+  tracking is unchanged; only the charge-timing is). *Residual bias:*
+  this is an upper bound on overlap benefit — real implementations
+  hit setup, synchronization, and dependency-chain stalls that
+  prevent perfect parallelism. The symmetric counterpart is
+  non-consecutive block residency (below), which biases in the
+  opposite direction (over-estimates usable cross-pod reuse). Option
+  (a) from the bead, chosen over the chunked-pipeline (b) for
+  simplicity; relative ordering across policies is preserved because
+  every policy sees the same rule.
 - **lmsys mock tokenizer (0.25 tokens/char vs. ~0.75 real English).**
   *Direction:* under-estimates prompt length, which under-estimates
   available reuse and biases *against* prefix-aware policies on lmsys.
