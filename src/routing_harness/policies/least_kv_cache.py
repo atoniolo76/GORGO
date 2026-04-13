@@ -3,6 +3,10 @@
 A capacity-aware policy that avoids routing into a pod whose cache is
 near-full (which would force heavy eviction). Ignores prefix match; pair
 with prefix_cache_preble if you want both signals.
+
+Taxonomy (see `research/reports/routing-comparison.md` §3):
+    selection=capacity, state=stateless, fairness=best-effort,
+    topology=any, migration=none.
 """
 
 from __future__ import annotations

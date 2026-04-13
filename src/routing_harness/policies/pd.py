@@ -6,8 +6,15 @@ picks:
   - a decode pod using least-busy-time (decode is memory-bound, fairness
     matters more than cache locality)
 
-If no PD roles are present (all pods are Phase.BOTH), degrades to the
-prefix-cache policy to keep the harness well-defined.
+If no PD roles are present (all pods are Phase.BOTH), the two pools
+collapse to the same set and the policy still picks deterministically —
+prefix-match for prefill, busy-time for decode — over that shared set.
+
+Taxonomy (see `research/reports/routing-comparison.md` §3):
+    selection=composite (phase-split: cache-affinity for prefill + load
+    for decode), state=stateless, fairness=best-effort,
+    topology=pd-aware (exploits role split when present, tolerates
+    colocated), migration=none.
 """
 
 from __future__ import annotations

@@ -3,6 +3,10 @@
 Busy time = EWMA(latency) * (active + queued). Balances utilization and
 latency; generally dominates least-request under heterogeneous request
 sizes.
+
+Taxonomy (see `research/reports/routing-comparison.md` §3):
+    selection=load, state=stateless, fairness=best-effort,
+    topology=any, migration=none.
 """
 
 from __future__ import annotations

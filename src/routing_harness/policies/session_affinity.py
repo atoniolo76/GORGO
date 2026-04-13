@@ -4,6 +4,13 @@ New sessions land on the pod chosen by a fallback policy (default:
 least-request); subsequent requests from the same session stick. Evicts
 stickiness if the sticky pod has been unhealthy (modeled by an
 "available" flag) or if stickiness_ttl seconds have elapsed.
+
+Taxonomy (see `research/reports/routing-comparison.md` §3):
+    selection=identity (session_id), state=per-session (bindings map),
+    fairness=session-sticky, topology=any, migration=rebind-on-fail.
+    Note that session-sticky is not a fairness-balancing model: it
+    isolates sessions onto pods for cache warm-up, without attempting
+    to equalize throughput across sessions.
 """
 
 from __future__ import annotations

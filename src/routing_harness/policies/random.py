@@ -2,6 +2,10 @@
 
 Baseline. Used to establish a floor for KV-reuse metrics (what you get
 with zero cache awareness) and to sanity-check fairness metrics.
+
+Taxonomy (see `research/reports/routing-comparison.md` §3):
+    selection=random, state=stateless, fairness=best-effort,
+    topology=any, migration=none.
 """
 
 from __future__ import annotations

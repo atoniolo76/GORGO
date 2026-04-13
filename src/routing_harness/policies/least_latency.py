@@ -3,6 +3,10 @@
 Simple and brittle: a cold pod with no requests has latency 0 and will
 attract the first wave. The simulator's EWMA is initialized to a
 non-zero "warm" value so this policy behaves reasonably at t=0.
+
+Taxonomy (see `research/reports/routing-comparison.md` §3):
+    selection=load, state=stateless, fairness=best-effort,
+    topology=any, migration=none.
 """
 
 from __future__ import annotations

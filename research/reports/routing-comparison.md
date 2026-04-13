@@ -43,7 +43,8 @@ while varying only the policy.
 
 ### 1.2 Contributions
 
-- **A taxonomy** of routing strategies along five axes (Section 3).
+- **A taxonomy** of routing strategies along five orthogonal axes
+  (Section 3).
 - **A harness** with 11 pluggable policies, a prefix-level KV model,
   and a deterministic discrete-event simulator (Section 4).
 - **A comparison protocol** with explicit cost model, metrics, and
@@ -70,20 +71,93 @@ assumptions (see `src/routing_harness/policies/`).
 
 ## 3. Taxonomy
 
-Five orthogonal axes. Any system can be located along each:
+We locate each policy along five axes chosen to be orthogonal — that is,
+a policy's value on one axis should not mechanically determine its value
+on another. The first cut of this document conflated *reading*
+KV-cache state (a selection signal) with *carrying* private state across
+requests, which meant prefix-aware policies were doubly counted against
+both "cache awareness" and "statefulness." It also listed "hotspot
+mitigation" as a standalone axis even though every Preble-style
+mitigation mechanism we care about is either a linear combination of
+signals (belongs on the selection axis as `composite`) or a
+post-dispatch movement (belongs on the migration axis). The revision
+below retires those conflations.
 
-1. **Cache awareness**: none → capacity-aware → prefix-aware →
-   prefix+load-aware.
-2. **Phase separation**: colocated → disaggregated (PD) → hierarchical.
-3. **Fairness**: best-effort → tenant-fair → per-session-fair (VTC).
-4. **Statefulness**: stateless hash → EWMA → full session affinity.
-5. **Hotspot mitigation**: none → threshold-based → score-penalized
-   (Preble-style) → migration-based.
+1. **Selection criterion** — the primary signal the policy consults to
+   score candidate pods.
+   Values: `random` | `load` | `capacity` | `cache-affinity` |
+   `identity` | `fairness-debt` | `composite`.
+   `load` covers any backlog or utilization signal (queue depth,
+   busy-time, EWMA latency, EWMA throughput). `capacity` covers
+   free-resource signals such as free KV bytes. `cache-affinity` covers
+   prefix-match length against the per-pod KV cache. `identity` covers
+   session- or tenant-keyed stickiness. `fairness-debt` covers
+   accumulated token counters. `composite` is a linear or phase-split
+   combination of two or more of the above.
 
-Each implemented policy is placed in this space in Table 1.
+2. **Policy state scope** — memory the *policy itself* carries across
+   `decide` calls, independent of cluster or KV state owned by the
+   simulator.
+   Values: `stateless` | `per-session` | `per-tenant`.
+   A policy that inspects `KVCacheState.has(...)` or `Pod.active_*` to
+   make a decision is still `stateless` on this axis; only private
+   per-policy dataclass fields that accumulate observations count.
 
-> `{{table_policy_taxonomy}}` — placement of all 11 policies across
-> the five axes.
+3. **Fairness model** — how multi-tenant or multi-session contention is
+   mediated.
+   Values: `best-effort` | `session-sticky` | `tenant-weighted`.
+   Stickiness is distinct from tenant-weighting: it isolates a session
+   onto one pod (useful for cache warm-up) but does not attempt to
+   equalize throughput across tenants.
+
+4. **Topology requirement** — cluster-role assumption.
+   Values: `any` | `pd-aware` | `pd-required`.
+   `pd-aware` policies exploit role-split pools when present and
+   tolerate colocated topologies; `pd-required` policies would refuse
+   to run on a fully colocated cluster.
+
+5. **Migration / rebind** — whether the policy moves, abandons, or
+   reassigns work after the initial dispatch decision.
+   Values: `none` | `rebind-on-fail` | `cross-pod-pull`.
+   This axis is included for completeness of the design space; most
+   currently implemented policies are `none`.
+
+**Table 1** — placement of all 11 policies:
+
+| Policy                  | Selection       | State         | Fairness          | Topology   | Migration         |
+|-------------------------|-----------------|---------------|-------------------|------------|-------------------|
+| `random`                | `random`        | `stateless`   | `best-effort`     | `any`      | `none`            |
+| `least-request`         | `load`          | `stateless`   | `best-effort`     | `any`      | `none`            |
+| `least-busy-time`       | `load`          | `stateless`   | `best-effort`     | `any`      | `none`            |
+| `least-latency`         | `load`          | `stateless`   | `best-effort`     | `any`      | `none`            |
+| `throughput`            | `load`          | `stateless`   | `best-effort`     | `any`      | `none`            |
+| `least-kv-cache`        | `capacity`      | `stateless`   | `best-effort`     | `any`      | `none`            |
+| `prefix-cache`          | `cache-affinity`| `stateless`   | `best-effort`     | `any`      | `none`            |
+| `prefix-cache-preble`   | `composite`     | `stateless`   | `best-effort`     | `any`      | `none`            |
+| `pd`                    | `composite`     | `stateless`   | `best-effort`     | `pd-aware` | `none`            |
+| `session-affinity`      | `identity`      | `per-session` | `session-sticky`  | `any`      | `rebind-on-fail`  |
+| `vtc-basic`             | `fairness-debt` | `per-tenant`  | `tenant-weighted` | `any`      | `none`            |
+
+Orthogonality notes:
+
+- **Selection criterion vs. state scope.** `prefix-cache` is
+  (`cache-affinity`, `stateless`) because it reads `KVCacheState` but
+  stores nothing privately; a hypothetical per-session-learned
+  cache-affinity policy would share axis 1 and move to `per-session`
+  on axis 2. The two axes vary independently.
+- **State scope vs. fairness model.** Fairness-weighted policies do
+  need state, but the converse is not true: `session-affinity` carries
+  `per-session` bindings yet its fairness model is `best-effort`
+  (stickiness is for cache warm-up, not balancing).
+- **Topology and migration** are independent of the other three. Any
+  selection criterion could in principle be paired with any topology
+  requirement, and migration is a post-dispatch behavior.
+- **Composite at selection, one axis down.** The old taxonomy's
+  "hotspot mitigation" axis duplicated signal-fusion: a Preble-style
+  linear combination is captured as `composite` on axis 1, and the
+  threshold-based deflection is a property of that composite, not a
+  separate axis. Migration-based hotspot mitigation (e.g. some Mooncake
+  variants) is captured on axis 5, not bolted onto axis 1.
 
 ## 4. Experimental Harness
 
@@ -316,10 +390,6 @@ treat symmetrically; absolute numbers are not claimed.
   still not a true event-driven scheduler. *Direction:* acceptable for
   p99 comparison at moderate concurrency; absolute throughput numbers
   should not be read off.
-- **Taxonomy axis overlap.** Statefulness and cache-awareness in §3
-  are partially collinear (stateful policies are usually
-  cache-aware). Revising the taxonomy into orthogonal axes is deferred
-  to a follow-up.
 
 ## 10. How to fill this report
 

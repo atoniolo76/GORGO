@@ -3,6 +3,10 @@
 Uses EWMA throughput maintained by the simulator. This policy optimizes
 for aggregate cluster throughput but can starve cold pods; see
 least-busy-time for a fairness-aware counterpart.
+
+Taxonomy (see `research/reports/routing-comparison.md` §3):
+    selection=load, state=stateless, fairness=best-effort,
+    topology=any, migration=none.
 """
 
 from __future__ import annotations

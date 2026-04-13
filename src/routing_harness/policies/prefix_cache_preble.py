@@ -18,6 +18,12 @@ conclusion about Preble-the-system from this policy.
 The registered id `prefix-cache-preble` is intentionally kept stable
 (config compatibility). Refer to this class name or docstring when
 citing the algorithm.
+
+Taxonomy (see `research/reports/routing-comparison.md` §3):
+    selection=composite (cache-affinity + load), state=stateless,
+    fairness=best-effort, topology=any, migration=none. The
+    hotspot-threshold deflection is a property of the composite signal,
+    not a separate taxonomy axis.
 """
 
 from __future__ import annotations

@@ -4,6 +4,12 @@ Baseline KV-cache aware routing (inspired by SGLang router and similar
 designs). No cross-pod transport; if nobody has the prefix, fall back to
 least-request to avoid hotspotting on the first pod that happens to
 cache a popular prefix.
+
+Taxonomy (see `research/reports/routing-comparison.md` §3):
+    selection=cache-affinity, state=stateless, fairness=best-effort,
+    topology=any, migration=none. Reading `KVCacheState` during decide
+    does not make the policy stateful on axis 2; the policy itself
+    keeps no private memory across requests.
 """
 
 from __future__ import annotations

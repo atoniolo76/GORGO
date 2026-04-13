@@ -6,6 +6,11 @@ that are currently serving heavy tenants. Each pod has a per-tenant
 whose aggregate debt for the request's tenant is lowest, breaking ties
 by least-busy-time. The engine's `observe_completion` hook updates
 counters when requests finish.
+
+Taxonomy (see `research/reports/routing-comparison.md` §3):
+    selection=fairness-debt (per-pod × per-tenant token counter),
+    state=per-tenant (`counters` and `pod_tenant_tokens`),
+    fairness=tenant-weighted, topology=any, migration=none.
 """
 
 from __future__ import annotations

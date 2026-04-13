@@ -2,6 +2,10 @@
 
 Classic load balancer. Ties broken by pod_id lexicographically for
 determinism.
+
+Taxonomy (see `research/reports/routing-comparison.md` §3):
+    selection=load, state=stateless, fairness=best-effort,
+    topology=any, migration=none.
 """
 
 from __future__ import annotations
