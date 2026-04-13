@@ -237,10 +237,12 @@ At what ratio of prefill:decode cost does disaggregation help?
    given model × GPU before any quantitative claim is made. The
    `InstrumentedCostModel` scaffolding supports overriding analytic
    values with observations.
-3. **Tokenizer fidelity.** The lmsys adapter uses a content-hashed
-   block-structured *mock* tokenizer to preserve prefix overlap. Real
-   tokenization (tiktoken / model-native) may change block alignment
-   and therefore capture rates.
+3. **Tokenizer fidelity.** The lmsys adapter ships two tokenizers: a
+   content-hashed block-structured *mock* (default, zero deps) and a
+   real `tiktoken:<encoding>` path behind the `tokenizers` optional
+   extra. Real tokenization changes block alignment and can materially
+   shift capture rates; the real path should be used for any published
+   absolute number on lmsys (see §9.1 for the bias direction).
 4. **Real KV transport.** We model transport as
    `rtt + bytes/bandwidth`. Real NCCL / RDMA transfers include
    setup, backpressure, and bandwidth sharing effects not captured
@@ -284,6 +286,10 @@ treat symmetrically; absolute numbers are not claimed.
 - **lmsys mock tokenizer (0.25 tokens/char vs. ~0.75 real English).**
   *Direction:* under-estimates prompt length, which under-estimates
   available reuse and biases *against* prefix-aware policies on lmsys.
+  *Status:* addressable — set `tokenizer: "tiktoken:cl100k_base"` in
+  the lmsys workload params and install the `tokenizers` optional
+  extra (`pip install 'GORGO[tokenizers]'`). Bias persists only for
+  runs that keep the default mock.
 - **Non-consecutive block residency.** `owners_of` only checks
   per-block presence, not whether a pod owns a *consecutive* prefix.
   *Direction:* over-estimates usable cross-pod reuse and biases

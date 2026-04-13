@@ -102,6 +102,12 @@ each with a direction-of-error annotation so readers know the bias:
 - **`lmsys` mock tokenizer: 0.25 tokens/char (actual English ~0.75).**
   *Direction:* under-estimates prompt length → under-estimates
   available reuse → biases *against* prefix-aware policies on lmsys.
+  *Status:* addressed in go-pf8. `TraceParams.tokenizer` now accepts
+  `"tiktoken:<encoding>"` (e.g. `"tiktoken:cl100k_base"`); install the
+  `tokenizers` optional extra to enable. Default remains `"mock"` so
+  the base install works without external deps, and an unmet
+  `tiktoken:*` request raises a loud `RuntimeError` rather than
+  silently regressing to the biased mock.
 - **Non-consecutive block residency** breaks the strict "prefix"
   assumption in `owners_of`. *Direction:* over-estimates usable
   cross-pod reuse → biases *toward* pull-heavy policies.
@@ -118,6 +124,8 @@ each with a direction-of-error annotation so readers know the bias:
 
 - PD sweep topology + PD ablation experiment design.
 - M/M/1 queueing model implementation + calibration.
-- Real-tokenizer (tiktoken or model-native) lmsys adapter.
+- ~~Real-tokenizer (tiktoken or model-native) lmsys adapter.~~
+  Addressed in go-pf8 via optional `tokenizers` extra and
+  `TraceParams.tokenizer` flag.
 - Batch-size-dependent decode cost + continuous-batching model.
 - Network-contention model for concurrent KV pulls.

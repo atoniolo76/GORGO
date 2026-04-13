@@ -28,6 +28,7 @@ exercised without the real dataset.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import random
@@ -61,9 +62,12 @@ class SessionTurn:
 @dataclass(frozen=True)
 class TraceParams:
     arrival_rate_qps: float
-    tokens_per_char: float = 0.25  # rough heuristic; replace with tokenizer later
+    tokens_per_char: float = 0.25  # only used when tokenizer == "mock"
     max_output_tokens: int = 256
     seed: int = 0
+    # "mock" or "tiktoken:<encoding>". Missing tiktoken raises rather than
+    # silently falling back, so the mock bias can't be misattributed.
+    tokenizer: str = "mock"
 
 
 class StubLoader:
@@ -135,18 +139,15 @@ def load_sessions(cfg: LmsysConfig) -> Iterator[SessionTurn]:
                     )
 
 
-def _content_to_tokens(content: str, tokens_per_char: float) -> tuple[int, ...]:
-    """Map a string to a reproducible token id sequence.
+def _mock_tokens(content: str, tokens_per_char: float) -> tuple[int, ...]:
+    """Block-hash mock: stable, no deps, preserves prefix structure.
 
-    This is *not* a real tokenizer. It yields stable block-structured ids
-    so prefix overlap in the source text yields prefix overlap in the
-    token stream. Replace with tiktoken / the model's tokenizer when a
-    runtime-realistic mapping is needed.
+    Yields token ids where shared *content* prefixes produce shared *token*
+    prefixes. Under-estimates real token count (English cl100k_base is
+    ~0.75 tokens/char; default here is 0.25).
     """
     n = max(1, int(len(content) * tokens_per_char))
     tokens: list[int] = []
-    # Build block-aligned ids so shared prefixes in `content` => shared
-    # prefixes in tokens.
     block = 16
     for start in range(0, n, block):
         chunk = content[start : start + 64]
@@ -154,6 +155,41 @@ def _content_to_tokens(content: str, tokens_per_char: float) -> tuple[int, ...]:
         for k in range(min(block, n - start)):
             tokens.append((h + k) % 50_000)
     return tuple(tokens[:n])
+
+
+@functools.lru_cache(maxsize=4)
+def _load_tiktoken_encoding(name: str):
+    try:
+        import tiktoken  # type: ignore[import-not-found]
+    except ImportError as e:
+        raise RuntimeError(
+            f"tokenizer='tiktoken:{name}' requested but tiktoken is not "
+            f"installed. Install the optional extra: "
+            f"`pip install 'GORGO[tokenizers]'`."
+        ) from e
+    return tiktoken.get_encoding(name)
+
+
+def _content_to_tokens(
+    content: str, tokenizer: str, tokens_per_char: float
+) -> tuple[int, ...]:
+    """Dispatch to the configured tokenizer.
+
+    `tokenizer` is either "mock" or "tiktoken:<encoding>" (e.g.
+    "tiktoken:cl100k_base"). Unknown values raise ValueError. Empty
+    output is coerced to a single-token sequence so downstream code
+    that assumes at least one token stays safe.
+    """
+    if tokenizer == "mock":
+        return _mock_tokens(content, tokens_per_char)
+    if tokenizer.startswith("tiktoken:"):
+        enc = _load_tiktoken_encoding(tokenizer.split(":", 1)[1])
+        ids = tuple(enc.encode(content))
+        return ids if ids else (0,)
+    raise ValueError(
+        f"Unknown tokenizer {tokenizer!r}. Expected 'mock' or "
+        f"'tiktoken:<encoding>'."
+    )
 
 
 def build_trace(
@@ -182,7 +218,9 @@ def build_trace(
         if turn.role != "user":
             continue
         t += rng.expovariate(max(1e-9, params.arrival_rate_qps))
-        tokens = _content_to_tokens(turn.content, params.tokens_per_char)
+        tokens = _content_to_tokens(
+            turn.content, params.tokenizer, params.tokens_per_char
+        )
         reqs.append(
             Request(
                 request_id=f"lm{idx:08d}",

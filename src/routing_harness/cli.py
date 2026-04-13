@@ -61,6 +61,7 @@ def _build_trace(workload_cfg, seed: int):
             tokens_per_char=params.get("tokens_per_char", 0.25),
             max_output_tokens=params.get("max_output_tokens", 256),
             seed=seed,
+            tokenizer=params.get("tokenizer", "mock"),
         )
         return lmsys_adapter.build_trace(lmsys_cfg, trace_params)
     raise ValueError(f"unknown workload kind: {kind}")

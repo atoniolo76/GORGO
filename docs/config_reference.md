@@ -115,9 +115,21 @@ workload:
     min_turns: 1
     max_turns: 16
     arrival_rate_qps: 8.0
-    tokens_per_char: 0.25
+    tokens_per_char: 0.25          # used only when tokenizer == "mock"
     max_output_tokens: 256
+    tokenizer: "mock"              # or "tiktoken:cl100k_base"
 ```
+
+The `tokenizer` field accepts:
+
+- `"mock"` (default): content-hashed block-structured ids, no external
+  deps. Under-estimates real token counts on English (biases against
+  prefix-aware policies — see the routing-comparison report §9.1).
+- `"tiktoken:<encoding>"`: real tiktoken encoding, e.g.
+  `"tiktoken:cl100k_base"`. Requires the optional extra:
+  `pip install 'GORGO[tokenizers]'`. If `tiktoken` is not installed,
+  `build_trace` raises `RuntimeError` rather than silently falling
+  back to the biased mock.
 
 ## Sweep config
 

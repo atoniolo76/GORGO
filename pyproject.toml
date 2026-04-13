@@ -9,6 +9,9 @@ dependencies = [
 modal = [
     "modal>=1.4.0",
 ]
+tokenizers = [
+    "tiktoken>=0.7",
+]
 dev = [
     "pytest>=7.0",
 ]
