@@ -132,7 +132,7 @@ class SimulationEngine:
             pull_blocks = 0
             if captured < reuse_avail_blocks:
                 for h in hashes[captured:]:
-                    owners = self.kv_cache.owners_of(h)
+                    owners = self.kv_cache.owners_of(h, hashes)
                     if owners:
                         owner = max(
                             owners,

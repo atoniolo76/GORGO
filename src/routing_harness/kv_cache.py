@@ -78,11 +78,48 @@ class KVCacheState:
         pod = self.pods.get(pod_id)
         return pod is not None and prefix_hash in pod.entries
 
-    def owners_of(self, prefix_hash: str) -> list[str]:
-        return [pid for pid, pc in self.pods.items() if prefix_hash in pc.entries]
+    def owners_of(
+        self,
+        prefix_hash: str,
+        prefix_hashes: Iterable[str] | None = None,
+    ) -> list[str]:
+        """Pods whose cache contains a consecutive prefix ending at ``prefix_hash``.
 
-    def best_owner(self, prefix_hash: str) -> str | None:
-        owners = self.owners_of(prefix_hash)
+        A paged KV block is only reusable if its predecessors in the
+        request's prefix are also resident on the same pod: block K's
+        attention state depends on blocks 0..K-1. A pod that holds a
+        scattered subset (say blocks 2 and 5 but not 0, 1, 3, 4) cannot
+        serve block 5 as a reuse source.
+
+        ``prefix_hashes`` is the ordered block-hash sequence for the
+        request (as produced by ``enumerate_prefix_hashes``). If
+        omitted, ``prefix_hash`` is treated as a single-block prefix
+        (the legacy per-block membership check, correct only for the
+        first block of any request).
+        """
+        if prefix_hashes is None:
+            required = (prefix_hash,)
+        else:
+            required = []
+            for h in prefix_hashes:
+                required.append(h)
+                if h == prefix_hash:
+                    break
+            else:
+                return []
+            required = tuple(required)
+        return [
+            pid
+            for pid, pc in self.pods.items()
+            if all(h in pc.entries for h in required)
+        ]
+
+    def best_owner(
+        self,
+        prefix_hash: str,
+        prefix_hashes: Iterable[str] | None = None,
+    ) -> str | None:
+        owners = self.owners_of(prefix_hash, prefix_hashes)
         if not owners:
             return None
         # Prefer the most-recently-used owner as a tiebreaker.

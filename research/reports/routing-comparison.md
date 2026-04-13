@@ -386,10 +386,16 @@ treat symmetrically; absolute numbers are not claimed.
   the lmsys workload params and install the `tokenizers` optional
   extra (`pip install 'GORGO[tokenizers]'`). Bias persists only for
   runs that keep the default mock.
-- **Non-consecutive block residency.** `owners_of` only checks
+- ~~**Non-consecutive block residency.** `owners_of` only checks
   per-block presence, not whether a pod owns a *consecutive* prefix.
   *Direction:* over-estimates usable cross-pod reuse and biases
-  *toward* pull-heavy policies.
+  *toward* pull-heavy policies.~~ *Addressed (go-uce).* `owners_of`
+  now accepts the request's ordered hash list and filters to pods
+  whose cache contains every predecessor up to the queried block, so
+  a scattered resident (blocks 0 and 2 but not 1) no longer qualifies
+  as a reuse source for block 2. Engine pull-decision callsite passes
+  `hashes` as context; the legacy per-block form is retained for
+  single-block introspection.
 - **`active_prefill` / `active_decode` retirement approximation.** The
   simulator now increments on dispatch and retires on projected
   completion via a heap, giving a non-monotonic load signal; it is
