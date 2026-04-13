@@ -13,6 +13,13 @@ on `decide` and decremented once the next request's arrival_ts is
 past the projected completion. This gives load-aware policies a
 non-degenerate load signal while remaining deterministic. Documented as
 an approximation in docs/peer_review_v1.md §7.
+
+Fabric contention: concurrent KV transfers share the inter-pod
+fabric's bandwidth. The engine tracks in-flight transfers in a heap
+keyed by projected fabric completion and sums overlapping bytes; the
+cost model uses that sum under a fluid fair-share model so an
+individual transfer slows as the fabric saturates. A lone transfer
+reduces to the uncontended `rtt + bytes/B` formula.
 """
 
 from __future__ import annotations
@@ -47,6 +54,9 @@ class SimulationEngine:
     _pending: list[tuple[float, int, str, str, Request, "object"]] = field(
         default_factory=list
     )
+    _fabric_inflight: list[tuple[float, int, int]] = field(
+        default_factory=list
+    )
     _seq: int = 0
 
     def __post_init__(self) -> None:
@@ -60,6 +70,17 @@ class SimulationEngine:
         return enumerate_prefix_hashes(
             req.prompt_tokens, block_size=self.config.block_size
         )
+
+    def _drain_fabric(self, now_s: float) -> int:
+        """Drop transfers whose projected fabric completion is past.
+
+        Returns the sum of bytes still in flight on the fabric at
+        `now_s`. The sum is used to charge contention on the next
+        transfer via the cost model's fair-share formula.
+        """
+        while self._fabric_inflight and self._fabric_inflight[0][0] <= now_s:
+            heappop(self._fabric_inflight)
+        return sum(b for (_, _, b) in self._fabric_inflight)
 
     def _retire_up_to(self, now_s: float) -> None:
         """Retire in-flight requests whose projected completion is past.
@@ -143,14 +164,38 @@ class SimulationEngine:
                     len(req.prompt_tokens) * self.network.kv_bytes_per_token
                 )
 
+            kv_transport_bytes = owner_pull_bytes + pd_handoff_bytes
+            # Fabric contention: retire transfers whose fabric-side
+            # completion has passed, then charge this transfer against
+            # the sum of (other in-flight bytes) + (own bytes). The
+            # cost model implements fluid fair-share on that sum.
+            if kv_transport_bytes > 0:
+                other_inflight_bytes = self._drain_fabric(now)
+                concurrent_bytes = other_inflight_bytes + kv_transport_bytes
+            else:
+                self._drain_fabric(now)
+                concurrent_bytes = 0
+
             cost = self.cost_model.estimate(
                 request=req,
                 decision=decision,
                 cluster=self.cluster,
                 kv_cache=self.kv_cache,
                 cached_prefix_tokens=cached_prefix_tokens,
-                kv_transport_bytes=owner_pull_bytes + pd_handoff_bytes,
+                kv_transport_bytes=kv_transport_bytes,
+                concurrent_kv_transport_bytes=concurrent_bytes or None,
             )
+
+            if kv_transport_bytes > 0:
+                self._seq += 1
+                heappush(
+                    self._fabric_inflight,
+                    (
+                        now + cost.kv_transport_ms / 1000.0,
+                        self._seq,
+                        kv_transport_bytes,
+                    ),
+                )
 
             self._apply_side_effects(
                 pod=pod,
@@ -173,7 +218,7 @@ class SimulationEngine:
                     cached_prefix_tokens=cached_prefix_tokens,
                     reuse_available_blocks=reuse_avail_blocks,
                     reuse_captured_blocks=captured,
-                    kv_transport_bytes=owner_pull_bytes + pd_handoff_bytes,
+                    kv_transport_bytes=kv_transport_bytes,
                     migrated=decision.prefill_pod_id != decision.decode_pod_id,
                 )
             )

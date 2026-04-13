@@ -287,9 +287,18 @@ treat symmetrically; absolute numbers are not claimed.
   latency at high concurrency, biases *against* policies that batch
   well (e.g. PD with batched decode pods). *Next step:* calibrate `k`
   against a measured vLLM / TRT-LLM decode-latency curve.
-- **KV pull is synchronous, no RDMA pipelining.** *Direction:*
-  over-penalizes small cross-pod pulls and therefore biases *against*
-  fine-grained prefix-sharing policies.
+- **Concurrent KV pulls now share fabric bandwidth (fluid fair-share).**
+  The engine tracks in-flight transfers on the inter-pod fabric and
+  charges each new transfer against the sum of overlapping bytes, so
+  `kv_transport_ms ≈ inter_pod_rtt + Σbytes_in_flight / bandwidth`.
+  Prior model treated every transfer as if it owned the full fabric
+  (bead go-uy0). *Direction:* tightens the previous under-estimate and
+  now biases *against* pull-heavy policies when the fabric saturates;
+  when only one transfer is in flight the formula reduces to the
+  uncontended `rtt + bytes/B`, so low-concurrency runs are unchanged.
+- **KV pull is still synchronous — no RDMA pipelining.** *Direction:*
+  over-penalizes small cross-pod pulls even with contention tracking,
+  because setup cost is paid in full per transfer.
 - **lmsys mock tokenizer (0.25 tokens/char vs. ~0.75 real English).**
   *Direction:* under-estimates prompt length, which under-estimates
   available reuse and biases *against* prefix-aware policies on lmsys.

@@ -10,6 +10,15 @@ charges:
   - routing_ms = constant policy-specific budget,
   - queueing_ms = function of pod active_prefill / max_concurrent_prefill.
 
+KV transport uses a fluid fair-share fabric model: when multiple
+transfers overlap on the inter-pod fabric, each sees effective
+bandwidth `B / (Σb_in_flight / b_self)` so that the individual
+transfer time becomes `rtt + Σb_in_flight / B`. The caller passes
+`concurrent_kv_transport_bytes` — the sum of this transfer's bytes
+plus the bytes of transfers still in flight when this one starts —
+and the single-transfer case (no overlap) recovers the uncontended
+formula `rtt + bytes/B`.
+
 All coefficients are explicit in NetworkParams / ComputeParams. No
 silent defaults. An `InstrumentedCostModel` subclass is scaffolded for
 the future, where measured values replace analytic estimates.
@@ -79,6 +88,7 @@ class CostModel(Protocol):
         kv_cache: KVCacheState,
         cached_prefix_tokens: int,
         kv_transport_bytes: int,
+        concurrent_kv_transport_bytes: int | None = None,
     ) -> CostBreakdown:
         ...
 
@@ -97,6 +107,7 @@ class AnalyticCostModel:
         kv_cache: KVCacheState,
         cached_prefix_tokens: int,
         kv_transport_bytes: int,
+        concurrent_kv_transport_bytes: int | None = None,
     ) -> CostBreakdown:
         prompt_len = len(request.prompt_tokens)
         uncached = max(0, prompt_len - cached_prefix_tokens)
@@ -139,8 +150,21 @@ class AnalyticCostModel:
             bytes_per_ms = (
                 self.network.inter_pod_bandwidth_gbps * 1e9 / 8.0 / 1000.0
             )
+            # Fluid fair-share contention: if other transfers are in
+            # flight on the fabric, this transfer waits for the shared
+            # bandwidth backlog to drain. The caller computes the sum
+            # of overlapping transfer bytes (including our own). When
+            # nothing else is in flight, contended == our own bytes
+            # and the formula reduces to the uncontended case.
+            contended = (
+                concurrent_kv_transport_bytes
+                if concurrent_kv_transport_bytes is not None
+                else kv_transport_bytes
+            )
+            if contended < kv_transport_bytes:
+                contended = kv_transport_bytes
             kv_transport_ms = (
-                self.network.inter_pod_rtt_ms + kv_transport_bytes / bytes_per_ms
+                self.network.inter_pod_rtt_ms + contended / bytes_per_ms
             )
         else:
             kv_transport_ms = 0.0

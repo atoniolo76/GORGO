@@ -142,3 +142,47 @@ def test_decode_batch_k_uses_decode_pod_not_prefill_pod(cluster, kv_cache):
     c_busy_prefill = cm.estimate(r, d, cluster, kv_cache, 0, 0)
 
     assert c_busy_decode.compute_decode_ms < c_busy_prefill.compute_decode_ms
+
+
+def test_fabric_contention_slows_transfer(cost_model, cluster, kv_cache):
+    r = _req()
+    d = Decision("p0", "p0", "test")
+    solo = cost_model.estimate(
+        r, d, cluster, kv_cache, 0, 1_000_000,
+        concurrent_kv_transport_bytes=1_000_000,
+    )
+    contended = cost_model.estimate(
+        r, d, cluster, kv_cache, 0, 1_000_000,
+        concurrent_kv_transport_bytes=4_000_000,
+    )
+    assert contended.kv_transport_ms > solo.kv_transport_ms
+    # Fluid fair-share: slowdown scales with the ratio of concurrent
+    # bytes to this transfer's own bytes (post-rtt).
+    bytes_per_ms = cost_model.network.inter_pod_bandwidth_gbps * 1e9 / 8.0 / 1000.0
+    expected = cost_model.network.inter_pod_rtt_ms + 4_000_000 / bytes_per_ms
+    assert abs(contended.kv_transport_ms - expected) < 1e-6
+
+
+def test_fabric_contention_default_is_uncontended(cost_model, cluster, kv_cache):
+    r = _req()
+    d = Decision("p0", "p0", "test")
+    default = cost_model.estimate(r, d, cluster, kv_cache, 0, 500_000)
+    explicit_solo = cost_model.estimate(
+        r, d, cluster, kv_cache, 0, 500_000,
+        concurrent_kv_transport_bytes=500_000,
+    )
+    assert abs(default.kv_transport_ms - explicit_solo.kv_transport_ms) < 1e-9
+
+
+def test_fabric_contention_floor_on_self_bytes(cost_model, cluster, kv_cache):
+    # Passing a "concurrent" value smaller than this transfer must not
+    # cheat the transfer into going faster than its own-bytes time.
+    r = _req()
+    d = Decision("p0", "p0", "test")
+    c = cost_model.estimate(
+        r, d, cluster, kv_cache, 0, 1_000_000,
+        concurrent_kv_transport_bytes=100_000,
+    )
+    bytes_per_ms = cost_model.network.inter_pod_bandwidth_gbps * 1e9 / 8.0 / 1000.0
+    expected_own = cost_model.network.inter_pod_rtt_ms + 1_000_000 / bytes_per_ms
+    assert abs(c.kv_transport_ms - expected_own) < 1e-6

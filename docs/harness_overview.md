@@ -88,6 +88,12 @@ research/
   `Decision(pod_id, rationale)`; the cost model owns how long it will
   take. This lets us swap cost models (e.g., Preble-style vs Mooncake-
   style transport costs) without touching policies.
+- **Fabric contention under fluid fair-share.** Concurrent KV
+  transfers share the inter-pod fabric: the engine keeps a heap of
+  in-flight transfers and feeds the cost model the sum of overlapping
+  bytes, so an individual transfer's time becomes
+  `rtt + Σbytes_in_flight / bandwidth`. A lone transfer (nothing else
+  on the fabric) reduces to the uncontended `rtt + bytes/B` formula.
 - **KV-cache state is a prefix trie with eviction and transport events.**
   Reuse accounting distinguishes *available reuse* (some pod has the
   prefix) from *captured reuse* (the pod the request was routed to has
