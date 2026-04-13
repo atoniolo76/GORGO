@@ -1,0 +1,3 @@
+{"id": "sg_fixture_0", "conversations": [{"from": "system", "value": "You are ShareGPT fixture."}, {"from": "human", "value": "Hello, can you explain tries?"}, {"from": "gpt", "value": "A trie is a prefix tree."}, {"from": "human", "value": "Give me a tiny example."}, {"from": "gpt", "value": "Here's one..."}]}
+{"id": "sg_fixture_1", "conversations": [{"from": "human", "value": "What is KV cache reuse?"}, {"from": "gpt", "value": "It is the practice of reusing attention key/value tensors across requests that share a prompt prefix."}]}
+{"id": "sg_fixture_2", "conversations": [{"from": "human", "value": "Single-turn question."}, {"from": "gpt", "value": "Single-turn answer."}]}

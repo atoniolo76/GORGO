@@ -36,9 +36,11 @@ src/routing_harness/
   kv_cache.py       KVCacheState: prefix trie, eviction, reuse accounting
   cost_model.py     CostModel: compute/network/scheduling cost estimation
   workload/
-    trace.py        WorkloadTrace (iterator of Requests with arrivals)
-    lmsys.py        lmsys-chat-1m adapter (stubbed download)
-    synthetic.py    Synthetic trace generator (Poisson / Zipf prefixes)
+    trace.py           WorkloadTrace (iterator of Requests with arrivals)
+    lmsys.py           lmsys-chat-1m adapter (stubbed download)
+    sharegpt.py        ShareGPT JSONL adapter (stubbed download)
+    code_completion.py HumanEval/MBPP/CodeContests JSONL adapter
+    synthetic.py       Synthetic trace generator (Poisson / Zipf prefixes)
   simulator/
     engine.py       Discrete-event simulator: routes, queues, serves
     metrics.py      Metrics collector (latency percentiles, hit rate, …)
@@ -100,6 +102,29 @@ research/
   the prefix), which is central to answering the core research question.
 - **No silent defaults.** Every config section has an explicit required
   schema; omitting a field is an error, not a default.
+
+## Workload coverage
+
+The harness ships four workload adapters, each targeting a distinct
+prefix-reuse distribution:
+
+- **synthetic** — Poisson arrivals over a Zipf-distributed prefix family.
+  Good for controlled sweeps where reuse mass is a tunable parameter.
+- **lmsys** — lmsys-chat-1m JSONL. Multi-turn chat with long, repetitive
+  system-prompt heads; reuse comes from within-session turns plus the
+  common chatbot preamble.
+- **sharegpt** — ShareGPT JSONL. Chat-shaped like lmsys but with a
+  longer tail of system-prompt variants and more code fragments in-line,
+  so cross-session reuse is lower than lmsys even at matched QPS.
+- **code-completion** — HumanEval / MBPP / CodeContests JSONL. Each task
+  is a single-turn independent request; cross-request reuse is driven
+  almost entirely by the optional `instruction_prefix` config knob, which
+  models the static template a production code-completion endpoint wraps
+  around every prompt.
+
+All chat adapters share the same tokenizer dispatch (`"mock"` default,
+`"tiktoken:<encoding>"` opt-in via the `tokenizers` extra) so switching
+workloads never switches tokenizers as a confound.
 
 ## What this harness intentionally does NOT do (yet)
 

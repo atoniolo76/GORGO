@@ -1,0 +1,4 @@
+{"task_id": "HumanEval/0", "prompt": "def add(a, b):\n    \"\"\"Return a + b.\"\"\"\n", "language": "python"}
+{"task_id": "HumanEval/1", "prompt": "def is_prime(n):\n    \"\"\"Return True if n is prime.\"\"\"\n", "language": "python"}
+{"task_id": "MBPP/11", "text": "Write a Python function to reverse a list.", "language": "python"}
+{"task_id": "CC/js_1", "prompt": "function hello() {\n  return 'hi';\n}\n", "language": "javascript"}

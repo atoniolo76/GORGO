@@ -20,7 +20,9 @@ from .simulator.engine import EngineConfig
 from .simulator.runner import run_single
 from . import policies  # noqa: F401 — registers policies
 from .policy import list_policies
+from .workload import code_completion as code_completion_adapter
 from .workload import lmsys as lmsys_adapter
+from .workload import sharegpt as sharegpt_adapter
 from .workload import synthetic as synthetic_gen
 
 
@@ -64,6 +66,38 @@ def _build_trace(workload_cfg, seed: int):
             tokenizer=params.get("tokenizer", "mock"),
         )
         return lmsys_adapter.build_trace(lmsys_cfg, trace_params)
+    if kind == "sharegpt":
+        sg_cfg = sharegpt_adapter.ShareGPTConfig(
+            local_path=params["local_path"],
+            max_conversations=params.get("max_conversations"),
+            min_turns=params.get("min_turns", 1),
+            max_turns=params.get("max_turns", 32),
+            seed=seed,
+        )
+        sg_trace_params = sharegpt_adapter.TraceParams(
+            arrival_rate_qps=params["arrival_rate_qps"],
+            tokens_per_char=params.get("tokens_per_char", 0.25),
+            max_output_tokens=params.get("max_output_tokens", 256),
+            seed=seed,
+            tokenizer=params.get("tokenizer", "mock"),
+        )
+        return sharegpt_adapter.build_trace(sg_cfg, sg_trace_params)
+    if kind == "code-completion":
+        cc_cfg = code_completion_adapter.CodeCompletionConfig(
+            local_path=params["local_path"],
+            max_tasks=params.get("max_tasks"),
+            instruction_prefix=params.get("instruction_prefix", ""),
+            language_filter=tuple(params.get("language_filter", ())),
+            seed=seed,
+        )
+        cc_trace_params = code_completion_adapter.TraceParams(
+            arrival_rate_qps=params["arrival_rate_qps"],
+            tokens_per_char=params.get("tokens_per_char", 0.25),
+            max_output_tokens=params.get("max_output_tokens", 256),
+            seed=seed,
+            tokenizer=params.get("tokenizer", "mock"),
+        )
+        return code_completion_adapter.build_trace(cc_cfg, cc_trace_params)
     raise ValueError(f"unknown workload kind: {kind}")
 
 
