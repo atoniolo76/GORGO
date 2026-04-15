@@ -11,6 +11,7 @@ mutation. Policies read only.
 
 from __future__ import annotations
 
+import inspect
 from typing import Callable, Protocol, runtime_checkable
 
 from .cluster import ClusterState
@@ -68,12 +69,31 @@ def register_policy(policy_id: str) -> Callable[[type], type]:
 
 
 def get_policy(policy_id: str, **kwargs) -> RoutingPolicy:
-    """Instantiate a policy by id. kwargs are policy-specific config."""
+    """Instantiate a policy by id. kwargs are policy-specific config.
+
+    Sweeps Cartesian-join over policy_id and policy.params, so a param
+    that only applies to one policy (e.g. `block_size` on prefix-cache)
+    leaks into the kwargs of unrelated policies. We drop kwargs the
+    target policy does not accept rather than crashing the sweep.
+    """
     if policy_id not in _REGISTRY:
         raise KeyError(
             f"unknown policy: {policy_id!r}. known: {sorted(_REGISTRY)}"
         )
-    return _REGISTRY[policy_id](**kwargs)
+    cls = _REGISTRY[policy_id]
+    sig = inspect.signature(cls)
+    accepted = {
+        name for name, p in sig.parameters.items()
+        if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+    }
+    has_var_keyword = any(
+        p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
+    )
+    filtered = (
+        kwargs if has_var_keyword
+        else {k: v for k, v in kwargs.items() if k in accepted}
+    )
+    return cls(**filtered)
 
 
 def list_policies() -> list[str]:

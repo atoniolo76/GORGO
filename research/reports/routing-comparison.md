@@ -29,29 +29,64 @@ network, and KV-transport components.
 
 ### 1.1 Motivation
 
-Prefix-aware routing (e.g. SGLang, Mooncake Conductor) can dramatically
-cut prefill cost by reusing KV state already cached on a specific pod.
-But naive prefix-locality concentrates load on a few "hot" pods,
-trading cache reuse for queueing delay. Preble-style approaches argue
-for a joint objective; PD disaggregation argues for decoupling the two
-phases; VTC argues that fairness constraints change the Pareto
-frontier entirely.
+Prefix-aware routing (SGLang router, Mooncake Conductor) can
+dramatically cut prefill cost by reusing KV state already cached on a
+specific pod. But naive prefix-locality concentrates load on a few
+"hot" pods, trading cache reuse for queueing delay. Preble-style
+approaches argue for a joint objective; PD disaggregation argues for
+decoupling the two phases; VTC argues that fairness constraints change
+the Pareto frontier entirely. Each of these proposals has been
+evaluated against its own baseline on its own workload; the field has
+not produced an apples-to-apples comparison across the design space.
 
-Existing evaluations are pairwise and report-specific. We need a
-harness that holds workload, topology, and cost assumptions constant
-while varying only the policy.
+**Research question.** *Which* prefix-aware routing strategy wins, for
+which workload regime and which cluster topology, and by how much — and
+does any of them clearly improve on the routing layer GORGO already
+ships (a random-choice proxy over replica URLs; see
+`proxy/modal_proxy.py`)?
+
+This phrasing is deliberate on three counts:
+
+1. **Not "does prefix-aware routing win"** — that framing treats
+   prefix-awareness as a single binary. SGLang-style longest-prefix,
+   Mooncake-style KV-aware dispatch, Preble-style load-adjusted
+   matching, and PD disaggregation are all "prefix-aware" but make
+   fundamentally different tradeoffs; lumping them hides the result we
+   actually care about.
+2. **Situating a fragmented space.** The related-systems literature
+   (Section 2) is a catalog of point designs, each with its own cost
+   model, workload, and evaluation protocol. A common harness that
+   holds those constant while varying only the policy is what lets us
+   compare them head-to-head.
+3. **Grounded in GORGO.** GORGO's production serving path is
+   `engine/modal_sglang.py` (SGLang + Qwen3.5-35B-A3B-FP8, multi-
+   replica on H100) fronted by the naive random-choice proxy in
+   `proxy/modal_proxy.py`. Any policy that demonstrably beats the
+   random baseline under GORGO's workload and topology is a candidate
+   to replace that proxy; any that does not, isn't.
 
 ### 1.2 Contributions
 
 - **A taxonomy** of routing strategies along five orthogonal axes
-  (Section 3).
-- **A harness** with 11 pluggable policies, a prefix-level KV model,
-  and a deterministic discrete-event simulator (Section 4).
+  (Section 3) that separates "reads cache state" (a selection signal)
+  from "carries private state across requests" (a memory axis) — a
+  distinction the existing literature collapses.
+- **A harness** with 11 pluggable policies (SGLang-ish, Mooncake-ish,
+  Preble-ish, PD, VTC, session-affinity, five cache-oblivious
+  baselines), a prefix-level KV model, and a deterministic discrete-
+  event simulator (Section 4).
 - **A comparison protocol** with explicit cost model, metrics, and
-  reproducibility guarantees (Section 5).
-- **A first characterization** of the reuse-vs-latency Pareto curve
-  on synthetic workloads and lmsys-chat-1m turn replays
-  (Sections 6–7, quantitative results to be filled).
+  reproducibility guarantees (Section 5). Policies are evaluated
+  against the same workload/topology/cost assumptions; the random
+  baseline (`policy=random`) is the direct stand-in for GORGO's
+  current proxy.
+- **A first characterization** of the reuse-vs-latency Pareto curve on
+  synthetic workloads and lmsys-chat-1m turn replays (Sections 6–7,
+  quantitative results to be filled after the sweep lands).
+- **A GORGO-fit recommendation**: which policy (if any) beats random
+  on GORGO's workload enough to justify the deployment cost of
+  replacing the current proxy (Section 7.4, to be written after the
+  sweep).
 
 ## 2. Related Systems (conceptual references, not reimplementations)
 
@@ -290,6 +325,29 @@ Filling out:
 ### 7.3 PD versus colocated
 
 At what ratio of prefill:decode cost does disaggregation help?
+
+### 7.4 GORGO-fit recommendation
+
+GORGO's production routing is random (`proxy/modal_proxy.py`:
+`random.choice(replica_urls)` over replicas discovered through the
+`GORGO-replicas` Modal Dict). That corresponds directly to the
+`random` policy in our harness. This section answers, for the workload
+mix we actually serve:
+
+- **Does any policy beat random** by enough margin (on p99 latency or
+  prefill hit rate) to justify the operational cost of a real proxy?
+- **Which one**, and under what assumptions about the workload's
+  prefix-reuse mass? (The answer almost certainly depends on how much
+  system-prompt and multi-turn reuse actually shows up in production
+  traffic; until calibration (§2.2 below) is done against live
+  SGLang metrics, the recommendation is conditional on the synthetic
+  reuse knob, not measured.)
+- **What would have to be true** — in workload shape, cluster
+  topology, or latency budget — for the recommendation to flip?
+
+The answer feeds directly into a follow-up proposal to replace
+`random.choice` with the winning policy behind an SGLang-compatible
+proxy.
 
 ## 8. Reproducibility
 
