@@ -149,15 +149,25 @@ def enumerate_prefix_hashes(tokens: Iterable[int], block_size: int = 16) -> list
     Mirrors the common "paged" KV layout where prefix reuse is measured
     in blocks of `block_size` tokens. The hash is an opaque string
     (content-addressed) so it is stable across processes.
+
+    Streams tokens into a single incremental blake2b rather than
+    re-hashing every prefix from scratch — hashing is O(n) total, not
+    O(n²). The on-wire hash output is unchanged from the prior
+    implementation: each block's hash is still blake2b over
+    ``b",".join(str(t).encode() for t in seq[:end])``.
     """
     import hashlib
 
-    seq = list(tokens)
+    hasher = hashlib.blake2b(digest_size=16)
     out: list[str] = []
-    for end in range(block_size, len(seq) + 1, block_size):
-        h = hashlib.blake2b(
-            b",".join(str(t).encode() for t in seq[:end]),
-            digest_size=16,
-        ).hexdigest()
-        out.append(h)
+    first = True
+    i = 0
+    for tok in tokens:
+        if not first:
+            hasher.update(b",")
+        hasher.update(str(tok).encode())
+        first = False
+        i += 1
+        if i % block_size == 0:
+            out.append(hasher.copy().hexdigest())
     return out
