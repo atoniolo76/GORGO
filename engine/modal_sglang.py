@@ -9,6 +9,8 @@ import modal
 
 app = modal.App(name="GORGO")
 
+replicas = modal.Dict.from_name("GORGO-replicas", create_if_missing=True)
+
 sglang_image = modal.Image.from_registry(
     "lmsysorg/sglang:nightly-dev-cu13-20260411-0011d2ae"
 ).run_commands("rm -rf /root/.cache/huggingface").entrypoint(
@@ -84,6 +86,8 @@ def model_endpoint():
         print(f"tunnel.tls_socket = {tunnel.tls_socket}")
         process = subprocess.Popen(cmd)
         wait_ready(process)
+        replicas[REGION] = tunnel.url
+        print(replicas[REGION])
         process.wait()
 
 
