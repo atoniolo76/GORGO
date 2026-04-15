@@ -1,6 +1,18 @@
 # GORGO
 
-## Modal / Shadow scaffold
+## Production deployment (Modal + SGLang)
+
+```bash
+REGION=us MODEL_ORG="Qwen" MODEL_NAME="Qwen3.5-35B-A3B-FP8" MIN_CONTAINERS=1 modal run --env=alessio-dev engine/modal_sglang.py
+```
+
+Full list of regions [here](https://modal.com/docs/guide/region-selection).
+
+The production proxy currently randomizes routing across replicas
+(`proxy/modal_proxy.py`). The routing harness below exists to study
+what should replace that.
+
+## Modal / Shadow scaffold (legacy)
 
 ```
 modal run --env=alessio-dev models/qwen/model.py

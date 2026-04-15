@@ -1,19 +1,17 @@
 [project]
 name = "GORGO"
 version = "0.1.0"
+requires-python = ">=3.12"
 dependencies = [
     "PyYAML>=6.0",
+    "guidellm>=0.6.0",
+    "modal>=1.4.0",
+    "uvicorn>=0.44.0",
 ]
 
 [project.optional-dependencies]
-modal = [
-    "modal>=1.4.0",
-]
 tokenizers = [
     "tiktoken>=0.7",
-]
-dev = [
-    "pytest>=7.0",
 ]
 
 [project.scripts]
@@ -30,3 +28,20 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-ra -q"
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.9.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["engine", "src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "W"]
+
+[tool.ruff.format]
+quote-style = "double"
