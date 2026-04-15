@@ -7,15 +7,15 @@ import urllib.request
 
 import modal
 
-app = modal.App(name="GORGO")
+from app import app, ENVIRONMENT_NAME
 
-replicas = modal.Dict.from_name("GORGO-replicas", create_if_missing=True)
+replicas = modal.Dict.from_name("GORGO-replicas", create_if_missing=True, environment_name=ENVIRONMENT_NAME)
 
 sglang_image = modal.Image.from_registry(
     "lmsysorg/sglang:nightly-dev-cu13-20260411-0011d2ae"
 ).run_commands("rm -rf /root/.cache/huggingface").entrypoint(
     []  # silence chatty logs on container start
-)
+).add_local_python_source("app")
 
 REGION = os.getenv("REGION", "us-east")
 GPU_TYPE = os.getenv("GPU_TYPE", "H100")
@@ -28,13 +28,13 @@ MODEL_REVISION = (  # pin revision id to avoid nasty surprises!
 N_GPUS = os.getenv("N_GPUS", 1)
 GPU = f"{GPU_TYPE}:{N_GPUS}"
 PORT = 8000
-HF_CACHE_VOL = modal.Volume.from_name(f"{MODEL_NAME}-huggingface-cache", create_if_missing=True)
+HF_CACHE_VOL = modal.Volume.from_name(f"{MODEL_NAME}-huggingface-cache", create_if_missing=True, environment_name=ENVIRONMENT_NAME)
 HF_CACHE_PATH = "/root/.cache/huggingface"
 FULL_MODEL_NAME = f"{MODEL_ORG}/{MODEL_NAME}"
 MODEL_PATH = f"{HF_CACHE_PATH}/{FULL_MODEL_NAME}"
 MIN_CONTAINERS = os.getenv("MIN_CONTAINERS", 2)
 WAIT_READY_TIMEOUT = os.getenv("WAIT_READY_TIMEOUT", 1200)
-DG_CACHE_VOL = modal.Volume.from_name("deepgemm-cache", create_if_missing=True)
+DG_CACHE_VOL = modal.Volume.from_name("deepgemm-cache", create_if_missing=True, environment_name=ENVIRONMENT_NAME)
 DG_CACHE_PATH = "/root/.cache/deepgemm"
 
 sglang_image = sglang_image.env({"HF_HUB_CACHE": HF_CACHE_PATH, "HF_XET_HIGH_PERFORMANCE": "1", "SGLANG_ENABLE_JIT_DEEPGEMM": "1"})

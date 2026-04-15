@@ -1,11 +1,9 @@
 import random
 import modal
 
-app = modal.App(name="GORGO")
+from app import app, replicas
 
-replicas = modal.Dict.from_name("GORGO-replicas")
-
-@app.function(image=modal.Image.debian_slim().pip_install("httpx", "uvicorn"))
+@app.function(image=modal.Image.debian_slim().pip_install("httpx", "uvicorn").add_local_python_source("app"))
 def proxy():
     import json
 
