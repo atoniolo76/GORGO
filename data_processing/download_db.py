@@ -5,7 +5,9 @@ import modal
 
 from app import app, completions_volume
 
-query_clickhouse_fun = modal.Function.from_name("db-wrappers", "query_clickhouse", environment_name="modal-etl")
+query_clickhouse_fun = modal.Function.from_name(
+    "db-wrappers", "query_clickhouse", environment_name="modal-etl"
+)
 
 
 image = modal.Image.debian_slim().pip_install("pyarrow").add_local_python_source("app")
@@ -20,16 +22,18 @@ def download_responses(start: datetime, end: datetime, chunk_minutes: int = 60):
     cursor = start
     while cursor < end:
         chunk_end = min(cursor + timedelta(minutes=chunk_minutes), end)
-        chunks.append((
-            f"SELECT * FROM flash_llm_responses"
-            f" WHERE timestamp >= '{cursor.strftime('%Y-%m-%d %H:%M:%S')}'"
-            f" AND timestamp < '{chunk_end.strftime('%Y-%m-%d %H:%M:%S')}'",
-            cursor.strftime("%Y%m%d_%H%M%S"),
-        ))
+        chunks.append(
+            (
+                f"SELECT * FROM flash_llm_responses"
+                f" WHERE timestamp >= '{cursor.strftime('%Y-%m-%d %H:%M:%S')}'"
+                f" AND timestamp < '{chunk_end.strftime('%Y-%m-%d %H:%M:%S')}'",
+                cursor.strftime("%Y%m%d_%H%M%S"),
+            )
+        )
         cursor = chunk_end
 
     queries = [q for q, _ in chunks]
-    labels  = [l for _, l in chunks]
+    labels = [l for _, l in chunks]
 
     total = 0
     chunk_times = []
@@ -49,7 +53,9 @@ def download_responses(start: datetime, end: datetime, chunk_minutes: int = 60):
     start = time.time()
     print(f"Writing to volume at {start}")
     completions_volume.commit()
-    print(f"Downloaded {total} rows across {len(chunks)} chunk(s) and committed to volume in {time.time() - start} seconds")
+    print(
+        f"Downloaded {total} rows across {len(chunks)} chunk(s) and committed to volume in {time.time() - start} seconds"
+    )
     return total
 
 
@@ -58,6 +64,5 @@ def main():
     download_responses.remote(
         start=datetime(2026, 4, 12, 11, 0, 0),
         end=datetime(2026, 4, 12, 11, 15, 0),
-   
-        chunk_minutes=15
+        chunk_minutes=15,
     )

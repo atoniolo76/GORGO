@@ -3,7 +3,10 @@ import modal
 
 from app import app, replicas
 
-@app.function(image=modal.Image.debian_slim().pip_install("httpx", "uvicorn").add_local_python_source("app"))
+
+@app.function(
+    image=modal.Image.debian_slim().pip_install("httpx", "uvicorn").add_local_python_source("app")
+)
 def proxy():
     import json
 
@@ -31,40 +34,51 @@ def proxy():
                         )
                 except httpx.ConnectError:
                     err = json.dumps({"error": "upstream replica unreachable"}).encode()
-                    await send({
-                        "type": "http.response.start",
-                        "status": 502,
-                        "headers": [(b"content-type", b"application/json")],
-                    })
-                    await send({
-                        "type": "http.response.body",
-                        "body": err,
-                    })
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": 502,
+                            "headers": [(b"content-type", b"application/json")],
+                        }
+                    )
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": err,
+                        }
+                    )
                     return
                 response_headers = [
-                    (k.lower().encode(), v.encode())
-                    for k, v in resp.headers.items()
+                    (k.lower().encode(), v.encode()) for k, v in resp.headers.items()
                 ]
-                await send({
-                    "type": "http.response.start",
-                    "status": resp.status_code,
-                    "headers": response_headers,
-                })
-                await send({
-                    "type": "http.response.body",
-                    "body": resp.content,
-                })
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": resp.status_code,
+                        "headers": response_headers,
+                    }
+                )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": resp.content,
+                    }
+                )
                 return
             # fallback: 404
-            await send({
-                "type": "http.response.start",
-                "status": 404,
-                "headers": [(b"content-type", b"text/plain")],
-            })
-            await send({
-                "type": "http.response.body",
-                "body": b"Not found",
-            })
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 404,
+                    "headers": [(b"content-type", b"text/plain")],
+                }
+            )
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": b"Not found",
+                }
+            )
 
     with modal.forward(8000) as tunnel:
         print(f"proxy listening at {tunnel.url}")

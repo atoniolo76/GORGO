@@ -9,13 +9,18 @@ import modal
 
 from app import app, ENVIRONMENT_NAME
 
-replicas = modal.Dict.from_name("GORGO-replicas", create_if_missing=True, environment_name=ENVIRONMENT_NAME)
+replicas = modal.Dict.from_name(
+    "GORGO-replicas", create_if_missing=True, environment_name=ENVIRONMENT_NAME
+)
 
-sglang_image = modal.Image.from_registry(
-    "lmsysorg/sglang:nightly-dev-cu13-20260411-0011d2ae"
-).run_commands("rm -rf /root/.cache/huggingface").entrypoint(
-    []  # silence chatty logs on container start
-).add_local_python_source("app")
+sglang_image = (
+    modal.Image.from_registry("lmsysorg/sglang:nightly-dev-cu13-20260411-0011d2ae")
+    .run_commands("rm -rf /root/.cache/huggingface")
+    .entrypoint(
+        []  # silence chatty logs on container start
+    )
+    .add_local_python_source("app", copy=True)
+)
 
 REGION = os.getenv("REGION", "us-east")
 GPU_TYPE = os.getenv("GPU_TYPE", "H100")
@@ -28,21 +33,32 @@ MODEL_REVISION = (  # pin revision id to avoid nasty surprises!
 N_GPUS = os.getenv("N_GPUS", 1)
 GPU = f"{GPU_TYPE}:{N_GPUS}"
 PORT = 8000
-HF_CACHE_VOL = modal.Volume.from_name(f"{MODEL_NAME}-huggingface-cache", create_if_missing=True, environment_name=ENVIRONMENT_NAME)
+HF_CACHE_VOL = modal.Volume.from_name(
+    f"{MODEL_NAME}-huggingface-cache", create_if_missing=True, environment_name=ENVIRONMENT_NAME
+)
 HF_CACHE_PATH = "/root/.cache/huggingface"
 FULL_MODEL_NAME = f"{MODEL_ORG}/{MODEL_NAME}"
 MODEL_PATH = f"{HF_CACHE_PATH}/{FULL_MODEL_NAME}"
 MIN_CONTAINERS = os.getenv("MIN_CONTAINERS", 2)
 WAIT_READY_TIMEOUT = os.getenv("WAIT_READY_TIMEOUT", 1200)
-DG_CACHE_VOL = modal.Volume.from_name("deepgemm-cache", create_if_missing=True, environment_name=ENVIRONMENT_NAME)
+DG_CACHE_VOL = modal.Volume.from_name(
+    "deepgemm-cache", create_if_missing=True, environment_name=ENVIRONMENT_NAME
+)
 DG_CACHE_PATH = "/root/.cache/deepgemm"
 
-sglang_image = sglang_image.env({"HF_HUB_CACHE": HF_CACHE_PATH, "HF_XET_HIGH_PERFORMANCE": "1", "SGLANG_ENABLE_JIT_DEEPGEMM": "1"})
+sglang_image = sglang_image.env(
+    {
+        "HF_HUB_CACHE": HF_CACHE_PATH,
+        "HF_XET_HIGH_PERFORMANCE": "1",
+        "SGLANG_ENABLE_JIT_DEEPGEMM": "1",
+    }
+)
 sglang_image = sglang_image.run_commands(
     f"python3 -m sglang.compile_deep_gemm --model-path {FULL_MODEL_NAME} --revision {MODEL_REVISION} --tp {N_GPUS}",
     volumes={DG_CACHE_PATH: DG_CACHE_VOL, HF_CACHE_PATH: HF_CACHE_VOL},
     gpu=GPU,
 )
+
 
 @app.function(
     image=sglang_image,
@@ -109,11 +125,13 @@ def wait_ready(process: subprocess.Popen, timeout: int = WAIT_READY_TIMEOUT):
     else:
         raise TimeoutError(f"SGLang server not ready within {timeout} seconds")
 
-    warmup_body = json.dumps({
-        "model": HF_REPO_ID,
-        "messages": [{"role": "user", "content": "warmup"}],
-        "max_tokens": 1,
-    }).encode()
+    warmup_body = json.dumps(
+        {
+            "model": HF_REPO_ID,
+            "messages": [{"role": "user", "content": "warmup"}],
+            "max_tokens": 1,
+        }
+    ).encode()
     warmup_req = urllib.request.Request(
         f"http://127.0.0.1:{PORT}/v1/chat/completions",
         data=warmup_body,
@@ -127,6 +145,7 @@ def wait_ready(process: subprocess.Popen, timeout: int = WAIT_READY_TIMEOUT):
         except (urllib.error.URLError, urllib.error.HTTPError):
             time.sleep(2)
     raise TimeoutError(f"SGLang server not ready within {timeout} seconds")
+
 
 if __name__ == "__main__":
     model_endpoint.remote()
