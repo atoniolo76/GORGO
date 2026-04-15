@@ -28,3 +28,11 @@ uv.lock
 
 # data
 data/
+
+# Gas Town (added by gt)
+.runtime/
+.claude/
+.logs/
+state.json
+CLAUDE.md
+CLAUDE.local.md
