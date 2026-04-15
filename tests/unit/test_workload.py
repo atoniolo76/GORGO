@@ -41,6 +41,52 @@ def test_synthetic_describe():
     assert d["t_start"] >= 0.0
 
 
+def test_synthetic_shared_head_produces_matching_token_prefixes():
+    """Shared-head mode: requests from the same family share a real
+    token-level prefix, and prefix_key is cleared so the engine will
+    enumerate block-level hashes over prompt_tokens instead of
+    collapsing the prefix to a single opaque block.
+    """
+    params = SyntheticParams(
+        n_requests=200,
+        arrival_rate_qps=10.0,
+        n_prefix_families=4,
+        zipf_s=1.1,
+        prompt_len_min=64,
+        prompt_len_max=128,
+        max_output_tokens=8,
+        n_sessions=5,
+        seed=0,
+        shared_prefix_tokens=32,
+    )
+    trace = generate(params)
+    assert len(trace.requests) == 200
+    # All prefix_keys are None in shared-head mode.
+    assert all(r.prefix_key is None for r in trace.requests)
+    # Group by family, verify same-family requests share the first 32 tokens.
+    by_fam: dict[int, list[tuple[int, ...]]] = {}
+    for r in trace.requests:
+        by_fam.setdefault(r.metadata["family"], []).append(r.prompt_tokens)
+    for fam, toks in by_fam.items():
+        heads = {t[:32] for t in toks}
+        assert len(heads) == 1, f"family {fam} has divergent heads"
+    # Different families produce different heads.
+    distinct_heads = {toks[0][:32] for toks in by_fam.values()}
+    assert len(distinct_heads) == len(by_fam)
+
+
+def test_synthetic_shared_head_is_deterministic():
+    params = SyntheticParams(
+        n_requests=50, arrival_rate_qps=10.0, n_prefix_families=4,
+        zipf_s=1.1, prompt_len_min=64, prompt_len_max=128,
+        max_output_tokens=8, n_sessions=5, seed=3,
+        shared_prefix_tokens=32,
+    )
+    a = generate(params)
+    b = generate(params)
+    assert [r.prompt_tokens for r in a.requests] == [r.prompt_tokens for r in b.requests]
+
+
 def test_lmsys_stub_loader_builds_trace():
     stub = StubLoader(n_convs=3, turns_per_conv=2, seed=0)
     cfg = LmsysConfig(local_path="/nonexistent/but/unused", seed=0)
