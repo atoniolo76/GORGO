@@ -3,10 +3,13 @@ name = "GORGO"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "asyncio>=4.0.0",
     "duckdb>=1.5.2",
     "guidellm>=0.6.0",
+    "httpx>=0.28.1",
     "modal>=1.4.0",
     "numpy>=2.4.4",
+    "tiktoken>=0.12.0",
     "uvicorn>=0.44.0",
 ]
 
