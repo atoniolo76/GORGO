@@ -1,29 +1,43 @@
-"""Preble-*inspired* prefix-cache routing with hotspot-aware balancing.
+"""Preble-inspired prefix-cache routing with exploit/explore gate and
+relative-imbalance hotspot mitigation.
 
-Deliberately simplified formulation, not a faithful reimplementation of
-Preble. The published Preble system optimizes routing over a reuse
-graph with load prediction; this policy reduces that to a linear
-combination:
+Implements a minimum-viable approximation of Preble (Zhong et al.,
+"Efficient Distributed Prompt Scheduling for LLM Serving", ICLR 2025).
+Three mechanisms match the paper:
 
-    score = alpha * prefix_match_blocks - beta * load_factor
+1. **Exploit/explore gate (E2).** If the best prefix match saves more
+   tokens than the uncached tail would cost (``missed < cached``), bind
+   to the prefix owner (exploit). Otherwise fall back to the pod with
+   the lowest estimated wait (explore). This replaces the prior linear
+   ``alpha * match - beta * load`` combination with the conditional
+   structure the paper actually uses.
 
-where load_factor is normalized (active + queued)/capacity. Hotspot
-mitigation: if the top-scoring pod's load_factor exceeds
-`hotspot_threshold`, defer to a less-loaded pod that already has *some*
-prefix overlap, even if shorter. The coefficients (alpha, beta,
-hotspot_threshold) are magic numbers chosen to expose the trade-off in
-this harness; empirical tuning is expected before drawing any
-conclusion about Preble-the-system from this policy.
+2. **Time-domain load signal.** Per-pod estimated wait is
+   ``ewma_latency_ms * (active_prefill + active_decode)`` — a quantity
+   with units of milliseconds that tracks how long until the pod drains
+   its in-flight work. This replaces the prior dimensionless
+   slot-occupancy ratio, which was normalized against a denominator
+   (``max_prefill + max_decode``) 5× larger than the cost model's
+   queueing denominator and therefore never signaled congestion.
 
-The registered id `prefix-cache-preble` is intentionally kept stable
-(config compatibility). Refer to this class name or docstring when
-citing the algorithm.
+3. **Relative hotspot threshold.** Hotspot fires when the exploit
+   target's load exceeds ``th_bal`` times the lightest pod's load — a
+   ratio, not an absolute threshold. The deflection target is the
+   lightest pod regardless of prefix match (the prior ``match > 0``
+   gate was the binding constraint under mono-homing).
 
-Taxonomy (see `research/reports/routing-comparison.md` §3):
+Deferred: eviction cost M_i, prefix auto-scaling, radix tree, local
+priority-group scheduling. See ``docs/preble_paper_vs_impl.md`` for
+the full divergence analysis (go-ggf).
+
+The registered id ``prefix-cache-preble`` is intentionally kept stable
+(config compatibility). Prior parameters ``alpha``, ``beta``, and
+``hotspot_threshold`` are silently dropped by the registry for
+backwards-compatible sweep configs (they are no longer accepted).
+
+Taxonomy (see ``research/reports/routing-comparison.md`` §3):
     selection=composite (cache-affinity + load), state=stateless,
-    fairness=best-effort, topology=any, migration=none. The
-    hotspot-threshold deflection is a property of the composite signal,
-    not a separate taxonomy axis.
+    fairness=best-effort, topology=any, migration=none.
 """
 
 from __future__ import annotations
@@ -31,7 +45,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..cluster import ClusterState
-from ..core import Decision, Request
+from ..core import Decision, PodRuntime, Request
 from ..kv_cache import KVCacheState, enumerate_prefix_hashes
 from ..policy import register_policy
 
@@ -40,14 +54,23 @@ from ..policy import register_policy
 @dataclass
 class PreblePrefixCachePolicy:
     block_size: int = 16
-    alpha: float = 1.0
-    beta: float = 0.5
-    hotspot_threshold: float = 0.9
+    th_bal: float = 1.5
 
     def _prefix_hashes(self, r: Request) -> list[str]:
         if r.prefix_key:
             return [r.prefix_key]
         return enumerate_prefix_hashes(r.prompt_tokens, block_size=self.block_size)
+
+    @staticmethod
+    def _load_ms(pod: PodRuntime) -> float:
+        """Time-domain load: EWMA(latency) * in-flight requests.
+
+        Falls back to 1.0 ms when EWMA is uninitialized (0.0) so the
+        signal degrades to a pure active-count rather than collapsing
+        to zero.
+        """
+        ewma = pod.ewma_latency_ms if pod.ewma_latency_ms > 0.0 else 1.0
+        return ewma * (pod.active_prefill + pod.active_decode)
 
     def decide(
         self,
@@ -59,7 +82,9 @@ class PreblePrefixCachePolicy:
         if not cands:
             return Decision("__none__", "__none__", "no-prefill-capable-pod")
         hashes = self._prefix_hashes(request)
-        scored = []
+
+        # Per-pod: prefix match length + time-domain load.
+        pod_data: list[tuple[int, float, PodRuntime]] = []
         for p in cands:
             match = 0
             for h in hashes:
@@ -67,24 +92,46 @@ class PreblePrefixCachePolicy:
                     match += 1
                 else:
                     break
-            cap = max(1, p.spec.max_concurrent_prefill + p.spec.max_concurrent_decode)
-            load = (p.active_prefill + p.active_decode + p.queued) / cap
-            score = self.alpha * match - self.beta * load
-            scored.append((score, match, load, p))
-        scored.sort(key=lambda t: (-t[0], t[3].spec.pod_id))
-        top_score, top_match, top_load, top_pod = scored[0]
-        if top_load > self.hotspot_threshold:
-            for _, match, load, p in scored[1:]:
-                if match > 0 and load < self.hotspot_threshold:
-                    return Decision(
-                        p.spec.pod_id,
-                        p.spec.pod_id,
-                        rationale=f"hotspot-avoid top={top_pod.spec.pod_id}",
-                        score=match - load,
-                    )
+            pod_data.append((match, self._load_ms(p), p))
+
+        # Exploit candidate: most prefix match, then least load, then pod_id.
+        best_match, best_load, best_pod = max(
+            pod_data,
+            key=lambda t: (t[0], -t[1], t[2].spec.pod_id),
+        )
+
+        # Exploit/explore gate (Preble E2).
+        cached_tokens = best_match * self.block_size
+        missed_tokens = len(request.prompt_tokens) - cached_tokens
+
+        if best_match > 0 and missed_tokens < cached_tokens:
+            # EXPLOIT: prefix reuse dominates. Bind to owner unless
+            # the owner is a hotspot relative to the lightest pod.
+            min_load = min(t[1] for t in pod_data)
+            if best_load > self.th_bal * min_load:
+                lightest = min(
+                    pod_data, key=lambda t: (t[1], t[2].spec.pod_id)
+                )
+                return Decision(
+                    lightest[2].spec.pod_id,
+                    lightest[2].spec.pod_id,
+                    rationale=(
+                        f"exploit-hotspot-redirect from={best_pod.spec.pod_id}"
+                    ),
+                    score=float(lightest[0]),
+                )
+            return Decision(
+                best_pod.spec.pod_id,
+                best_pod.spec.pod_id,
+                rationale=f"exploit match={best_match} load_ms={best_load:.1f}",
+                score=float(best_match),
+            )
+
+        # EXPLORE: cache reuse insufficient. Minimize estimated wait.
+        lightest = min(pod_data, key=lambda t: (t[1], t[2].spec.pod_id))
         return Decision(
-            top_pod.spec.pod_id,
-            top_pod.spec.pod_id,
-            rationale=f"preble match={top_match} load={top_load:.2f}",
-            score=top_score,
+            lightest[2].spec.pod_id,
+            lightest[2].spec.pod_id,
+            rationale=f"explore load_ms={lightest[1]:.1f}",
+            score=float(-lightest[1]),
         )

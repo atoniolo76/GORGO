@@ -47,15 +47,48 @@ def test_prefix_cache_preble_avoids_hotspot(pod_specs, kv_cache):
     tokens = tuple(range(32))
     hashes = enumerate_prefix_hashes(tokens, block_size=16)
     for h in hashes:
-        # Prefix lives on p0 AND p1.
+        # Prefix lives ONLY on p0 (mono-homing).
         kv_cache.install("p0", PrefixEntry(h, 16, 1024), now=1.0)
-        kv_cache.install("p1", PrefixEntry(h, 16, 1024), now=1.0)
-    # p0 is a hotspot.
-    cluster.pods["p0"].active_prefill = 100
-    cluster.pods["p0"].queued = 100
-    p = get_policy("prefix-cache-preble", block_size=16, alpha=1.0, beta=0.5, hotspot_threshold=0.5)
+    # p0 is a hotspot: high active count drives time-domain load up.
+    cluster.pods["p0"].active_prefill = 20
+    cluster.pods["p0"].ewma_latency_ms = 50.0
+    # p1 and p2 are idle (load_ms = 0).
+    p = get_policy("prefix-cache-preble", block_size=16, th_bal=1.5)
     d = p.decide(Request("r", "s", 3.0, tokens, 4), cluster, kv_cache)
+    # Exploit branch fires (cached > missed) but hotspot redirect
+    # steers away from p0 because p0.load_ms >> th_bal * min_load.
+    # No match>0 gate — redirect works even under mono-homing.
     assert d.prefill_pod_id != "p0"
+    assert "hotspot-redirect" in d.rationale
+
+
+def test_prefix_cache_preble_exploit_binds_to_owner(pod_specs, kv_cache):
+    """When no hotspot, exploit binds to the prefix owner."""
+    cluster = ClusterState.from_specs(pod_specs)
+    tokens = tuple(range(32))
+    hashes = enumerate_prefix_hashes(tokens, block_size=16)
+    for h in hashes:
+        kv_cache.install("p2", PrefixEntry(h, 16, 1024), now=1.0)
+    p = get_policy("prefix-cache-preble", block_size=16)
+    d = p.decide(Request("r", "s", 2.0, tokens, 4), cluster, kv_cache)
+    assert d.prefill_pod_id == "p2"
+    assert "exploit" in d.rationale
+
+
+def test_prefix_cache_preble_explore_picks_lightest(pod_specs, kv_cache):
+    """When cache reuse is insufficient, explore picks lightest pod."""
+    cluster = ClusterState.from_specs(pod_specs)
+    # Short prompt with no cached prefix → missed >= cached → explore.
+    tokens = tuple(range(48))
+    cluster.pods["p0"].active_prefill = 5
+    cluster.pods["p0"].ewma_latency_ms = 10.0
+    cluster.pods["p1"].active_prefill = 1
+    cluster.pods["p1"].ewma_latency_ms = 10.0
+    # p2 is idle → lightest.
+    p = get_policy("prefix-cache-preble", block_size=16)
+    d = p.decide(Request("r", "s", 2.0, tokens, 4), cluster, kv_cache)
+    assert d.prefill_pod_id == "p2"
+    assert "explore" in d.rationale
 
 
 def test_session_affinity_sticks(cluster, kv_cache):

@@ -62,23 +62,23 @@ workload:
   params:
     n_requests: 2000
     arrival_rate_qps: 8.0
-    n_prefix_families: 64
+    n_prefix_families: 256
     zipf_s: 1.1
     prompt_len_min: 256
     prompt_len_max: 2048
     max_output_tokens: 128
     n_sessions: 200
-    # Shared-head mode: each family gets a 512-token deterministic
-    # prefix (32 blocks @ block_size=16) in prompt_tokens itself, and
+    # Shared-head mode: each family gets a 1024-token deterministic
+    # prefix (64 blocks @ block_size=16) in prompt_tokens itself, and
     # prefix_key is cleared so the engine enumerates real block hashes.
     # Without this, prefix_key collapses every family to a single
     # opaque block and hit_rate/capture_rate pin to ~1.0 across all
     # policies (see tests/unit/test_workload.py::shared_head).
-    # 64 families × 32 blocks = 2048 unique blocks total; each pod
+    # 256 families × 64 blocks = 16384 unique blocks total; each pod
     # holds 4 GiB / (128 KiB/tok × 16 tok/block) = 2048 blocks, so the
-    # hottest half of families comfortably fits on a single pod and
-    # the rest create eviction pressure under cache-oblivious routing.
-    shared_prefix_tokens: 512
+    # working set is 8× per-pod capacity — forces meaningful eviction
+    # contention and tests policy differentiation under cache pressure.
+    shared_prefix_tokens: 1024
 
 seeds: [0, 1, 2]
 output_dir: "results/prefix-cache-baseline"
