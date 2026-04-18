@@ -1,0 +1,7 @@
+[
+  {
+    "index": 0,
+    "type": "str",
+    "value": "{\"model\":\"zai-org/GLM-5-FP8\",\"messages\":[{\"role\":\"system\",\"content\":\"You are controlling a simulated autonomous agent in a persistent 3D world. Return a single JSON object only, matching this shape: {\\\"action\\\":{\\\"kind\\\":\\\"idle|move|gather|build|destroy|create|delete|trade\\\",\\\"target_entity_id\\\":null|string,\\\"target_position\\\":null|{\\\"x\\\":number,\\\"y\\\":number,\\\"z\\\":number},\\\"quantity\\\":integer,\\\"subtype\\\":null|string},\\\"rationale\\\":\\\"string\\\",\\\"confidence\\\":number}. Respect resource constraints. Prefer concrete actions.\"},{\"role\":\"user\",\"content\":\"{\\\"agent\\\":{\\\"id\\\":\\\"b1cedff3-d4f4-4fb1-b3fa-253d590f3eb3\\\",\\\"name\\\":\\\"agent_108\\\",\\\"position\\\":{\\\"x\\\":-254.89766677887906,\\\"y\\\":0.0,\\\"z\\\":152.1521388211865},\\\"target_position\\\":null,\\\"speed\\\":1.5,\\\"needs\\\":{\\\"hunger\\\":100.0,\\\"fatigue\\\":100.0},\\\"inventory\\\":{\\\"wood\\\":1,\\\"stone\\\":25,\\\"food\\\":0},\\\"last_action\\\":\\\"idle\\\",\\\"next_decision_at\\\":175734.8308357209},\\\"nearby_entities\\\":[],\\\"world_time_seconds\\\":175732.96666883427,\\\"objective\\\":\\\"survive_and_expand\\\"}\"}],\"temperature\":0.3,\"max_tokens\":200}"
+  }
+]
