@@ -11,10 +11,25 @@ import itertools
 from app import app, completions_volume
 import modal
 
-image = modal.Image.debian_slim().pip_install("duckdb", "tiktoken").add_local_python_source("app")
+image = (
+    modal.Image.debian_slim()
+    .pip_install("duckdb", "tiktoken", "pyarrow")
+    .add_local_python_source("app")
+)
 
 FILE_PREFIX = "llm_responses_202604"
 FILE_CUTOFF = "llm_responses_20260408"
+
+
+def tokenized_dir(file_prefix: str = FILE_PREFIX) -> str:
+    return f"/data/tokenized_{file_prefix}"
+
+
+def tokenized_path_for(filename: str, file_prefix: str = FILE_PREFIX) -> str:
+    import os
+
+    stem = filename[: -len(".parquet")] if filename.endswith(".parquet") else filename
+    return os.path.join(tokenized_dir(file_prefix), f"{stem}.tokenized.parquet")
 
 
 def _content_to_str(content) -> str:
@@ -45,40 +60,37 @@ def _session_fingerprint(token_hash: str, messages: list) -> str:
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
-@app.function(image=image, volumes={"/data": completions_volume}, timeout=3600, retries=2)
-def process_file(filename: str, include_token_ids: bool = False) -> list[dict]:
-    """For each session in the file, return the request with the most messages
-    along with per-message token counts.
-
-    If ``include_token_ids`` is True, each returned entry also includes
-    ``prompt_token_ids`` (flat list of tiktoken gpt-4o ids for the longest
-    conversation's messages, concatenated in order) and
-    ``response_token_ids`` (ids for the assistant response text).
-    """
-    import json
+def _read_rows(filename: str):
+    """Pull relevant columns out of one raw parquet on the /data volume."""
     import os
 
     import duckdb
-    import tiktoken
 
-    enc = tiktoken.encoding_for_model("gpt-4o")
     path = os.path.join("/data", filename)
-
     con = duckdb.connect()
-    rows = con.execute(
-        """
-        SELECT
-            uuid,
-            timestamp,
-            request_metadata.token_hash AS token_hash,
-            request,
-            response
-        FROM read_parquet(?)
-        WHERE request NOT LIKE '%keep-alive%'
-    """,
-        [path],
-    ).fetchall()
-    con.close()
+    try:
+        rows = con.execute(
+            """
+            SELECT
+                uuid,
+                timestamp,
+                request_metadata.token_hash AS token_hash,
+                request,
+                response
+            FROM read_parquet(?)
+            WHERE request NOT LIKE '%keep-alive%'
+            """,
+            [path],
+        ).fetchall()
+    finally:
+        con.close()
+    return rows
+
+
+def _rows_to_session_entries(rows, enc, include_token_ids: bool) -> list[dict]:
+    """Reduce raw (uuid, ts, token_hash, request, response) rows down to one
+    entry per session (the longest conversation wins)."""
+    import json
 
     best_by_session: dict[str, dict] = {}
 
@@ -160,6 +172,161 @@ def process_file(filename: str, include_token_ids: bool = False) -> list[dict]:
     return list(best_by_session.values())
 
 
+@app.function(
+    image=image,
+    volumes={"/data": completions_volume},
+    timeout=3600,
+    retries=2,
+    memory=1024 * 16,
+)
+def process_file(filename: str, include_token_ids: bool = False) -> list[dict]:
+    """For each session in the file, return the request with the most messages
+    along with per-message token counts.
+
+    If ``include_token_ids`` is True, each returned entry also includes
+    ``prompt_token_ids`` (flat list of tiktoken gpt-4o ids for the longest
+    conversation's messages, concatenated in order) and
+    ``response_token_ids`` (ids for the assistant response text).
+    """
+    import tiktoken
+
+    enc = tiktoken.encoding_for_model("gpt-4o")
+    rows = _read_rows(filename)
+    return _rows_to_session_entries(rows, enc, include_token_ids=include_token_ids)
+
+
+@app.function(
+    image=image,
+    volumes={"/data": completions_volume},
+    timeout=3600,
+    retries=2,
+    memory=1024 * 16,
+    cpu=4.0,
+)
+def tokenize_file(filename: str, file_prefix: str = FILE_PREFIX) -> dict:
+    """Tokenize one raw parquet and write per-session token ids to
+    ``/data/tokenized_<file_prefix>/<stem>.tokenized.parquet``.
+
+    Idempotent: if the output already exists, it is left alone and the
+    function returns quickly with ``skipped=True``.
+    """
+    import os
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    import tiktoken
+
+    out_path = tokenized_path_for(filename, file_prefix=file_prefix)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+    if os.path.exists(out_path):
+        try:
+            md = pq.read_metadata(out_path)
+            return {
+                "filename": filename,
+                "out_path": out_path,
+                "skipped": True,
+                "num_sessions": md.num_rows,
+                "bytes": os.path.getsize(out_path),
+            }
+        except Exception:
+            os.remove(out_path)
+
+    enc = tiktoken.encoding_for_model("gpt-4o")
+    rows = _read_rows(filename)
+    entries = _rows_to_session_entries(rows, enc, include_token_ids=True)
+
+    session_ids = [e["session_id"] for e in entries]
+    token_hashes = [e["token_hash"] for e in entries]
+    prompt_ids = [e["prompt_token_ids"] for e in entries]
+    prompt_token_counts = [len(ids) for ids in prompt_ids]
+    message_counts = [e["message_count"] for e in entries]
+
+    table = pa.table(
+        {
+            "session_id": pa.array(session_ids, type=pa.string()),
+            "token_hash": pa.array(token_hashes, type=pa.string()),
+            "message_count": pa.array(message_counts, type=pa.int32()),
+            "prompt_token_count": pa.array(prompt_token_counts, type=pa.int32()),
+            "prompt_ids": pa.array(prompt_ids, type=pa.list_(pa.uint32())),
+        }
+    )
+
+    tmp_path = out_path + ".tmp"
+    pq.write_table(table, tmp_path, compression="zstd")
+    os.replace(tmp_path, out_path)
+    completions_volume.commit()
+
+    return {
+        "filename": filename,
+        "out_path": out_path,
+        "skipped": False,
+        "num_sessions": len(entries),
+        "num_tokens": sum(prompt_token_counts),
+        "bytes": os.path.getsize(out_path),
+    }
+
+
+@app.function(image=image, volumes={"/data": completions_volume}, timeout=7200)
+def tokenize_dataset(file_prefix: str = FILE_PREFIX, file_cutoff: str = FILE_CUTOFF) -> dict:
+    """Fan ``tokenize_file`` out over every raw parquet in the date window.
+
+    Each worker writes its own output parquet under
+    ``/data/tokenized_<file_prefix>/``; this driver just aggregates stats.
+    Re-runs are cheap because per-file outputs are skipped if already written.
+    """
+    import os
+    import time
+
+    parquet_dir = "/data"
+    files = sorted(
+        f
+        for f in os.listdir(parquet_dir)
+        if f.endswith(".parquet") and file_prefix in f and f < file_cutoff
+    )
+    print(f"Tokenizing {len(files)} files -> {tokenized_dir(file_prefix)}")
+
+    t0 = time.time()
+    total_sessions = 0
+    total_tokens = 0
+    total_bytes = 0
+    skipped_files = 0
+
+    args = [(f, file_prefix) for f in files]
+    for i, result in enumerate(tokenize_file.starmap(args), start=1):
+        total_sessions += result.get("num_sessions", 0)
+        total_tokens += result.get("num_tokens", 0) or 0
+        total_bytes += result.get("bytes", 0)
+        if result.get("skipped"):
+            skipped_files += 1
+        if i % 20 == 0 or i == len(files):
+            elapsed = time.time() - t0
+            print(
+                f"  {i}/{len(files)} files | "
+                f"{total_sessions:,} sessions | "
+                f"{total_tokens:,} prompt tokens | "
+                f"{total_bytes / 1e9:,.2f} GB on disk | "
+                f"{skipped_files:,} pre-existing | "
+                f"elapsed {elapsed:,.0f}s"
+            )
+
+    completions_volume.commit()
+    print(
+        f"\nDone. {total_sessions:,} sessions across {len(files)} files "
+        f"({skipped_files:,} already cached)."
+    )
+    return {
+        "file_prefix": file_prefix,
+        "file_cutoff": file_cutoff,
+        "num_files": len(files),
+        "num_sessions": total_sessions,
+        "num_tokens": total_tokens,
+        "bytes": total_bytes,
+        "skipped_files": skipped_files,
+        "elapsed_seconds": time.time() - t0,
+    }
+
+
 @app.function(image=image, volumes={"/data": completions_volume}, timeout=7200)
 def build_dataset(batch_size: int = 50):
     import csv
@@ -238,3 +405,8 @@ def build_dataset(batch_size: int = 50):
 @app.local_entrypoint()
 def main(batch_size: int = 50):
     build_dataset.remote(batch_size=batch_size)
+
+
+@app.local_entrypoint()
+def tokenize_main(file_prefix: str = FILE_PREFIX, file_cutoff: str = FILE_CUTOFF):
+    tokenize_dataset.remote(file_prefix=file_prefix, file_cutoff=file_cutoff)
