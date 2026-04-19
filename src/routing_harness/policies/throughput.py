@@ -1,10 +1,12 @@
-"""Throughput-maximizing: route to the pod with highest recent tokens/s.
+"""Throughput-maximizing: route to the pod with highest available capacity.
 
-Uses EWMA throughput maintained by the simulator. This policy optimizes
-for aggregate cluster throughput but can starve cold pods; see
-least-busy-time for a fairness-aware counterpart.
+Scores each pod by ``ewma_throughput_tps / (1 + active_requests)`` so
+a pod with high throughput but high concurrency is ranked below a pod
+with moderate throughput and headroom. This prevents the pathological
+single-pod starvation where the first-warm pod monopolizes all traffic
+via a reinforcing EWMA feedback loop.
 
-Taxonomy (see `research/reports/routing-comparison.md` §3):
+Taxonomy (see ``research/reports/routing-comparison.md`` §3):
     selection=load, state=stateless, fairness=best-effort,
     topology=any, migration=none.
 """
@@ -31,10 +33,16 @@ class ThroughputPolicy:
         cands = cluster.prefill_capable()
         if not cands:
             return Decision("__none__", "__none__", "no-prefill-capable-pod")
-        pick = max(cands, key=lambda p: (p.ewma_throughput_tps, -ord(p.spec.pod_id[0])))
+        pick = max(
+            cands,
+            key=lambda p: (
+                p.ewma_throughput_tps / (1 + p.active_prefill + p.active_decode),
+                -ord(p.spec.pod_id[0]),
+            ),
+        )
         return Decision(
             pick.spec.pod_id,
             pick.spec.pod_id,
-            rationale="max-ewma-throughput",
+            rationale="max-available-throughput",
             score=pick.ewma_throughput_tps,
         )

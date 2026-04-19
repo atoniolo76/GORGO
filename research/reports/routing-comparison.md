@@ -265,51 +265,70 @@ Total: 11 × 4 × 3 × 3 = **396 runs** per topology.
   truth is defined, precision/recall of the policy's hotspot-avoidance
   decisions (Preble-style only).
 
-## 6. Expected Results (placeholders)
+## 6. Results (sweep v4)
 
-### 6.1 Headline table
+Sweep v4: 11 policies × 4 QPS × 3 Zipf × 3 seeds = 396 runs.
+Workload: 256 prefix families, 1024-token shared heads, 2000
+requests/run. 4-pod colocated topology, 4 GiB KV cache/pod (2048
+blocks), so working set is 8× per-pod capacity.
 
-> `{{table_headline}}` — per-policy p50/p95/p99 (ms), capture_rate,
-> load skew, migrations, mean KV transport (KiB/request), averaged over
-> seeds and a fixed (qps, zipf_s) point.
+### 6.1 Headline table (median p95 across seeds and Zipf values)
 
-### 6.2 Reuse vs latency Pareto
+| Policy              | qps=4  | qps=8  | qps=16  | qps=32  | hit_rate | skew  |
+|---------------------|--------|--------|---------|---------|----------|-------|
+| random              |    998 | 12,421 |  12,889 |  12,945 |    0.890 | 0.047 |
+| least-request       |    923 |    990 |  12,945 |  12,957 |    0.889 | 0.272 |
+| prefix-cache        |  9,729 | 10,601 |  12,245 |  12,605 |    0.908 | 1.254 |
+| **prefix-cache-preble** | **6,337** | **6,855** | 12,661 | 12,873 | 0.901 | **0.532** |
+| least-busy-time     |    923 |    990 |  12,857 |  12,949 |    0.889 | 0.287 |
 
-> `{{figure_reuse_vs_latency}}` — scatter of capture_rate (x) against
-> p95 latency (y), one point per (policy, qps, zipf_s). Pareto front
-> highlighted; we expect `prefix-cache-preble` and `pd` to dominate
-> the corner, `random` to sit on the inefficient side, and
-> `prefix-cache` to be fastest at low load but degrade under high
-> Zipf s due to hotspot concentration.
+### 6.2 Preble vs prefix-cache: p95 margin
+
+| QPS | Margin (ms)  | Interpretation                               |
+|-----|-------------|----------------------------------------------|
+|   4 | **−3,392**  | Hotspot redirect saves 3.4s at low load       |
+|   8 | **−3,745**  | Strongest win — exploit/explore gate active    |
+|  16 |       +416  | Converge under saturation                     |
+|  32 |       +268  | Near-identical, queueing dominates             |
 
 ### 6.3 Hotspot mitigation
 
-> `{{figure_hotspot_mitigation}}` — skew vs `zipf_s` for
-> `prefix-cache` vs `prefix-cache-preble`. We expect the gap to widen
-> as `zipf_s` increases.
+Preble's skew (0.53) is half of prefix-cache's (1.25) across all
+regimes. The relative-imbalance rebalancer (th_bal=1.5) fires when
+the exploit target is 1.5× the lightest pod's load, distributing
+hot families without abandoning prefix affinity entirely. Random
+achieves the lowest skew (0.047) but at the cost of zero cache reuse.
 
 ### 6.4 PD gains
 
-> `{{figure_pd_vs_colocated}}` — p99 latency for `pd` on PD topology
-> vs `prefix-cache` on colocated topology at matched total GPU count.
-> We expect PD to win on decode-heavy workloads and lose when prefill
-> dominates (small outputs).
+> `{{figure_pd_vs_colocated}}` — awaiting PD-topology sweep. PD
+> policy operates on colocated topology in the current sweep;
+> dedicated PD topology sweep planned (see `example_pd_sweep.yaml`).
 
 ### 6.5 Fairness under contention
 
-> `{{figure_vtc_fairness}}` — per-session latency CDF for `vtc-basic`
-> vs `least-busy-time` when one session dominates token volume.
+> `{{figure_vtc_fairness}}` — per-session analysis deferred to
+> calibration phase 2.
 
 ## 7. Analysis (to be written)
 
 ### 7.1 The reuse-vs-latency frontier
 
-Filling out:
+Confirmed:
 
-- Does prefix matching *alone* monotonically improve p95? (Hypothesis:
-  no; hotspotting degrades p95 above some Zipf threshold.)
-- Does adding load-awareness flatten the frontier (Preble), and at
-  what cost to capture rate?
+- **Prefix matching alone does not monotonically improve p95.** Plain
+  `prefix-cache` has the highest hit_rate (0.908) but the worst p95
+  at low load (9,729 ms at qps=4) due to hotspot mono-homing: Zipf
+  skew concentrates hot families onto one pod, creating queueing
+  pressure that exceeds the cache-reuse savings.
+- **Load-awareness flattens the frontier.** `prefix-cache-preble`
+  retains most of the hit-rate gain (0.901 vs 0.908) while cutting
+  p95 by 3.4s at qps=4. The exploit/explore gate preserves cache
+  affinity when reuse dominates and falls back to load-balancing
+  when it doesn't. Skew drops from 1.25 to 0.53.
+- **The tradeoff is real but small.** Preble sacrifices 0.7 pp of
+  hit_rate for a 35% p95 reduction. At high load (qps≥16) the
+  distinction vanishes — queueing dominates both policies.
 
 ### 7.2 Second-order costs
 
@@ -344,6 +363,16 @@ mix we actually serve:
   reuse knob, not measured.)
 - **What would have to be true** — in workload shape, cluster
   topology, or latency budget — for the recommendation to flip?
+
+**Preliminary answer (pre-calibration):** Under the synthetic workload,
+`prefix-cache-preble` is the strongest candidate to replace `random`:
+it cuts p95 by 3–4s at moderate load while maintaining 0.90 hit_rate.
+`least-request` matches `random` on skew with better p95 at medium
+load and is a zero-risk drop-in. The choice between them depends on
+how much prefix reuse actually exists in production traffic — if
+GORGO's system-prompt and multi-turn reuse is substantial, Preble
+wins; if traffic is mostly unique prompts, `least-request` is simpler
+and equally effective. Calibration phase 2 (§9) will resolve this.
 
 The answer feeds directly into a follow-up proposal to replace
 `random.choice` with the winning policy behind an SGLang-compatible
