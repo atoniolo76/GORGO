@@ -149,3 +149,28 @@ async def ai_brix_power_of_two(endpoints_queued_tokens: list[str, str]) -> list[
         return [random_endpoints[1]]
     else:
         return [random_endpoints[0]]
+
+
+async def gorgo_multi_objective(
+    request_tokens: int,
+    endpoints_queued_tokens: list[str, str],
+    replica_metrics: dict[str, replica_state],
+    hyperparameters: dict[str, float],
+) -> list[str]:
+    keys = endpoints_queued_tokens.keys()
+
+    if set(keys) != set(replica_metrics.keys()):
+        raise ValueError("Endpoints and replica metrics keys do not match")
+
+    scores = {}
+    for key in keys:
+        network_latency = replica_metrics[key].latency
+        num_used_tokens = request_tokens * hyperparameters["t_prefill"]
+        num_queued_tokens = (
+            endpoints_queued_tokens[key] + replica_metrics[key].num_used_tokens
+        ) * hyperparameters["queued_tokens_weight"]
+
+        score = network_latency + num_used_tokens + num_queued_tokens
+        scores[key] = score
+
+    return min(scores, key=scores.get)
