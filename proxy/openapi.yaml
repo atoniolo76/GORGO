@@ -1,0 +1,473 @@
+openapi: 3.1.0
+info:
+  title: GORGO proxy
+  version: 0.1.0
+  description: |
+    Routing proxy in front of a pool of SGLang replicas.
+
+    The proxy forwards OpenAI-compatible chat-completions requests and selects
+    a replica per request via a pluggable policy. A background task keeps a
+    live snapshot of each replica's Prometheus `/metrics` feed; policies read
+    this snapshot instead of fetching synchronously on every request.
+
+    Control-plane routes let callers change the active policy, tune
+    hyperparameters, and add/remove replicas at runtime without restarting
+    the proxy container.
+
+servers:
+  - url: https://{tunnel_host}
+    description: Modal tunnel host printed on proxy startup
+    variables:
+      tunnel_host:
+        default: example.modal.run
+
+tags:
+  - name: control-plane
+    description: Runtime configuration endpoints
+  - name: observability
+    description: Read-only introspection of proxy state
+  - name: proxy
+    description: Passthrough to upstream replicas
+
+paths:
+  /policy:
+    get:
+      tags: [control-plane, observability]
+      summary: Get the active routing policy
+      responses:
+        '200':
+          description: Current policy state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyState' }
+    post:
+      tags: [control-plane]
+      summary: Set the active routing policy
+      description: |
+        Switches the policy used by `POST /v1/chat/completions` for all
+        subsequent requests. `policy` and `name` are accepted as synonyms in
+        the request body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PolicyRequest' }
+            examples:
+              gorgo:
+                value: { policy: gorgo }
+              power_of_two:
+                value: { name: power_of_two }
+      responses:
+        '200':
+          description: Policy updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyState' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /hyperparameters:
+    get:
+      tags: [control-plane, observability]
+      summary: Get gorgo hyperparameters
+      responses:
+        '200':
+          description: Current hyperparameter values, allowed keys, and factory defaults.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HyperparameterState' }
+    post:
+      tags: [control-plane]
+      summary: Merge hyperparameter updates
+      description: |
+        Partial update. Only the keys present in the body are changed; every
+        key must be in `allowed_keys` and every value must be numeric.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HyperparameterUpdate' }
+            examples:
+              tune_prefill:
+                value: { t_prefill: 0.8 }
+              both:
+                value: { t_prefill: 0.8, queued_tokens_weight: 1.5 }
+      responses:
+        '200': { $ref: '#/components/responses/HyperparametersUpdated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+    patch:
+      tags: [control-plane]
+      summary: Merge hyperparameter updates (alias of POST)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HyperparameterUpdate' }
+      responses:
+        '200': { $ref: '#/components/responses/HyperparametersUpdated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    put:
+      tags: [control-plane]
+      summary: Replace hyperparameters
+      description: |
+        Resets hyperparameters to the factory defaults and then applies the
+        provided updates on top. Useful for returning to a known baseline in
+        one call.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HyperparameterUpdate' }
+      responses:
+        '200': { $ref: '#/components/responses/HyperparametersUpdated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /replicas:
+    get:
+      tags: [control-plane, observability]
+      summary: List the currently registered replica endpoints
+      responses:
+        '200':
+          description: Registered replica URLs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReplicasList' }
+    post:
+      tags: [control-plane]
+      summary: Replace the replica set
+      description: |
+        Fully replaces the replica set. Accepts either a bare JSON array of
+        URLs or an object wrapping one under `replicas` (or `endpoints`).
+        Each URL must start with `http://` or `https://`; trailing slashes
+        and duplicates are normalized away.
+
+        Removed replicas have their queue-token counters and live-metric
+        snapshots cleared. Newly added replicas start with a zero queue-token
+        counter; they become eligible for non-random policies once the next
+        background refresh populates their metrics (<=
+        `refresh_interval_seconds`, default 1s).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - { $ref: '#/components/schemas/ReplicasRequestObject' }
+                - { $ref: '#/components/schemas/ReplicasRequestArray' }
+            examples:
+              bare_array:
+                value:
+                  - https://replica-a.modal.run
+                  - https://replica-b.modal.run
+              wrapped:
+                value:
+                  replicas:
+                    - https://replica-a.modal.run
+                    - https://replica-b.modal.run
+      responses:
+        '200':
+          description: Replica set updated; `added` and `removed` report the diff.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReplicasUpdateResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /replica_metrics:
+    get:
+      tags: [observability]
+      summary: Inspect the live metrics snapshot
+      description: |
+        Returns the most recent metrics the background loop scraped from each
+        replica, along with per-replica in-flight queue-token counters and
+        the age of the last refresh pass. Endpoints absent from `metrics`
+        have not yet been successfully scraped; endpoints present in
+        `errors` failed on the most recent pass.
+      responses:
+        '200':
+          description: Snapshot of live metrics and proxy counters.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReplicaMetricsSnapshot' }
+
+  /v1/chat/completions:
+    post:
+      tags: [proxy]
+      summary: OpenAI-compatible chat completions passthrough
+      description: |
+        The body is parsed just enough to extract `messages` for tokenization
+        (used by the `gorgo` policy and the queue-token counter); everything
+        else is forwarded verbatim to the chosen replica. The upstream
+        response is streamed back to the client chunk-by-chunk: the proxy
+        emits the ASGI `http.response.start` as soon as the upstream returns
+        headers (no body buffering), which preserves meaningful time-to-first-
+        token measurements.
+
+        When the client sends `stream: true`, the upstream responds with
+        `Content-Type: text/event-stream` and the proxy forwards each SSE
+        event (`data: {...}\n\n`) as it arrives. Otherwise the upstream
+        returns a single JSON body, which is still forwarded via the same
+        streaming path (the body just happens to arrive in one or two
+        chunks).
+
+        If the active policy fails to select a replica (e.g. metrics not yet
+        populated) the proxy falls back to random selection.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChatCompletionsRequest' }
+      responses:
+        '200':
+          description: |
+            Passthrough of the upstream replica's response. `application/json`
+            for non-streaming requests, `text/event-stream` for
+            `stream: true` requests.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatCompletionsResponse' }
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  OpenAI-compatible server-sent events. Each event is a line
+                  of the form `data: <json-chunk>\n\n`; the final event is
+                  `data: [DONE]\n\n`. The JSON payload of each chunk matches
+                  OpenAI's `chat.completion.chunk` object.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '502':
+          description: |
+            Upstream replica unreachable or failed before the proxy could
+            commit to a status code. A mid-stream upstream failure cannot
+            produce this response (headers are already flushed) and instead
+            results in a truncated body.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+components:
+  schemas:
+    Policy:
+      type: string
+      enum: [random, power_of_two, gorgo]
+      description: |
+        - `random`: uniform random selection.
+        - `power_of_two`: sample two replicas, route to the one with fewer
+          used + queued tokens.
+        - `gorgo`: multi-objective score
+          `latency + t_prefill * request_tokens + queued_tokens_weight * (queue + used)`,
+          minimized across all replicas.
+
+    PolicyRequest:
+      type: object
+      description: At least one of `policy` / `name` is required.
+      properties:
+        policy: { $ref: '#/components/schemas/Policy' }
+        name: { $ref: '#/components/schemas/Policy' }
+      additionalProperties: false
+
+    PolicyState:
+      type: object
+      required: [policy, supported, hyperparameters]
+      properties:
+        policy: { $ref: '#/components/schemas/Policy' }
+        supported:
+          type: array
+          items: { $ref: '#/components/schemas/Policy' }
+        hyperparameters: { $ref: '#/components/schemas/Hyperparameters' }
+
+    Hyperparameters:
+      type: object
+      description: Tunables consumed by the `gorgo` policy scoring function.
+      required: [t_prefill, queued_tokens_weight]
+      properties:
+        t_prefill:
+          type: number
+          description: Coefficient applied to the request's token count to estimate prefill cost.
+        queued_tokens_weight:
+          type: number
+          description: Coefficient applied to `(in_flight_queue + num_used_tokens)` per replica.
+      additionalProperties: false
+
+    HyperparameterUpdate:
+      type: object
+      description: |
+        Subset of `Hyperparameters` to apply. Unknown keys are rejected with
+        a 400 whose body lists `allowed_keys`.
+      properties:
+        t_prefill: { type: number }
+        queued_tokens_weight: { type: number }
+      additionalProperties: false
+
+    HyperparameterState:
+      type: object
+      required: [hyperparameters, allowed_keys, defaults]
+      properties:
+        hyperparameters: { $ref: '#/components/schemas/Hyperparameters' }
+        allowed_keys:
+          type: array
+          items: { type: string }
+        defaults: { $ref: '#/components/schemas/Hyperparameters' }
+
+    ReplicaUrl:
+      type: string
+      pattern: '^https?://'
+      description: Base URL of an upstream SGLang replica (no trailing slash).
+      examples:
+        - https://replica-a.modal.run
+
+    ReplicasList:
+      type: object
+      required: [replicas, count]
+      properties:
+        replicas:
+          type: array
+          items: { $ref: '#/components/schemas/ReplicaUrl' }
+        count: { type: integer, minimum: 0 }
+
+    ReplicasRequestArray:
+      type: array
+      items: { $ref: '#/components/schemas/ReplicaUrl' }
+
+    ReplicasRequestObject:
+      type: object
+      properties:
+        replicas:
+          type: array
+          items: { $ref: '#/components/schemas/ReplicaUrl' }
+        endpoints:
+          type: array
+          items: { $ref: '#/components/schemas/ReplicaUrl' }
+      description: Exactly one of `replicas` or `endpoints` should be provided.
+
+    ReplicasUpdateResponse:
+      allOf:
+        - $ref: '#/components/schemas/ReplicasList'
+        - type: object
+          required: [added, removed]
+          properties:
+            added:
+              type: array
+              items: { $ref: '#/components/schemas/ReplicaUrl' }
+            removed:
+              type: array
+              items: { $ref: '#/components/schemas/ReplicaUrl' }
+
+    ReplicaLiveMetrics:
+      type: object
+      required: [num_running_reqs, num_queue_reqs, num_used_tokens, latency_seconds]
+      properties:
+        num_running_reqs:
+          type: integer
+          description: SGLang `sglang:num_running_reqs`.
+        num_queue_reqs:
+          type: integer
+          description: SGLang `sglang:num_queue_reqs`.
+        num_used_tokens:
+          type: integer
+          description: SGLang `sglang:num_used_tokens` (KV-cache occupancy).
+        latency_seconds:
+          type: number
+          description: Wall-clock time of the last `/metrics` scrape for this replica.
+
+    ReplicaMetricsSnapshot:
+      type: object
+      required:
+        [refresh_interval_seconds, last_refresh_age_seconds, errors, metrics, endpoints_queued_tokens]
+      properties:
+        refresh_interval_seconds: { type: number }
+        last_refresh_age_seconds:
+          oneOf:
+            - type: number
+            - type: 'null'
+          description: Seconds since the last full refresh pass; `null` before the first pass.
+        errors:
+          type: object
+          additionalProperties: { type: string }
+          description: Map of replica URL to the error from the most recent failed scrape. Absent keys scraped successfully.
+        metrics:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/ReplicaLiveMetrics' }
+        endpoints_queued_tokens:
+          type: object
+          additionalProperties: { type: integer }
+          description: Estimated in-flight prompt tokens per replica (increments on dispatch, decrements on response).
+
+    ChatCompletionsRequest:
+      type: object
+      description: |
+        OpenAI-compatible chat-completions request. The proxy inspects
+        `messages` for token-counting; all other fields pass through
+        unchanged to the selected replica.
+      required: [messages]
+      properties:
+        model: { type: string }
+        messages:
+          type: array
+          items: { $ref: '#/components/schemas/ChatMessage' }
+        temperature: { type: number }
+        top_p: { type: number }
+        max_tokens: { type: integer }
+        stream:
+          type: boolean
+          description: |
+            When true, the upstream replica returns SSE chunks and the proxy
+            streams them through without buffering, so time-to-first-token
+            reflects the replica's actual generation latency.
+      additionalProperties: true
+
+    ChatMessage:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool, function]
+        content:
+          oneOf:
+            - { type: string }
+            - type: array
+              items:
+                type: object
+                properties:
+                  type: { type: string }
+                  text: { type: string }
+                additionalProperties: true
+        name: { type: string }
+      additionalProperties: true
+
+    ChatCompletionsResponse:
+      type: object
+      description: Forwarded verbatim from the upstream replica.
+      additionalProperties: true
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+      additionalProperties: true
+
+  responses:
+    BadRequest:
+      description: Malformed JSON, wrong body shape, or rejected values.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    MethodNotAllowed:
+      description: HTTP method not supported on this path.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    HyperparametersUpdated:
+      description: Updated hyperparameter map.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [hyperparameters]
+            properties:
+              hyperparameters: { $ref: '#/components/schemas/Hyperparameters' }
