@@ -810,9 +810,7 @@ async def gorgo_multi_objective(
     scores: dict[str, float] = {}
     for key in keys:
         network_latency = replica_metrics[key].latency
-        # Clamp to [0, request_tokens]: a stale trie entry could in
-        # principle report more cached tokens than we're actually sending.
-        cached = min(endpoints_cached_tokens.get(key, 0), request_tokens)
+        cached = endpoints_cached_tokens.get(key, 0)
         effective_prefill_tokens = max(0, request_tokens - cached)
         prefill_cost = effective_prefill_tokens * hyperparameters["t_prefill"]
         queue_cost = (
