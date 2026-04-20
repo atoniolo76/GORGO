@@ -28,110 +28,13 @@ from build_eval_dataset import (
     tokenized_dir,
     tokenized_path_for,
 )
+from utils.radix_trie import RadixTrie
 
 image = (
     modal.Image.debian_slim()
     .pip_install("duckdb")
-    .add_local_python_source("app", "build_eval_dataset")
+    .add_local_python_source("app", "build_eval_dataset", "utils")
 )
-
-
-class RadixNode:
-    """One node in a path-compressed radix trie.
-
-    ``edge`` holds the token ids on the edge leading *into* this node.
-    ``count`` is the number of inserted sequences that traverse this node.
-    ``terminal`` is the number of sequences that end exactly at this node.
-    """
-
-    __slots__ = ("edge", "children", "count", "terminal")
-
-    def __init__(self, edge=None):
-        self.edge = edge if edge is not None else array("I")
-        self.children: dict[int, "RadixNode"] = {}
-        self.count = 0
-        self.terminal = 0
-
-
-class RadixTrie:
-    """Path-compressed radix trie over token-id sequences.
-
-    Edges use ``array('I')`` (uint32) so each token costs 4 bytes instead of
-    ~28 for a Python int object. Insertion is amortized O(len(seq)).
-    """
-
-    __slots__ = ("root", "total_tokens_inserted", "num_sequences")
-
-    def __init__(self):
-        self.root = RadixNode()
-        self.total_tokens_inserted = 0
-        self.num_sequences = 0
-
-    def insert(self, seq) -> None:
-        n = len(seq)
-        self.total_tokens_inserted += n
-        self.num_sequences += 1
-        node = self.root
-        node.count += 1
-        i = 0
-        while True:
-            if i == n:
-                node.terminal += 1
-                return
-            first = seq[i]
-            child = node.children.get(first)
-            if child is None:
-                leaf = RadixNode(edge=array("I", seq[i:]))
-                leaf.count = 1
-                leaf.terminal = 1
-                node.children[first] = leaf
-                return
-            edge = child.edge
-            elen = len(edge)
-            j = 1  # seq[i] == edge[0] already (first-char dispatch)
-            remaining = n - i
-            cap = elen if elen < remaining else remaining
-            while j < cap and edge[j] == seq[i + j]:
-                j += 1
-            if j == elen:
-                child.count += 1
-                node = child
-                i += j
-                continue
-            split = RadixNode(edge=edge[:j])
-            split.count = child.count + 1
-            child.edge = edge[j:]
-            split.children[child.edge[0]] = child
-            node.children[first] = split
-            i += j
-            if i == n:
-                split.terminal += 1
-                return
-            leaf = RadixNode(edge=array("I", seq[i:]))
-            leaf.count = 1
-            leaf.terminal = 1
-            split.children[seq[i]] = leaf
-            return
-
-    def unique_token_count(self) -> int:
-        """Total length of all compressed edges = KV-cache footprint after
-        perfect prefix sharing."""
-        total = 0
-        stack = [self.root]
-        while stack:
-            node = stack.pop()
-            total += len(node.edge)
-            stack.extend(node.children.values())
-        return total
-
-    def node_count(self) -> int:
-        count = 0
-        stack = [self.root]
-        while stack:
-            node = stack.pop()
-            count += 1
-            stack.extend(node.children.values())
-        return count
 
 
 def _fmt_pct(num: float, den: float) -> str:

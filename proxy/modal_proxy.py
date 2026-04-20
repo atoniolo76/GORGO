@@ -7,6 +7,7 @@ import httpx
 import tiktoken
 
 from app import app, replicas
+from utils.radix_trie import RadixNode, RadixTrie
 
 
 SUPPORTED_POLICIES = {"random", "power_of_two", "gorgo"}
@@ -72,18 +73,20 @@ def _message_text(content) -> str:
     return ""
 
 
-def tokenize_input(messages: list[dict]) -> int:
-    """Approximate input token count for an OpenAI chat-completions ``messages``
-    payload.
+def tokenize_input(messages: list[dict]) -> list[int]:
+    """Tokenize an OpenAI chat-completions ``messages`` payload into a flat
+    list of token ids.
 
-    Tokenizes each message's text content individually via tiktoken's batched
-    encoder. This isn't an exact match for the server-side count (we ignore
-    the per-message formatting tokens and tool-call arguments) but it's
-    directionally correct and cheap enough to run on every request for
-    routing.
+    Each message's text content is encoded individually via tiktoken's
+    batched encoder and the per-message ids are concatenated in order. This
+    isn't an exact match for the server-side count (we ignore per-message
+    formatting tokens and tool-call arguments) but it's directionally
+    correct and cheap enough to run on every request for both routing
+    decisions (``len(ids)``) and prefix-sharing tracking (the ids
+    themselves).
     """
     if not isinstance(messages, list) or not messages:
-        return 0
+        return []
     enc = _get_encoder()
     texts: list[str] = []
     for msg in messages:
@@ -94,15 +97,18 @@ def tokenize_input(messages: list[dict]) -> int:
         elif isinstance(msg, str):
             texts.append(msg)
     if not texts:
-        return 0
+        return []
     encoded = enc.encode_batch(texts, num_threads=4, disallowed_special=())
-    return sum(len(ids) for ids in encoded)
+    out: list[int] = []
+    for ids in encoded:
+        out.extend(ids)
+    return out
 
 
 @app.function(
     image=modal.Image.debian_slim()
     .pip_install("httpx[http2]", "uvicorn")
-    .add_local_python_source("app")
+    .add_local_python_source("app", "utils")
 )
 def proxy():
     import json
@@ -133,6 +139,17 @@ def proxy():
         "upstream_client": None,
     }
     endpoints_queued_tokens: dict[str, int] = {url: 0 for url in replica_urls}
+
+    # Live radix trie of every prompt we've forwarded. Each node along a
+    # sequence's insertion path is tagged with the replica URL that received
+    # that prompt, so the trie doubles as an approximate "which replica
+    # currently has this prefix cached in KV" index. Updated inline in the
+    # /v1/chat/completions handler after the upstream request is dispatched.
+    #
+    # Note: currently unbounded; a long-running proxy will accumulate state
+    # until the container is recycled. That's fine for the evaluation setup;
+    # a production deployment would need LRU/TTL eviction.
+    radix_trie = RadixTrie()
 
     # Default timeout used by the shared client. ``read=None`` is critical for
     # chat completions: httpx treats ``read`` as "seconds between bytes", so a
@@ -242,8 +259,9 @@ def proxy():
         )
         await send({"type": "http.response.body", "body": body})
 
-    async def _select_endpoint(request_tokens: int) -> str:
+    async def _select_endpoint(token_ids: list[int]) -> str:
         policy = state["policy"]
+        request_tokens = len(token_ids)
         if policy == "random" or len(replica_urls) <= 1:
             return random.choice(replica_urls)
 
@@ -262,11 +280,20 @@ def proxy():
             chosen = await ai_brix_power_of_two(endpoints_queued_tokens, metrics_snapshot)
             return chosen[0] if isinstance(chosen, list) else chosen
         if policy == "gorgo":
+            # One trie walk per request that answers "how many leading
+            # tokens of this prompt are already cached on each replica?".
+            # Skipped for empty prompts -- the batched walk would just
+            # return zeros but we'd rather avoid the set-allocs.
+            if token_ids:
+                endpoints_cached_tokens = radix_trie.cached_prefix_lengths(token_ids, replica_urls)
+            else:
+                endpoints_cached_tokens = {url: 0 for url in replica_urls}
             chosen = await gorgo_multi_objective(
                 request_tokens=request_tokens,
                 endpoints_queued_tokens=endpoints_queued_tokens,
                 replica_metrics=metrics_snapshot,
                 hyperparameters=state["hyperparameters"],
+                endpoints_cached_tokens=endpoints_cached_tokens,
             )
             return chosen[0] if isinstance(chosen, list) else chosen
         return random.choice(replica_urls)
@@ -451,6 +478,35 @@ def proxy():
             await _send_json(send, 405, {"error": "method not allowed"})
             return
 
+        if path == "/trie" and method == "GET":
+            # Summary stats only -- the full trie is too large to serialize
+            # on every request. ``coverage`` counts how many nodes are tagged
+            # with each replica URL, which is a useful sanity check that
+            # routing is producing the shape of prefix-sharing we expect.
+            coverage: dict[str, int] = {url: 0 for url in replica_urls}
+            stack = [radix_trie.root]
+            tagged_nodes = 0
+            while stack:
+                node = stack.pop()
+                if node.replica_endpoints:
+                    tagged_nodes += 1
+                    for url in node.replica_endpoints:
+                        coverage[url] = coverage.get(url, 0) + 1
+                stack.extend(node.children.values())
+            await _send_json(
+                send,
+                200,
+                {
+                    "num_sequences": radix_trie.num_sequences,
+                    "total_tokens_inserted": radix_trie.total_tokens_inserted,
+                    "unique_token_count": radix_trie.unique_token_count(),
+                    "node_count": radix_trie.node_count(),
+                    "tagged_node_count": tagged_nodes,
+                    "replica_coverage": coverage,
+                },
+            )
+            return
+
         if path == "/replica_metrics" and method == "GET":
             now = time.monotonic()
             last = metrics_meta["last_refresh_monotonic"]
@@ -543,10 +599,11 @@ def proxy():
                 await _send_json(send, 400, {"error": "'messages' must be a list"})
                 return
 
-            request_tokens = tokenize_input(messages)
+            token_ids = tokenize_input(messages)
+            request_tokens = len(token_ids)
 
             try:
-                target = await _select_endpoint(request_tokens)
+                target = await _select_endpoint(token_ids)
             except Exception as e:
                 print(f"[proxy] policy {state['policy']!r} failed ({e}); falling back to random")
                 target = random.choice(replica_urls)
@@ -590,6 +647,23 @@ def proxy():
                     content=body,
                     headers=upstream_headers,
                 ) as upstream:
+                    # At this point the request body has been sent upstream
+                    # and the response headers have come back, so the replica
+                    # has ingested the prompt and (at minimum) started
+                    # prefill. Record the prefix on the trie so concurrent
+                    # requests arriving during our streaming phase can see
+                    # that ``target`` now caches this prefix.
+                    #
+                    # Only tag successful dispatches -- a 4xx/5xx likely
+                    # means the replica never got far enough to cache
+                    # anything meaningful.
+                    if token_ids and 200 <= upstream.status_code < 300:
+                        try:
+                            radix_trie.insert(token_ids, endpoint=target)
+                        except Exception as e:
+                            # Trie bookkeeping must never break forwarding.
+                            print(f"[proxy] radix trie insert failed: {e}")
+
                     response_headers = [
                         (k.lower().encode(), v.encode())
                         for k, v in upstream.headers.items()
@@ -718,7 +792,17 @@ async def gorgo_multi_objective(
     endpoints_queued_tokens: dict[str, int],
     replica_metrics: dict[str, replica_state],
     hyperparameters: dict[str, float],
+    endpoints_cached_tokens: dict[str, int],
 ) -> str:
+    """Score each replica and pick the lowest.
+
+    ``endpoints_cached_tokens[url]`` is the number of leading tokens of the
+    current request that the proxy's live radix trie believes ``url`` has
+    already cached in its KV (i.e. tokens that won't need to be re-prefilled
+    there). We subtract it from the prefill cost so a replica that already
+    has most of the prompt cached is strongly preferred -- the whole point
+    of the Gorgo routing policy.
+    """
     keys = list(endpoints_queued_tokens.keys())
     if set(keys) != set(replica_metrics.keys()):
         raise ValueError("Endpoints and replica metrics keys do not match")
@@ -726,7 +810,11 @@ async def gorgo_multi_objective(
     scores: dict[str, float] = {}
     for key in keys:
         network_latency = replica_metrics[key].latency
-        prefill_cost = request_tokens * hyperparameters["t_prefill"]
+        # Clamp to [0, request_tokens]: a stale trie entry could in
+        # principle report more cached tokens than we're actually sending.
+        cached = min(endpoints_cached_tokens.get(key, 0), request_tokens)
+        effective_prefill_tokens = max(0, request_tokens - cached)
+        prefill_cost = effective_prefill_tokens * hyperparameters["t_prefill"]
         queue_cost = (
             endpoints_queued_tokens[key] + replica_metrics[key].num_used_tokens
         ) * hyperparameters["queued_tokens_weight"]
