@@ -88,6 +88,7 @@ class PodRuntime:
     queued: int = 0
     ewma_latency_ms: float = 0.0
     ewma_throughput_tps: float = 0.0
+    pending_work_ms: float = 0.0  # Preble L_i: Σ predicted service_ms for in-flight requests
     last_update_ts: float = 0.0
     # KV accounting is owned by KVCacheState, keyed by pod_id.
 

@@ -49,10 +49,10 @@ def test_prefix_cache_preble_avoids_hotspot(pod_specs, kv_cache):
     for h in hashes:
         # Prefix lives ONLY on p0 (mono-homing).
         kv_cache.install("p0", PrefixEntry(h, 16, 1024), now=1.0)
-    # p0 is a hotspot: high active count drives time-domain load up.
+    # p0 is a hotspot: high pending_work_ms from in-flight requests.
     cluster.pods["p0"].active_prefill = 20
-    cluster.pods["p0"].ewma_latency_ms = 50.0
-    # p1 and p2 are idle (load_ms = 0).
+    cluster.pods["p0"].pending_work_ms = 1000.0  # 1s of pending work
+    # p1 and p2 are idle (pending_work_ms = 0).
     p = get_policy("prefix-cache-preble", block_size=16, th_bal=1.5)
     d = p.decide(Request("r", "s", 3.0, tokens, 4), cluster, kv_cache)
     # Exploit branch fires (cached > missed) but hotspot redirect
@@ -81,10 +81,10 @@ def test_prefix_cache_preble_explore_picks_lightest(pod_specs, kv_cache):
     # Short prompt with no cached prefix → missed >= cached → explore.
     tokens = tuple(range(48))
     cluster.pods["p0"].active_prefill = 5
-    cluster.pods["p0"].ewma_latency_ms = 10.0
+    cluster.pods["p0"].pending_work_ms = 500.0
     cluster.pods["p1"].active_prefill = 1
-    cluster.pods["p1"].ewma_latency_ms = 10.0
-    # p2 is idle → lightest.
+    cluster.pods["p1"].pending_work_ms = 100.0
+    # p2 is idle → lightest (pending_work_ms = 0).
     p = get_policy("prefix-cache-preble", block_size=16)
     d = p.decide(Request("r", "s", 2.0, tokens, 4), cluster, kv_cache)
     assert d.prefill_pod_id == "p2"

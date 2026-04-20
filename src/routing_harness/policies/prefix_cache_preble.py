@@ -12,13 +12,11 @@ Three mechanisms match the paper:
    ``alpha * match - beta * load`` combination with the conditional
    structure the paper actually uses.
 
-2. **Time-domain load signal.** Per-pod estimated wait is
-   ``ewma_latency_ms * (active_prefill + active_decode)`` — a quantity
-   with units of milliseconds that tracks how long until the pod drains
-   its in-flight work. This replaces the prior dimensionless
-   slot-occupancy ratio, which was normalized against a denominator
-   (``max_prefill + max_decode``) 5× larger than the cost model's
-   queueing denominator and therefore never signaled congestion.
+2. **Time-domain load signal.** Per-pod load is ``pending_work_ms`` —
+   the sum of predicted service times (ms) for all in-flight requests
+   on that pod, maintained by the engine. This is Preble's ``L_i``
+   term: a direct measure of how long until the pod drains its
+   current work, in units of milliseconds.
 
 3. **Relative hotspot threshold.** Hotspot fires when the exploit
    target's load exceeds ``th_bal`` times the lightest pod's load — a
@@ -63,14 +61,8 @@ class PreblePrefixCachePolicy:
 
     @staticmethod
     def _load_ms(pod: PodRuntime) -> float:
-        """Time-domain load: EWMA(latency) * in-flight requests.
-
-        Falls back to 1.0 ms when EWMA is uninitialized (0.0) so the
-        signal degrades to a pure active-count rather than collapsing
-        to zero.
-        """
-        ewma = pod.ewma_latency_ms if pod.ewma_latency_ms > 0.0 else 1.0
-        return ewma * (pod.active_prefill + pod.active_decode)
+        """Preble L_i: sum of predicted service times for in-flight requests."""
+        return pod.pending_work_ms
 
     def decide(
         self,
