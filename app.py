@@ -9,3 +9,6 @@ replicas = modal.Dict.from_name(
 completions_volume = modal.Volume.from_name(
     "GORGO-glm5-completions", create_if_missing=True, environment_name=ENVIRONMENT_NAME
 )
+hf_datasets_volume = modal.Volume.from_name(
+    "GORGO-hf-datasets", create_if_missing=True, environment_name=ENVIRONMENT_NAME
+)
