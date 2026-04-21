@@ -11,8 +11,8 @@ info:
     this snapshot instead of fetching synchronously on every request.
 
     Control-plane routes let callers change the active policy, tune
-    hyperparameters, and add/remove replicas at runtime without restarting
-    the proxy container.
+    hyperparameters, add/remove replicas, and flush the proxy trie plus
+    upstream KV caches at runtime without restarting the proxy container.
 
 servers:
   - url: https://{tunnel_host}
@@ -190,6 +190,24 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReplicaMetricsSnapshot' }
+
+  /flush:
+    post:
+      tags: [control-plane]
+      summary: Clear proxy routing trie and flush KV cache on all replicas
+      description: |
+        Resets the proxy's in-memory radix trie (the global view of which
+        replica may hold which prompt prefix). In parallel, sends
+        `POST /flush_cache` to each registered SGLang replica so each upstream
+        clears its RadixAttention KV cache. Individual replicas may return a
+        non-success status if the server is busy (SGLang often requires idle).
+      responses:
+        '200':
+          description: Trie cleared; per-replica upstream results in `replicas`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FlushResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   /v1/chat/completions:
     post:
@@ -393,6 +411,21 @@ components:
           type: object
           additionalProperties: { type: integer }
           description: Estimated in-flight prompt tokens per replica (increments on dispatch, decrements on response).
+
+    FlushResponse:
+      type: object
+      required: [radix_trie_cleared, replicas]
+      properties:
+        radix_trie_cleared:
+          type: boolean
+          description: Always true when the handler completes; the proxy trie was reset.
+        replicas:
+          type: object
+          description: |
+            Per-registered-replica result of `POST /flush_cache`. Values are
+            either success objects with `ok` and `status_code`, or failure
+            objects with `ok` and `error` / `body_preview`.
+          additionalProperties: true
 
     ChatCompletionsRequest:
       type: object

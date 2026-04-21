@@ -97,6 +97,8 @@ def model_endpoint():
         "0.8",
     ]
 
+    # SGLang exposes OpenAI-compatible routes plus control endpoints; RadixAttention
+    # KV state can be cleared with POST /flush_cache on this server (same port).
     with modal.forward(PORT) as tunnel:
         print(f"tunnel.url        = {tunnel.url}")
         print(f"tunnel.tls_socket = {tunnel.tls_socket}")

@@ -65,6 +65,12 @@ class RadixTrie:
         self.total_tokens_inserted = 0
         self.num_sequences = 0
 
+    def clear(self) -> None:
+        """Drop all sequences and replica tags (empty trie, counters reset)."""
+        self.root = RadixNode()
+        self.total_tokens_inserted = 0
+        self.num_sequences = 0
+
     def insert(self, seq, endpoint: str | None = None) -> None:
         """Insert ``seq`` into the trie.
 

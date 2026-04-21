@@ -16,6 +16,8 @@ DEFAULT_GORGO_HYPERPARAMETERS = {"t_prefill": 1.0, "queued_tokens_weight": 1.0}
 ALLOWED_HYPERPARAM_KEYS = set(DEFAULT_GORGO_HYPERPARAMETERS)
 METRICS_REFRESH_INTERVAL_SECONDS = 1.0
 METRICS_FETCH_TIMEOUT_SECONDS = 2.0
+# SGLang may wait until idle; allow a generous read window for POST /flush_cache.
+FLUSH_UPSTREAM_TIMEOUT_SECONDS = 120.0
 
 # Headers that are connection-local and must not be forwarded verbatim when
 # we proxy upstream responses back to the client. Re-emitting these would
@@ -107,8 +109,9 @@ def tokenize_input(messages: list[dict]) -> list[int]:
 
 @app.function(
     image=modal.Image.debian_slim()
-    .pip_install("httpx[http2]", "uvicorn")
-    .add_local_python_source("app", "utils")
+    .pip_install("httpx[http2]", "uvicorn", "tiktoken")
+    .add_local_python_source("app", "utils"),
+    timeout=(24 * 60 * 60),
 )
 def proxy():
     import json
@@ -223,6 +226,27 @@ def proxy():
             return_exceptions=True,
         )
         metrics_meta["last_refresh_monotonic"] = time.monotonic()
+
+    async def _flush_upstream_replica(client: httpx.AsyncClient, base_url: str) -> tuple[str, dict]:
+        url = f"{base_url.rstrip('/')}/flush_cache"
+        try:
+            resp = await client.post(
+                url,
+                timeout=httpx.Timeout(
+                    connect=10.0,
+                    read=FLUSH_UPSTREAM_TIMEOUT_SECONDS,
+                    write=30.0,
+                    pool=10.0,
+                ),
+            )
+            out = {"ok": resp.is_success, "status_code": resp.status_code}
+            if not resp.is_success:
+                body = (resp.text or "")[:512]
+                if body:
+                    out["body_preview"] = body
+            return base_url, out
+        except Exception as e:
+            return base_url, {"ok": False, "error": repr(e)}
 
     async def _metrics_refresh_loop() -> None:
         try:
@@ -581,6 +605,34 @@ def proxy():
                 await _send_json(send, 200, {"hyperparameters": state["hyperparameters"]})
                 return
             await _send_json(send, 405, {"error": "method not allowed"})
+            return
+
+        if path == "/flush":
+            if method != "POST":
+                await _send_json(send, 405, {"error": "method not allowed"})
+                return
+            radix_trie.clear()
+            client = state["upstream_client"]
+            replica_results: dict[str, dict] = {}
+            if client is None:
+                for u in replica_urls:
+                    replica_results[u] = {
+                        "ok": False,
+                        "error": "upstream client not yet initialized",
+                    }
+            elif replica_urls:
+                pairs = await asyncio.gather(
+                    *[_flush_upstream_replica(client, u) for u in replica_urls],
+                )
+                replica_results = dict(pairs)
+            await _send_json(
+                send,
+                200,
+                {
+                    "radix_trie_cleared": True,
+                    "replicas": replica_results,
+                },
+            )
             return
 
         if path == "/v1/chat/completions" and method == "POST":
