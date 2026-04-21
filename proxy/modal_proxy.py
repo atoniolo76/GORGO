@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 import json
 import random
 import modal
@@ -7,10 +6,12 @@ import httpx
 import tiktoken
 
 from app import app, replicas
+from utils.lb_aibrix import ROUTING_POLICIES, ReplicaSnapshot, normalize_policy, route as lb_route
 from utils.radix_trie import RadixNode, RadixTrie
 
 
-SUPPORTED_POLICIES = {"random", "power_of_two", "gorgo"}
+# Kebab-case names matching Aibrix ``gateway/algorithms``; underscores in POST bodies are normalized.
+SUPPORTED_POLICIES = ROUTING_POLICIES
 DEFAULT_POLICY = "random"
 DEFAULT_GORGO_HYPERPARAMETERS = {"t_prefill": 1.0, "queued_tokens_weight": 1.0}
 ALLOWED_HYPERPARAM_KEYS = set(DEFAULT_GORGO_HYPERPARAMETERS)
@@ -180,7 +181,7 @@ def proxy():
     # Live mirror of each replica's /metrics output. A background task refreshes
     # this every ``METRICS_REFRESH_INTERVAL_SECONDS``; policy functions read
     # snapshots of it per request instead of fetching synchronously.
-    live_metrics: dict[str, replica_state] = {}
+    live_metrics: dict[str, ReplicaSnapshot] = {}
     metrics_meta = {
         "last_refresh_monotonic": 0.0,
         "last_refresh_errors": {},  # url -> str
@@ -210,11 +211,13 @@ def proxy():
             .lstrip("-")
             .isdigit()
         }
-        live_metrics[url] = replica_state(
+        live_metrics[url] = ReplicaSnapshot(
             num_running_reqs=int(parsed.get("sglang:num_running_reqs", 0)),
             num_queue_reqs=int(parsed.get("sglang:num_queue_reqs", 0)),
             num_used_tokens=int(parsed.get("sglang:num_used_tokens", 0)),
             latency=latency,
+            gen_throughput=float(parsed.get("sglang:gen_throughput", 0.0)),
+            utilization=float(parsed.get("sglang:utilization", 0.0)),
         )
         metrics_meta["last_refresh_errors"].pop(url, None)
 
@@ -283,14 +286,33 @@ def proxy():
         )
         await send({"type": "http.response.body", "body": body})
 
-    async def _select_endpoint(token_ids: list[int]) -> str:
-        policy = state["policy"]
+    def _select_endpoint(token_ids: list[int]) -> str:
+        """Pick upstream URL using ``utils.lb_aibrix`` (Aibrix-compatible names)."""
+        policy = normalize_policy(state["policy"])
         request_tokens = len(token_ids)
-        if policy == "random" or len(replica_urls) <= 1:
+        if not replica_urls:
+            raise ValueError("no replicas configured")
+        if len(replica_urls) == 1:
+            return replica_urls[0]
+
+        # Policies that do not read /metrics (stubs or hash-only).
+        if policy == "random":
             return random.choice(replica_urls)
+        if policy in ("pd", "pd-disaggregation"):
+            return random.choice(replica_urls)
+        if policy == "simple-session-affinity":
+            return lb_route(
+                policy,
+                replica_urls,
+                {},
+                endpoints_queued_tokens,
+                radix_trie,
+                token_ids,
+                request_tokens,
+                state["hyperparameters"],
+            )
 
         # Snapshot live_metrics so mid-request refreshes can't mutate our view.
-        # Skip replicas we've never successfully scraped.
         metrics_snapshot = {url: live_metrics[url] for url in replica_urls if url in live_metrics}
         if len(metrics_snapshot) < len(replica_urls):
             missing = [u for u in replica_urls if u not in metrics_snapshot]
@@ -300,27 +322,16 @@ def proxy():
             )
             return random.choice(replica_urls)
 
-        if policy == "power_of_two":
-            chosen = await ai_brix_power_of_two(endpoints_queued_tokens, metrics_snapshot)
-            return chosen[0] if isinstance(chosen, list) else chosen
-        if policy == "gorgo":
-            # One trie walk per request that answers "how many leading
-            # tokens of this prompt are already cached on each replica?".
-            # Skipped for empty prompts -- the batched walk would just
-            # return zeros but we'd rather avoid the set-allocs.
-            if token_ids:
-                endpoints_cached_tokens = radix_trie.cached_prefix_lengths(token_ids, replica_urls)
-            else:
-                endpoints_cached_tokens = {url: 0 for url in replica_urls}
-            chosen = await gorgo_multi_objective(
-                request_tokens=request_tokens,
-                endpoints_queued_tokens=endpoints_queued_tokens,
-                replica_metrics=metrics_snapshot,
-                hyperparameters=state["hyperparameters"],
-                endpoints_cached_tokens=endpoints_cached_tokens,
-            )
-            return chosen[0] if isinstance(chosen, list) else chosen
-        return random.choice(replica_urls)
+        return lb_route(
+            policy,
+            replica_urls,
+            metrics_snapshot,
+            endpoints_queued_tokens,
+            radix_trie,
+            token_ids,
+            request_tokens,
+            state["hyperparameters"],
+        )
 
     async def asgi_app(scope, receive, send):
         if scope["type"] == "lifespan":
@@ -388,13 +399,19 @@ def proxy():
                 except json.JSONDecodeError:
                     await _send_json(send, 400, {"error": "invalid JSON body"})
                     return
-                name = data.get("policy") or data.get("name")
+                raw = data.get("policy") or data.get("name")
+                if raw is None or not isinstance(raw, str):
+                    await _send_json(
+                        send, 400, {"error": "body must include string policy or name"}
+                    )
+                    return
+                name = normalize_policy(raw)
                 if name not in SUPPORTED_POLICIES:
                     await _send_json(
                         send,
                         400,
                         {
-                            "error": f"unknown policy {name!r}",
+                            "error": f"unknown policy {raw!r}",
                             "supported": sorted(SUPPORTED_POLICIES),
                         },
                     )
@@ -547,6 +564,8 @@ def proxy():
                             "num_queue_reqs": m.num_queue_reqs,
                             "num_used_tokens": m.num_used_tokens,
                             "latency_seconds": m.latency,
+                            "gen_throughput": m.gen_throughput,
+                            "utilization": m.utilization,
                         }
                         for url, m in live_metrics.items()
                     },
@@ -655,7 +674,7 @@ def proxy():
             request_tokens = len(token_ids)
 
             try:
-                target = await _select_endpoint(token_ids)
+                target = _select_endpoint(token_ids)
             except Exception as e:
                 print(f"[proxy] policy {state['policy']!r} failed ({e}); falling back to random")
                 target = random.choice(replica_urls)
@@ -779,18 +798,10 @@ def proxy():
         uvicorn.run(asgi_app, host="0.0.0.0", port=8000)
 
 
-@dataclass
-class replica_state:
-    num_running_reqs: int
-    num_queue_reqs: int
-    num_used_tokens: int
-    latency: float
-
-
-async def fetch_replica_metrics(endpoints: list[str]) -> dict[str, replica_state]:
+async def fetch_replica_metrics(endpoints: list[str]) -> dict[str, ReplicaSnapshot]:
     import time
 
-    async def _fetch(client: httpx.AsyncClient, endpoint: str) -> tuple[str, replica_state]:
+    async def _fetch(client: httpx.AsyncClient, endpoint: str) -> tuple[str, ReplicaSnapshot]:
         t0 = time.monotonic()
         resp = await client.get(f"{endpoint}/metrics")
         latency = time.monotonic() - t0
@@ -808,66 +819,15 @@ async def fetch_replica_metrics(endpoints: list[str]) -> dict[str, replica_state
             .isdigit()
         }
 
-        return endpoint, replica_state(
+        return endpoint, ReplicaSnapshot(
             num_running_reqs=int(metrics.get("sglang:num_running_reqs", 0)),
             num_queue_reqs=int(metrics.get("sglang:num_queue_reqs", 0)),
             num_used_tokens=int(metrics.get("sglang:num_used_tokens", 0)),
             latency=latency,
+            gen_throughput=float(metrics.get("sglang:gen_throughput", 0.0)),
+            utilization=float(metrics.get("sglang:utilization", 0.0)),
         )
 
     async with httpx.AsyncClient() as client:
         results = await asyncio.gather(*[_fetch(client, ep) for ep in endpoints])
         return dict(results)
-
-
-async def ai_brix_power_of_two(
-    endpoints_queued_tokens: dict[str, int],
-    replica_metrics: dict[str, replica_state],
-) -> list[str]:
-    """Pick the less-loaded of two randomly sampled replicas.
-
-    Reads ``num_used_tokens`` from the caller-provided ``replica_metrics``
-    snapshot (kept live by the proxy's background refresh loop); does no I/O
-    of its own.
-    """
-    candidates = [u for u in endpoints_queued_tokens if u in replica_metrics]
-    if len(candidates) < 2:
-        return candidates[:1] if candidates else []
-    a, b = random.sample(candidates, 2)
-    load_a = replica_metrics[a].num_used_tokens + endpoints_queued_tokens.get(a, 0)
-    load_b = replica_metrics[b].num_used_tokens + endpoints_queued_tokens.get(b, 0)
-    return [b] if load_a > load_b else [a]
-
-
-async def gorgo_multi_objective(
-    request_tokens: int,
-    endpoints_queued_tokens: dict[str, int],
-    replica_metrics: dict[str, replica_state],
-    hyperparameters: dict[str, float],
-    endpoints_cached_tokens: dict[str, int],
-) -> str:
-    """Score each replica and pick the lowest.
-
-    ``endpoints_cached_tokens[url]`` is the number of leading tokens of the
-    current request that the proxy's live radix trie believes ``url`` has
-    already cached in its KV (i.e. tokens that won't need to be re-prefilled
-    there). We subtract it from the prefill cost so a replica that already
-    has most of the prompt cached is strongly preferred -- the whole point
-    of the Gorgo routing policy.
-    """
-    keys = list(endpoints_queued_tokens.keys())
-    if set(keys) != set(replica_metrics.keys()):
-        raise ValueError("Endpoints and replica metrics keys do not match")
-
-    scores: dict[str, float] = {}
-    for key in keys:
-        network_latency = replica_metrics[key].latency
-        cached = endpoints_cached_tokens.get(key, 0)
-        effective_prefill_tokens = max(0, request_tokens - cached)
-        prefill_cost = effective_prefill_tokens * hyperparameters["t_prefill"]
-        queue_cost = (
-            endpoints_queued_tokens[key] + replica_metrics[key].num_used_tokens
-        ) * hyperparameters["queued_tokens_weight"]
-        scores[key] = network_latency + prefill_cost + queue_cost
-
-    return min(scores, key=scores.get)
