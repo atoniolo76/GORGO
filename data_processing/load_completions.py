@@ -166,5 +166,5 @@ def count_request_tokens(batch_size: int = 100):
 
 
 @app.local_entrypoint()
-def main(batch_size: int = 100):
+def load_completions_cli(batch_size: int = 100):
     count_request_tokens.remote(batch_size=batch_size)

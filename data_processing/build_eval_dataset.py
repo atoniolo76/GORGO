@@ -403,7 +403,7 @@ def build_dataset(batch_size: int = 50):
 
 
 @app.local_entrypoint()
-def main(batch_size: int = 50):
+def build_eval_cli(batch_size: int = 50):
     build_dataset.remote(batch_size=batch_size)
 
 

@@ -47,5 +47,5 @@ def dump_sample_requests(n: int = 20):
 
 
 @app.local_entrypoint()
-def main(n: int = 20):
+def dump_samples_cli(n: int = 20):
     dump_sample_requests.remote(n=n)

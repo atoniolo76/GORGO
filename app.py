@@ -12,3 +12,7 @@ completions_volume = modal.Volume.from_name(
 hf_datasets_volume = modal.Volume.from_name(
     "GORGO-hf-datasets", create_if_missing=True, environment_name=ENVIRONMENT_NAME
 )
+# HF ``save_to_disk`` for lmsys/lmsys-chat-1m (e.g. ``…/lmsys-chat-1m/train/*.arrow``).
+lmsys_chat_1m_volume = modal.Volume.from_name(
+    "GORGO-lmsys-chat-1m", create_if_missing=True, environment_name=ENVIRONMENT_NAME
+)

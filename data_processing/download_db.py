@@ -89,7 +89,7 @@ def download_responses(start: datetime, end: datetime, chunk_minutes: int = 60):
 
 
 @app.local_entrypoint()
-def main(
+def download_db_cli(
     start: str = "2026-03-12T12:00:00",
     end: str = "2026-04-12T12:00:00",
     chunk_minutes: int = 30,
