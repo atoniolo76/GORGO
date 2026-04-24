@@ -355,3 +355,54 @@ def test_throughput_tiebreak_uses_full_pod_id():
         "F8: when first chars match, tie-break still picks smallest full "
         "pod_id — not iteration order."
     )
+
+
+# -------------------------------------------------------------------------
+# F11: cross-policy tie-break convention
+# -------------------------------------------------------------------------
+
+# Policies participating in the 'smallest pod_id wins ties' convention.
+# `random` is deliberately excluded — it has no tie-break. The two prefix
+# policies are included because their no-match/explore branches fall back
+# to the same load-balancing tie rule (bead go-dmo description).
+TIE_BREAK_CONVENTION_POLICIES = (
+    "least-request",
+    "least-busy-time",
+    "least-latency",
+    "least-kv-cache",
+    "throughput",
+    "prefix-cache",
+    "prefix-cache-preble",
+)
+
+
+@pytest.mark.parametrize("policy_id", TIE_BREAK_CONVENTION_POLICIES)
+def test_group_tie_break_picks_smallest_pod_id(policy_id):
+    """POSITIVE: umbrella regression for F11.
+
+    All pods fresh and identical → every scoring signal ties → selection
+    must fall through to the smallest pod_id. Covers the load-balancing
+    group plus the prefix policies whose fallback/explore branches share
+    the convention. Ids are inserted in reverse order so iteration order
+    does not coincide with the expected winner — if a policy regresses
+    to 'iteration order' or 'largest pod_id', this test catches it.
+    """
+    specs = [
+        PodSpec(
+            pod_id=pid,
+            role=Phase.BOTH,
+            gpu_count=1,
+            kv_cache_bytes=8 * 1024 * 1024,
+            max_concurrent_prefill=2,
+            max_concurrent_decode=8,
+        )
+        for pid in ("p2", "p1", "p0")
+    ]
+    cluster, kv = _fresh_cluster(specs)
+    p = get_policy(policy_id)
+    d = p.decide(Request("r", "s", 0.0, (1, 2, 3), 4), cluster, kv)
+    assert d.prefill_pod_id == "p0", (
+        f"F11 regression in {policy_id}: tie-break must pick smallest pod_id "
+        f"(got {d.prefill_pod_id}). Group convention is 'smallest pod_id "
+        f"wins ties' across the load-balancing + prefix fallback policies."
+    )
