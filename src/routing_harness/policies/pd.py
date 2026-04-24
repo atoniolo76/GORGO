@@ -6,6 +6,14 @@ picks:
   - a decode pod using least-active-decode (decode is memory-bound,
     fairness matters more than cache locality)
 
+Decode selection is topology-aware: if the chosen prefill pod declares
+`peer_ids` (NVLink islands, RDMA groups, etc.), the decode candidate
+set is filtered to those peers. If the filter yields no candidates
+(peer_ids unset, or no declared peers are in the decode pool) the
+policy falls back to the full decode pool — degraded but available —
+rather than refusing the request. See go-6i2 (F23) and
+`research/reports/policy_audits/pd_topology.md` §2.4.
+
 If no PD roles are present (all pods are Phase.BOTH), the two pools
 collapse to the same set and the policy still picks deterministically —
 prefix-match for prefill, active-decode for decode — over that shared
@@ -77,10 +85,13 @@ class PDPolicy:
             ),
         )
 
-        best_decode = min(
-            decode, key=lambda p: (p.active_decode, p.spec.pod_id)
-        )
+        peers = set(best_prefill.spec.peer_ids)
+        peered_decode = [p for p in decode if p.spec.pod_id in peers]
+        decode_pool = peered_decode if peered_decode else decode
+        peer_tag = "peer" if peered_decode else ("unpeered" if peers else "nopeers")
+
+        best_decode = min(decode_pool, key=lambda p: (p.active_decode, p.spec.pod_id))
         rationale = (
-            f"pd prefill={best_prefill.spec.pod_id} decode={best_decode.spec.pod_id}"
+            f"pd prefill={best_prefill.spec.pod_id} decode={best_decode.spec.pod_id} {peer_tag}"
         )
         return Decision(best_prefill.spec.pod_id, best_decode.spec.pod_id, rationale=rationale)
