@@ -311,9 +311,12 @@ the first pod chosen (by F19 tie-break) warms up, and subsequent
 identical-prompt requests then win on match count regardless of load. In
 the 50-request identical-prompt reproduction in §2.4, every request
 routed to `pfB`. This is the same hotspot pathology that motivates
-`prefix-cache-preble`; a natural follow-on is a `pd-preble` variant that
-applies the exploit/explore gate to the prefill pool. Documented as a
-tracking item, not a bug.
+`prefix-cache-preble`. Resolved by shipping the `pd-preble` variant
+(`src/routing_harness/policies/pd_preble.py`, bead go-caz): applies the
+exploit/explore gate and relative-imbalance hotspot deflection to the
+prefill pool while keeping `pd`'s peer-aware decode selection. `pd`
+itself is retained unchanged; operators select between the two per
+workload.
 
 ## 3. Paper-fidelity summary
 
@@ -429,7 +432,8 @@ Modal smoke bead (`go-3j8`) tracks the actual run.
 - **F24** (`go-997`): `pd` has no partial-availability fallback when one
   pool empties.
 - **F25** (`go-caz`): PD inherits plain-prefix-cache hotspot risk on the
-  prefill pool; candidate for a future `pd-preble` variant.
+  prefill pool. Resolved by the `pd-preble` variant
+  (`src/routing_harness/policies/pd_preble.py`).
 
 F21 is a cross-policy `queued`-mirror coupling; it rides on the existing
 F1 cleanup bead rather than getting its own ticket.

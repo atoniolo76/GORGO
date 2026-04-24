@@ -80,4 +80,5 @@ GRD scaffold lives in [`research/`](research/):
 | `prefix-cache-preble`  | match − load, with hotspot-threshold deflection |
 | `vtc-basic`            | fairness-aware tenant counter + LBT |
 | `pd`                   | disaggregated: prefix-match for prefill, LBT for decode |
+| `pd-preble`            | `pd` + Preble exploit/explore gate on prefill pool |
 | `session-affinity`     | sticky by session_id with TTL |

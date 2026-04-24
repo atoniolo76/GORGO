@@ -12,12 +12,15 @@ from . import (
     least_latency,
     least_request,
     pd,
+    pd_preble,
     prefix_cache,
     prefix_cache_preble,
-    random as random_policy,  # avoid shadowing stdlib
     session_affinity,
     throughput,
     vtc_basic,
+)
+from . import (
+    random as random_policy,  # avoid shadowing stdlib
 )
 
 
@@ -33,6 +36,7 @@ __all__ = [
     "least_latency",
     "least_request",
     "pd",
+    "pd_preble",
     "prefix_cache",
     "prefix_cache_preble",
     "random_policy",
