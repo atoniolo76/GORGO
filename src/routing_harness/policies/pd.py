@@ -49,10 +49,19 @@ class PDPolicy:
             return Decision("__none__", "__none__", "pd-pools-empty")
 
         hashes = self._prefix(request)
+
+        def _match_len(pod_id: str) -> int:
+            n = 0
+            for h in hashes:
+                if not kv_cache.has(pod_id, h):
+                    break
+                n += 1
+            return n
+
         best_prefill = max(
             prefill,
             key=lambda p: (
-                sum(1 for h in hashes if kv_cache.has(p.spec.pod_id, h)),
+                _match_len(p.spec.pod_id),
                 -p.active_prefill,
                 p.spec.pod_id,
             ),

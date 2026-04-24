@@ -199,16 +199,13 @@ def test_pd_prefix_key_path():
 # ---------------------------------------------------------------------------
 
 
-def test_pd_f18_non_consecutive_match_beats_consecutive_prefix():
-    """F18: pd counts scattered block-hash hits, not longest consecutive prefix.
+def test_pd_f18_consecutive_match_beats_scattered_blocks():
+    """F18 fix: pd scores by longest consecutive prefix, not scattered hits.
 
-    A pod with blocks {0, 2, 4} (scattered, unreusable) scores 3 and wins
-    over a pod with blocks {0, 1} (genuinely reusable prefix) that scores 2.
-    The engine's captured counter (consecutive) will then give the chosen
-    pod only 1 block of actual reuse.
-
-    When F18 is fixed (match becomes consecutive), flip the assertion:
-        assert d.prefill_pod_id == "pfB"
+    A pod with blocks {0, 2, 4} (scattered, unreusable past block 0) scores
+    1 and loses to a pod with blocks {0, 1} (genuinely reusable prefix)
+    that scores 2 — matching the engine's `captured` semantics and
+    `prefix_cache.py`.
     """
     specs = [
         PodSpec("pfA", Phase.PREFILL, 1, 16 * 1024 * 1024, 4, 0),
@@ -227,10 +224,9 @@ def test_pd_f18_non_consecutive_match_beats_consecutive_prefix():
 
     p = get_policy("pd", block_size=16)
     d = p.decide(Request("r", "s", 2.0, tokens, 4), cluster, kv)
-    # F18: current implementation routes to the scattered pod.
-    assert d.prefill_pod_id == "pfA"
+    assert d.prefill_pod_id == "pfB"
 
-    # Cross-check: prefix_cache (consecutive match, correct) prefers pfB.
+    # Cross-check: prefix_cache (consecutive match) agrees on pfB.
     d_ref = get_policy("prefix-cache", block_size=16).decide(
         Request("r", "s", 2.0, tokens, 4), cluster, kv
     )
