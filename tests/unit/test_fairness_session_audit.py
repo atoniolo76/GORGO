@@ -200,6 +200,53 @@ def test_session_affinity_single_pod_cluster(pod_specs):
     assert d2.prefill_pod_id == one[0].pod_id
 
 
+def test_session_affinity_purge_drops_expired_bindings_F13(pod_specs):
+    """F13: stale _bindings entries are swept every `purge_interval` decides."""
+    cluster, kv = _fresh_3_pod_cluster(pod_specs)
+    p = get_policy("session-affinity", stickiness_ttl_s=60.0, purge_interval=10)
+    # Seed 3 never-returning sessions at t=0 (count 1..3, no purge).
+    for i in range(3):
+        p.decide(_make_req(f"r{i}", f"ghost_{i}", 0.0), cluster, kv)
+    assert len(p._bindings) == 3
+    # 6 more live decides at t~=270 (count 4..9, still no purge, within TTL).
+    for i in range(6):
+        p.decide(_make_req(f"rl{i}", f"live_{i}", 270.0 + i), cluster, kv)
+    assert any(s.startswith("ghost_") for s in p._bindings)
+    assert p._decide_count == 9
+    # 10th decide at t=300 triggers purge: ghosts (t=0) are 300s stale > 60s TTL;
+    # live_* at t~=270 are within 30s < 60s and survive.
+    p.decide(_make_req("rL", "live_6", 300.0), cluster, kv)
+    remaining = set(p._bindings)
+    assert not any(s.startswith("ghost_") for s in remaining)
+    assert {f"live_{i}" for i in range(7)} <= remaining
+
+
+def test_session_affinity_purge_preserves_fresh_bindings_F13(pod_specs):
+    """F13: purge must not drop entries still within TTL."""
+    cluster, kv = _fresh_3_pod_cluster(pod_specs)
+    p = get_policy("session-affinity", stickiness_ttl_s=60.0, purge_interval=2)
+    d0 = p.decide(_make_req("r0", "sFresh", 0.0), cluster, kv)
+    bound = d0.prefill_pod_id
+    # Second decide triggers purge at t=30 (within TTL).
+    p.decide(_make_req("r1", "sOther", 30.0), cluster, kv)
+    assert "sFresh" in p._bindings
+    # sFresh must still stick.
+    d2 = p.decide(_make_req("r2", "sFresh", 40.0), cluster, kv)
+    assert d2.prefill_pod_id == bound
+    assert d2.rationale.startswith("sticky")
+
+
+def test_session_affinity_purge_disabled_when_interval_zero_F13(pod_specs):
+    """F13: purge_interval=0 disables the sweep (back-compat escape hatch)."""
+    cluster, kv = _fresh_3_pod_cluster(pod_specs)
+    p = get_policy("session-affinity", stickiness_ttl_s=60.0, purge_interval=0)
+    for i in range(10):
+        p.decide(_make_req(f"r{i}", f"s{i}", 0.0), cluster, kv)
+    # Well past TTL but no purge triggered.
+    p.decide(_make_req("rlate", "sLate", 10_000.0), cluster, kv)
+    assert len(p._bindings) == 11
+
+
 # =============================================================================
 # vtc-basic
 # =============================================================================

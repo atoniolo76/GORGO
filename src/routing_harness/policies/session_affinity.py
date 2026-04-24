@@ -5,6 +5,12 @@ least-request); subsequent requests from the same session stick. Evicts
 stickiness if the sticky pod has been unhealthy (modeled by an
 "available" flag) or if stickiness_ttl seconds have elapsed.
 
+Memory bound (F13): TTL is checked on read, so never-returning sessions
+would otherwise accumulate in `_bindings` forever. Every
+`purge_interval` decisions we sweep entries whose bound_ts is older than
+stickiness_ttl_s relative to the current arrival_ts. The sweep is
+amortized O(N / purge_interval) per decide().
+
 Taxonomy (see `research/reports/routing-comparison.md` §3):
     selection=identity (session_id), state=per-session (bindings map),
     fairness=session-sticky, topology=any, migration=rebind-on-fail.
@@ -27,7 +33,9 @@ from ..policy import register_policy
 @dataclass
 class SessionAffinityPolicy:
     stickiness_ttl_s: float = 3600.0
+    purge_interval: int = 1024
     _bindings: dict[str, tuple[str, float]] = field(default_factory=dict)
+    _decide_count: int = 0
 
     def decide(
         self,
@@ -38,6 +46,9 @@ class SessionAffinityPolicy:
         cands = cluster.prefill_capable()
         if not cands:
             return Decision("__none__", "__none__", "no-prefill-capable-pod")
+        self._decide_count += 1
+        if self.purge_interval > 0 and self._decide_count % self.purge_interval == 0:
+            self._purge_stale(request.arrival_ts)
         bound = self._bindings.get(request.session_id)
         if bound is not None:
             pod_id, bound_ts = bound
@@ -49,3 +60,9 @@ class SessionAffinityPolicy:
         )
         self._bindings[request.session_id] = (pick.spec.pod_id, request.arrival_ts)
         return Decision(pick.spec.pod_id, pick.spec.pod_id, rationale="new-sticky-binding")
+
+    def _purge_stale(self, now: float) -> None:
+        ttl = self.stickiness_ttl_s
+        self._bindings = {
+            sid: (pid, ts) for sid, (pid, ts) in self._bindings.items() if now - ts <= ttl
+        }
