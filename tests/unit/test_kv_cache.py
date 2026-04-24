@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from routing_harness.kv_cache import KVCacheState, PrefixEntry, enumerate_prefix_hashes
 
 
@@ -18,6 +20,12 @@ def test_enumerate_prefix_hashes_prefix_structure():
     long = list(range(48))
     # First two hashes must match since they cover the same blocks.
     assert enumerate_prefix_hashes(short)[:2] == enumerate_prefix_hashes(long)[:2]
+
+
+@pytest.mark.parametrize("bad_size", [0, -1, -16])
+def test_enumerate_prefix_hashes_rejects_non_positive_block_size(bad_size):
+    with pytest.raises(ValueError, match="block_size must be positive"):
+        enumerate_prefix_hashes(list(range(16)), block_size=bad_size)
 
 
 def test_lru_eviction_by_byte_budget():
