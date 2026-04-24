@@ -27,12 +27,17 @@ the full engine on a tiny trace:
   every pod with `ewma_throughput_tps == 0`, parallel to the existing
   `ewma_latency_ms` warm. Post-fix: 20/20/20 at 50 QPS, 10/10/10 at 5 QPS.
   Regression test: `test_throughput_rotates_under_real_engine`.
-- **`least-kv-cache` (F10, MEDIUM):** under shared-prefix workloads,
-  install-after-cache-hit is a byte-level no-op, so the pod that was first
-  warmed holds its `free = cap - bytes_used` value forever. Combined with
-  the policy's `max(..., pod_id)` tie-break (F9), the pod with the
-  **largest** pod_id keeps winning. Reproduced: 58/1/1 skew at 50 QPS on
-  three colocated pods sharing a single prefix family (§2.5.3).
+- **`least-kv-cache` (F10, MEDIUM — FIXED, go-fw8):** under shared-prefix
+  workloads, install-after-cache-hit is a byte-level no-op, so the pod that
+  was first warmed held its `free = cap - bytes_used` value forever.
+  Combined with the policy's `max(..., pod_id)` tie-break (F9), the pod
+  with the **largest** pod_id kept winning. Reproduced: 58/1/1 skew at 50
+  QPS on three colocated pods sharing a single prefix family (§2.5.3).
+  **Fix:** added `-p.active_prefill` as the secondary sort key so free-byte
+  ties fall back to load balancing:
+  `max(..., key=lambda p: (free(p), -p.active_prefill, p.spec.pod_id))`.
+  Post-fix: 20/20/20 at 50 QPS on the same trace. Regression test:
+  `test_least_kv_cache_rotates_on_shared_prefix`.
 
 Plus one cross-cutting wart (F11: inconsistent tie-break direction across
 the group) and three information-only items on signal staleness,
@@ -186,15 +191,15 @@ Fix: negate the tie-break to `(free(p), -ord?)`/`-pod_id_sortable`, or
 restructure to `min(-free, pod_id)`. Filing as discovered.
 
 **F10 (MEDIUM, least-kv-cache): shared-prefix workloads cause 2/3 pod
-starvation.** When all requests share a prefix family, the first dispatch
-installs it on some pod P. Subsequent requests routed to P are byte-level
-no-ops (the hashes already exist in `pod.entries`; `PrefixEntry.install`
-replaces in place). So `P.free` does not change, and if `P.pod_id` is
-the lex-largest (F9), `P` keeps winning the tie-break. Other pods never
-get warmed, so their `free` stays at `cap` and is tied with `P.free`
-only when P is also at `cap`. Once any byte-level delta occurs on a
-non-P pod, P will re-win forever once the whole cluster is warm.
-**Reproduced**: 60-request shared-prefix trace @ 50 QPS →
+starvation. FIXED in go-fw8.** When all requests share a prefix family,
+the first dispatch installs it on some pod P. Subsequent requests routed
+to P are byte-level no-ops (the hashes already exist in `pod.entries`;
+`PrefixEntry.install` replaces in place). So `P.free` does not change,
+and if `P.pod_id` is the lex-largest (F9), `P` keeps winning the
+tie-break. Other pods never get warmed, so their `free` stays at `cap`
+and is tied with `P.free` only when P is also at `cap`. Once any
+byte-level delta occurs on a non-P pod, P re-wins forever once the whole
+cluster is warm. **Reproduced**: 60-request shared-prefix trace @ 50 QPS →
 
 ```
 least-kv-cache dispatch (shared prefix): {'p2': 58, 'p1': 1, 'p0': 1}
@@ -202,19 +207,30 @@ least-kv-cache dispatch (shared prefix): {'p2': 58, 'p1': 1, 'p0': 1}
 
 Under unique-prefix traffic the pathology vanishes (20/20/20), so the
 bug is workload-dependent. It is a real concern for realistic GORGO-style
-traffic (conversations with heavy shared system prompts). Suggested fix:
-add a secondary load signal (e.g., `active_prefill`) to the sort key so
-the policy falls back to load-balancing when free-byte tied:
+traffic (conversations with heavy shared system prompts).
+
+**Fix:** add `-p.active_prefill` as the secondary sort key so that
+free-byte ties fall back to load balancing:
 
 ```python
-pick = max(cands, key=lambda p: (free(p), -p.active_prefill, pod_id))
+pick = max(
+    cands,
+    key=lambda p: (free(p), -p.active_prefill, p.spec.pod_id),
+)
 ```
 
-Or, more principled, rank by a blended metric `free_bytes −
-β·active_prefill·avg_tokens·kv_bytes_per_token` so that free-capacity
-and demand are commensurate.
+The tertiary `p.spec.pod_id` key preserves determinism on full ties
+(all-empty cluster still picks `p2`, tracked separately by F9). Post-fix,
+the reproduction trace dispatches 20/20/20 at 50 QPS.
 
-Filing as discovered.
+A more principled alternative — rank by a blended metric
+`free_bytes − β·active_prefill·avg_tokens·kv_bytes_per_token` so
+free-capacity and demand are commensurate — was considered but rejected
+as scope creep: `active_prefill` as a tiebreaker is the minimal change
+that kills the starvation, preserves the "free bytes first" ordering
+that motivates the policy, and keeps the policy parameter-free. The
+blended-metric form can be revisited if/when a pathology emerges where
+the two signals need to compete rather than fall back.
 
 **F12 (INFO, cross-cutting): no policy in this group rejects an
 over-saturated pod.** `cluster.prefill_capable()` only filters on `role`;
@@ -410,10 +426,11 @@ New file `tests/unit/test_load_balancing_audit.py`:
   σ within ±2 across 3 pods.
 - `test_least_kv_cache_rotates_on_unique_prefixes` — unique-prefix
   workload → balanced dispatch.
-- `test_least_kv_cache_starves_on_shared_prefix` — **documents F10
-  with an `# F10` annotation**; asserts the current (buggy) behavior
-  (one pod ≥ 50/60 dispatches) so the test will fail when F10 is fixed,
-  forcing the fixer to update it. Negative-regression test.
+- `test_least_kv_cache_rotates_on_shared_prefix` — **POSITIVE regression
+  for F10 fix (go-fw8)**; asserts balanced rotation (`max-min ≤ 4`) at
+  50 QPS under a single shared prefix. Replaces the prior NEGATIVE
+  `test_least_kv_cache_starves_on_shared_prefix`. Will fail if the
+  `-active_prefill` secondary key is removed from the tie-break.
 - `test_least_kv_cache_tiebreak_picks_max_id` — **documents F9**;
   asserts current behavior (largest pod_id wins). Same negative-
   regression pattern.
@@ -469,7 +486,7 @@ signal-freshness question against real traffic on three colocated pods.
 | `least-request` | ≤ 0.05 (near-perfect rotation under load) |
 | `least-busy-time` | ≤ 0.10 |
 | `least-latency` | ≤ 0.20 (EWMA-driven cycling; may lag) |
-| `least-kv-cache` | 0.40–0.70 — **if F10 reproduces**; 0.10–0.20 if Modal's engine makes installs cost something extra (e.g., per-dispatch write-through) that our simulator misses |
+| `least-kv-cache` | ≤ 0.20 post-F10 fix — the `-active_prefill` secondary key pulls dispatch toward rotation once free bytes tie. A σ ≥ 0.40 on Modal would indicate either the fix regressed or Modal's `active_prefill` signal is stale under real vLLM timing (reopen F10). |
 | `throughput` | ≤ 0.20 post-F7a — near-rotation once all pods share an equal warm floor; a σ ≥ 0.40 on Modal would indicate the warm-init pathway differs in production (e.g., pods constructed outside `SimulationEngine.__post_init__`) and would reopen F7 |
 
 Historical note: before F7a, this row expected σ ≥ 0.80 in the sim and
@@ -495,7 +512,8 @@ execution to `go-3j8`.
 - **F9**: `least-kv-cache` tie-break direction inconsistent with the
   rest of the load-balancing group.
 - **F10**: `least-kv-cache` starves 2/3 pods under shared-prefix
-  workloads (byte-level install no-op + F9 tie-break).
+  workloads (byte-level install no-op + F9 tie-break). **Fixed via
+  load-aware secondary key in go-fw8** (see §2.5.3).
 - **F11**: cross-group tie-break direction inconsistency (tracks
   jointly with prefix-aware F3).
 - **F12** (info, no bead): no policy admits on `max_concurrent_prefill`.
@@ -511,14 +529,11 @@ execution to `go-3j8`.
 | `least-request` | **pass** — correct; §2.2.2 low-load note is informational. |
 | `least-busy-time` | **pass** — product formulation neutralizes EWMA staleness. |
 | `least-latency` | **pass** — depends on `initial_warm_latency_ms` warm-init; covered by new regression. |
-| `least-kv-cache` | **fail (correctness, MEDIUM)** — F10 reproducible on shared-prefix workloads. F9 is a contributing tie-break bug. Negative-regression tests pin current behavior. |
+| `least-kv-cache` | **pass post-F10 fix (go-fw8)** — `-active_prefill` secondary key breaks free-byte ties into load-balancing; 60-req shared-prefix trace rotates 20/20/20. F9 remains as a LOW tie-break-direction finding (see go-edm). |
 | `throughput` | **pass post-F7a (go-z51)** — warm-init of `ewma_throughput_tps` restores cold-start fairness; `4540cca`'s `/(1+active)` normalization is now load-bearing. F8 tie-break wart remains open as a LOW finding. |
 
 Ready for Modal smoke (via `configs/smoke_load_balancing_modal.yaml`,
-gated on human approval). The two "fail" entries do not block the
-existing sweep conclusions in `research/reports/routing-comparison.md`
-— those sweeps did not use a cold-start single-family trace against
-`throughput`, and their `least-kv-cache` results were downweighted per
-§7.4 of that report. With F7 fixed in go-z51, only F10 remains as a
-fix-before-ship item for any real-traffic deployment routing through
-these policies.
+gated on human approval). With F7 fixed in go-z51 and F10 fixed in
+go-fw8, no correctness-class findings remain in this group. F8, F9, and
+F11 are LOW tie-break-direction warts tracked on their own beads; they
+do not block deployment.
