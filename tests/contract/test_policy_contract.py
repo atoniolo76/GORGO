@@ -57,7 +57,7 @@ def test_policy_handles_empty_cluster(policy_id, kv_cache):
 def test_policy_does_not_mutate_cluster(policy_id, cluster, kv_cache):
     policy = _instantiate(policy_id)
     cluster_snap = {
-        pid: (p.active_prefill, p.active_decode, p.queued, p.ewma_latency_ms)
+        pid: (p.active_prefill, p.active_decode, p.ewma_latency_ms)
         for pid, p in cluster.pods.items()
     }
     # Snapshot KV cache contents + byte accounting so we catch policies
@@ -69,7 +69,7 @@ def test_policy_does_not_mutate_cluster(policy_id, cluster, kv_cache):
     for req in shared_prefix_trace():
         policy.decide(req, cluster, kv_cache)
     cluster_after = {
-        pid: (p.active_prefill, p.active_decode, p.queued, p.ewma_latency_ms)
+        pid: (p.active_prefill, p.active_decode, p.ewma_latency_ms)
         for pid, p in cluster.pods.items()
     }
     kv_after = {

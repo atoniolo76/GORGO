@@ -32,11 +32,11 @@ class LeastRequestPolicy:
             return Decision("__none__", "__none__", "no-prefill-capable-pod")
         pick = min(
             cands,
-            key=lambda p: (p.active_prefill + p.active_decode + p.queued, p.spec.pod_id),
+            key=lambda p: (p.active_prefill + p.active_decode, p.spec.pod_id),
         )
         return Decision(
             pick.spec.pod_id,
             pick.spec.pod_id,
-            rationale="min-active+queued",
-            score=float(pick.active_prefill + pick.active_decode + pick.queued),
+            rationale="min-active",
+            score=float(pick.active_prefill + pick.active_decode),
         )

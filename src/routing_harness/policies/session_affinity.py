@@ -57,7 +57,7 @@ class SessionAffinityPolicy:
                 return Decision(pod_id, pod_id, rationale=f"sticky session={request.session_id}")
         pick = min(
             cands,
-            key=lambda p: (p.active_prefill + p.active_decode + p.queued, p.spec.pod_id),
+            key=lambda p: (p.active_prefill + p.active_decode, p.spec.pod_id),
         )
         self._bindings[request.session_id] = (pick.spec.pod_id, request.arrival_ts)
         return Decision(pick.spec.pod_id, pick.spec.pod_id, rationale="new-sticky-binding")
