@@ -1,0 +1,165 @@
+# HUMAN-GATED — Modal smoke config for fairness/session policy group.
+#
+# Bead: go-sz5 (child of go-czi, linked to go-3j8 for actually running).
+# Spend ceiling: ≤ $1 on A10G/L4-class instances. 3 pods × ~30s active ×
+# 3 back-to-back runs ≈ 4.5 pod-minutes total; under the epic's per-smoke
+# budget.
+#
+# Purpose: exercise the fairness/session group in a heavy-user + light-user
+# mix where session-affinity's stickiness and vtc-basic's tenant-debt
+# steering behave distinctly from the random floor. Three runs back-to-back
+# on the same topology and workload:
+#   - random (floor)
+#   - session-affinity (caching, not balancing)
+#   - vtc-basic (per-pod × per-tenant steering — NOT paper VTC; see F15)
+#
+# Design choices (calibrated against sweep-v4 regimes):
+#   - Generous KV budget — we want fairness dynamics, not cache pressure.
+#   - Few sessions (8), few families — so per-session skew is visible on 200
+#     requests without statistical noise.
+#   - Heavy/light mix: 2 heavy sessions get 80% of tokens (via long prompts),
+#     6 light sessions get the rest. This is the regime where fairness
+#     policies earn their keep.
+
+name: "smoke-fairness-session"
+
+policy:
+  # Base run uses vtc-basic (the more interesting of the two). Companion
+  # stanzas below run all three back-to-back.
+  policy_id: "vtc-basic"
+  params:
+    fairness_key: "session_id"
+
+topology:
+  pods:
+    - pod_id: "p0"
+      role: "both"
+      gpu_count: 1
+      # 2 GiB KV budget per pod — generous; no eviction pressure in smoke.
+      # We are NOT testing caching here. Fairness policies should stand on
+      # their own without cache dynamics confounding the signal.
+      kv_cache_bytes: 2147483648
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 16
+    - pod_id: "p1"
+      role: "both"
+      gpu_count: 1
+      kv_cache_bytes: 2147483648
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 16
+    - pod_id: "p2"
+      role: "both"
+      gpu_count: 1
+      kv_cache_bytes: 2147483648
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 16
+
+# Modal-calibrated analytic costs — parity with smoke_load_balancing_modal.yaml
+# and smoke_prefix_aware_modal.yaml so cross-group comparison is sound.
+compute:
+  prefill_ms_per_token: 0.08
+  decode_ms_per_token: 6.0
+  prefill_overhead_ms: 5.0
+  decode_overhead_ms: 2.0
+
+network:
+  client_rtt_ms: 5.0
+  inter_pod_rtt_ms: 0.2
+  inter_pod_bandwidth_gbps: 100.0
+  kv_bytes_per_token: 131072
+  serialization_overhead_ms: 0.5
+
+scheduler:
+  base_routing_ms: 0.2
+  per_pod_consideration_us: 5.0
+
+engine:
+  kv_ewma_alpha: 0.2
+  block_size: 16
+  initial_warm_latency_ms: 5.0
+
+workload:
+  kind: "synthetic"
+  params:
+    n_requests: 200              # ~40s wall at 5 QPS
+    arrival_rate_qps: 5.0        # moderate — stays well below saturation;
+                                 # fairness dynamics dominate over queueing
+    n_prefix_families: 4         # low enough that cache matters would be
+                                 # an unwelcome confound; families serve as
+                                 # metadata only here
+    zipf_s: 0.3                  # near-uniform family distribution
+    prompt_len_min: 256
+    prompt_len_max: 2048         # wide range → heavy sessions get long prompts
+    max_output_tokens: 64
+    n_sessions: 8                # 2 heavy + 6 light (see session_weights)
+    shared_prefix_tokens: 0      # no shared prefix — caching is not under test
+
+    # Heavy/light mix: session 0 and 1 are heavy (each receives 40% of
+    # requests and gets the long end of prompt_len). Sessions 2..7 split
+    # the remaining 20%. Session weights are synth-workload-specific;
+    # consumed by workload/synthetic.py if supported, otherwise the Modal
+    # runner should replicate by duplicating session_id in the trace.
+    session_weights: [0.40, 0.40, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033]
+    heavy_session_ids: ["s0", "s1"]         # get long prompts (1024–2048)
+    heavy_prompt_len_min: 1024
+    heavy_prompt_len_max: 2048
+
+seeds: [0]
+output_dir: "results/smoke-fairness-session-modal"
+
+# Three companion runs back-to-back. If the Modal runner accepts only one
+# policy per invocation, dispatch three jobs with overrides:
+#   modal run ... --policy random
+#   modal run ... --policy session-affinity
+#   modal run ... --policy vtc-basic
+companion_runs:
+  - name: "floor-random"
+    policy_id: "random"
+    params:
+      seed: 0
+  - name: "treatment-session-affinity"
+    policy_id: "session-affinity"
+    params:
+      stickiness_ttl_s: 3600.0
+  - name: "treatment-vtc-basic"
+    policy_id: "vtc-basic"
+    params:
+      fairness_key: "session_id"
+
+# Acceptance criteria (checked post-run by reviewer before closing go-3j8):
+#
+# 1. All three runs complete without errors or timeout.
+#
+# 2. Per-pod request-count coefficient-of-variation
+#    (σ/μ over 3 pods, across ALL requests):
+#      - random:           cv ≤ 0.15  (law of large numbers on N=200)
+#      - session-affinity: cv ≤ 0.35  (stickiness concentrates, but 8 sessions
+#                                      split across 3 pods keeps it moderate)
+#      - vtc-basic:        cv ≤ 0.25  (spreads heavy tenants; busy() handles
+#                                      in-flight skew — see F17)
+#
+# 3. Per-TENANT pod-spread for heavy sessions s0 and s1 (number of distinct
+#    pods a heavy session touches, out of 3):
+#      - random:           3 (uniform random → ~always 3)
+#      - session-affinity: 1 (sticky binding → exactly one pod per session)
+#      - vtc-basic:        ≥ 2 (must spread; ideally 3)
+#    If session-affinity spread is > 1 for a heavy session, there was a
+#    rebind (TTL breach or pod failure) — flag in report but not a failure.
+#    If vtc-basic spread is 1 for ANY heavy session, ESCALATE: indicates
+#    the tenant_debt signal is being overwhelmed by busy() and the policy
+#    has effectively reduced to least-busy-time.
+#
+# 4. p50/p95 end-to-end latency recorded per policy. Expectations:
+#      - session-affinity is likely worst on heavy-session p95 (pinning
+#        amplifies queueing). Report but do not block on this.
+#      - vtc-basic and random should be in a similar band (±20% on p50).
+#
+# 5. Total Modal spend ≤ $1 (enforced by per-run container ceiling).
+#
+# Reporting format (for reviewer):
+#   - Dispatch counts per pod per policy (3 rows × 3 cols)
+#   - Per-session pod-count distribution (sessions 0..7 × pods 0..2)
+#   - cv across pods, per policy
+#   - p50/p95/p99 end-to-end latency, overall and by heavy/light cohort
+#   - vtc-basic: final pod_tenant_tokens snapshot (to verify F16 monotonic
+#     growth matches the simulator's prediction)
