@@ -1,8 +1,7 @@
 """Least-busy-time: route to pod with lowest projected busy time.
 
-Busy time = EWMA(latency) * (active + queued). Balances utilization and
-latency; generally dominates least-request under heterogeneous request
-sizes.
+Busy time = EWMA(latency) * active. Balances utilization and latency;
+generally dominates least-request under heterogeneous request sizes.
 
 Taxonomy (see `research/reports/routing-comparison.md` §3):
     selection=load, state=stateless, fairness=best-effort,
@@ -33,7 +32,7 @@ class LeastBusyTimePolicy:
             return Decision("__none__", "__none__", "no-prefill-capable-pod")
 
         def busy(p):
-            return p.ewma_latency_ms * (p.active_prefill + p.active_decode + p.queued)
+            return p.ewma_latency_ms * (p.active_prefill + p.active_decode)
 
         pick = min(cands, key=lambda p: (busy(p), p.spec.pod_id))
         return Decision(

@@ -85,7 +85,6 @@ class PodRuntime:
     spec: PodSpec
     active_prefill: int = 0
     active_decode: int = 0
-    queued: int = 0
     ewma_latency_ms: float = 0.0
     ewma_throughput_tps: float = 0.0
     pending_work_ms: float = 0.0  # Preble L_i: Σ predicted service_ms for in-flight requests

@@ -61,7 +61,7 @@ class PrefixCachePolicy:
         if best_pod is None or best_len <= 0:
             pick = min(
                 cands,
-                key=lambda p: (p.active_prefill + p.queued, p.spec.pod_id),
+                key=lambda p: (p.active_prefill, p.spec.pod_id),
             )
             return Decision(
                 pick.spec.pod_id, pick.spec.pod_id, rationale="no-prefix-match/fallback-LRQ"

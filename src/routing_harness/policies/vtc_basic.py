@@ -127,7 +127,7 @@ class VTCBasicPolicy:
         vtc_score = self.counters.get(k, 0.0)
 
         def busy(p):
-            return p.ewma_latency_ms * (p.active_prefill + p.active_decode + p.queued)
+            return p.ewma_latency_ms * (p.active_prefill + p.active_decode)
 
         def tenant_debt(p):
             return self.pod_tenant_tokens.get(p.spec.pod_id, {}).get(k, 0.0)

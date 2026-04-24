@@ -100,8 +100,6 @@ class SimulationEngine:
             pod_p = self.cluster.pods.get(prefill_id)
             if pod_p is not None and pod_p.active_prefill > 0:
                 pod_p.active_prefill -= 1
-            if pod_p is not None and pod_p.queued > 0:
-                pod_p.queued -= 1
             if pod_p is not None:
                 pod_p.pending_work_ms = max(0.0, pod_p.pending_work_ms - service_ms)
             pod_d = self.cluster.pods.get(decode_id)
@@ -261,7 +259,6 @@ class SimulationEngine:
 
         # Record the in-flight arrival on both pods for load-aware policies.
         pod.active_prefill += 1
-        pod.queued += 1
         pod.pending_work_ms += observed_latency_ms
         decode_pod.active_decode += 1
         # Schedule retirement at now + observed latency (ms → s).
