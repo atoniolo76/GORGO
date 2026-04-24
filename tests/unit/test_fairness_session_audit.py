@@ -310,19 +310,67 @@ def test_vtc_is_deterministic_under_same_input(pod_specs):
     assert decisions1 == decisions2
 
 
-def test_vtc_counters_monotonic_no_decay_F16_pin(pod_specs):
-    """F16 pin: counters never decay; document current behavior."""
+def test_vtc_counters_monotonic_when_window_unset_F16(pod_specs):
+    """F16: default (window_s=None) keeps monotonic behavior for backward-compat."""
     cluster, kv = _fresh_3_pod_cluster(pod_specs)
     p = get_policy("vtc-basic")
+    assert p.window_s is None
     req = _make_req("r", "sMono", 0.0)
     d = p.decide(req, cluster, kv)
     for _ in range(5):
         p.observe_completion(req, d, tokens_consumed=200.0)
     assert p.counters["sMono"] == pytest.approx(1000.0)
-    # No decay/reset method exists on the policy; assert that the public API
-    # surface does not include one (pins the gap for the paper-fidelity fix).
-    assert not hasattr(p, "decay")
-    assert not hasattr(p, "reset")
+    # Even re-deciding far in the future does not age out consumption.
+    p.decide(_make_req("r2", "sMono", 1e9), cluster, kv)
+    assert p.counters["sMono"] == pytest.approx(1000.0)
+
+
+def test_vtc_sliding_window_ages_out_consumption_F16(pod_specs):
+    """F16: with window_s set, consumption beyond the window stops counting."""
+    cluster, kv = _fresh_3_pod_cluster(pod_specs)
+    p = get_policy("vtc-basic", window_s=60.0)
+    # Heavy burst at t=0..2
+    for i in range(5):
+        r = _make_req(f"r{i}", "sHeavy", float(i))
+        d = p.decide(r, cluster, kv)
+        p.observe_completion(r, d, tokens_consumed=200.0)
+    # Within window: still 1000
+    p.decide(_make_req("probe_a", "sHeavy", 50.0), cluster, kv)
+    assert p.counters["sHeavy"] == pytest.approx(1000.0)
+    # Past the window: all events aged out
+    p.decide(_make_req("probe_b", "sHeavy", 200.0), cluster, kv)
+    assert p.counters["sHeavy"] == pytest.approx(0.0)
+    for pid in ("p0", "p1", "p2"):
+        assert p.pod_tenant_tokens[pid].get("sHeavy", 0.0) == pytest.approx(0.0)
+
+
+def test_vtc_sliding_window_unpins_heavy_tenant_F16(pod_specs):
+    """F16: after the window elapses, a previously-heavy tenant is no longer
+    steered away from its earlier warmed pod."""
+    cluster, kv = _fresh_3_pod_cluster(pod_specs)
+    p = get_policy("vtc-basic", window_s=60.0)
+    r1 = _make_req("r1", "sH", 0.0)
+    d1 = p.decide(r1, cluster, kv)
+    p.observe_completion(r1, d1, tokens_consumed=1_000_000.0)
+    # Mid-window: should still avoid the heavy pod.
+    d_mid = p.decide(_make_req("r_mid", "sH", 30.0), cluster, kv)
+    assert d_mid.prefill_pod_id != d1.prefill_pod_id
+    # Past the window: debt aged out; tie-break falls back to lowest pod_id.
+    d_late = p.decide(_make_req("r_late", "sH", 120.0), cluster, kv)
+    assert d_late.prefill_pod_id == "p0"
+
+
+def test_vtc_reset_clears_all_state_F16(pod_specs):
+    """F16: reset() exposed for experiment isolation."""
+    cluster, kv = _fresh_3_pod_cluster(pod_specs)
+    p = get_policy("vtc-basic")
+    r = _make_req("r", "sX", 0.0)
+    d = p.decide(r, cluster, kv)
+    p.observe_completion(r, d, tokens_consumed=500.0)
+    assert p.counters["sX"] == 500.0
+    p.reset()
+    assert p.counters == {}
+    assert p.pod_tenant_tokens == {}
 
 
 def test_vtc_empty_cluster_returns_none_sentinel(pod_specs):
