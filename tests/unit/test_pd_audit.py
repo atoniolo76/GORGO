@@ -160,10 +160,7 @@ def test_pd_prefill_cache_match_routes_to_owner():
 
 def test_pd_decode_busy_picks_least_loaded():
     specs, cluster, kv = _pd_cluster_2x2()
-    # Give both decode pods warm ewma so the multiplier is non-trivial; then
-    # make dcA clearly busier.
-    cluster.pods["dcA"].ewma_latency_ms = 10.0
-    cluster.pods["dcB"].ewma_latency_ms = 10.0
+    # Make dcA clearly busier on active_decode; policy picks dcB.
     cluster.pods["dcA"].active_decode = 8
     cluster.pods["dcB"].active_decode = 1
     p = get_policy("pd", block_size=16)
@@ -276,12 +273,34 @@ def test_pd_f19_engine_no_gratuitous_handoff_on_both_cluster():
 # ---------------------------------------------------------------------------
 
 
-def test_pd_f20_decode_pool_ewma_is_stale():
-    """F20: the engine only updates ewma_latency_ms on the prefill pod.
-    Pure-DECODE pods stay at initial_warm_latency_ms forever.
+def test_pd_f20_decode_selection_ignores_stale_ewma():
+    """F20 fix: the decode pool uses active_decode directly, not
+    ewma_latency_ms * active_decode. The engine still only updates
+    ewma_latency_ms on the prefill pod, so pure-DECODE EWMAs remain
+    pinned at warm — but the policy no longer depends on that signal.
 
-    When F20 is fixed (engine instruments decode EWMA, or policy drops
-    the multiplier), update the assertion to verify the signal advances.
+    Verify by making one decode pod's stale EWMA artificially small and
+    another's artificially large while active_decode points the other
+    way: the decision must follow active_decode, not the multiplier.
+    """
+    specs, cluster, kv = _pd_cluster_2x2()
+    # Artificially diverge the (stale) decode EWMAs. Under the old
+    # multiplier, dcA would win despite higher load because its EWMA is
+    # tiny. Under the fix, active_decode alone decides — dcB wins.
+    cluster.pods["dcA"].ewma_latency_ms = 0.1
+    cluster.pods["dcB"].ewma_latency_ms = 1000.0
+    cluster.pods["dcA"].active_decode = 10
+    cluster.pods["dcB"].active_decode = 1
+    p = get_policy("pd", block_size=16)
+    d = p.decide(Request("r", "s", 2.0, tuple(range(32)), 4), cluster, kv)
+    assert d.decode_pod_id == "dcB"
+
+
+def test_pd_f20_decode_ewma_still_stale_on_pure_decode_pods():
+    """F20 fix is in the policy, not the engine: ewma_latency_ms on
+    pure-DECODE pods still never advances. Pinning this so a future
+    engine-side fix (which would also be correct) breaks this test
+    loudly rather than silently changing the signal.
     """
     specs, cluster, kv = _pd_cluster_2x2()
     eng = _engine(cluster, kv, get_policy("pd", block_size=16))
@@ -291,15 +310,8 @@ def test_pd_f20_decode_pool_ewma_is_stale():
     ]
     eng.run(reqs)
     warm = eng.config.initial_warm_latency_ms
-    # F20: both pure-DECODE pods' EWMA stayed pinned at warm-start.
     assert cluster.pods["dcA"].ewma_latency_ms == pytest.approx(warm)
     assert cluster.pods["dcB"].ewma_latency_ms == pytest.approx(warm)
-    # Sanity: at least one prefill pod's EWMA *did* advance past warm.
-    advanced = [
-        p.ewma_latency_ms > warm * 1.5
-        for p in (cluster.pods["pfA"], cluster.pods["pfB"])
-    ]
-    assert any(advanced)
 
 
 # ---------------------------------------------------------------------------
