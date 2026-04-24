@@ -3,12 +3,22 @@
 For clusters where some pods are Phase.PREFILL and others Phase.DECODE,
 picks:
   - a prefill pod using prefix-cache (reuse wins)
-  - a decode pod using least-busy-time (decode is memory-bound, fairness
-    matters more than cache locality)
+  - a decode pod using least-active-decode (decode is memory-bound,
+    fairness matters more than cache locality)
 
 If no PD roles are present (all pods are Phase.BOTH), the two pools
 collapse to the same set and the policy still picks deterministically —
-prefix-match for prefill, busy-time for decode — over that shared set.
+prefix-match for prefill, active-decode for decode — over that shared
+set.
+
+The decode signal is pod.active_decode directly, not
+ewma_latency_ms * active_decode. The engine only updates
+ewma_latency_ms on the prefill pod (engine.py:255), so a multiplier on
+pure-DECODE pods would reduce to warm_constant * active_decode —
+latency-unaware. Under the analytic cost model decode latency is
+roughly constant per token, so active_decode already approximates a
+time-domain load signal under continuous batching. See go-vix (F20)
+and `research/reports/policy_audits/pd_topology.md` §2.4.
 
 Taxonomy (see `research/reports/routing-comparison.md` §3):
     selection=composite (phase-split: cache-affinity for prefill + load
@@ -67,10 +77,9 @@ class PDPolicy:
             ),
         )
 
-        def busy(p):
-            return p.ewma_latency_ms * (p.active_decode + p.queued)
-
-        best_decode = min(decode, key=lambda p: (busy(p), p.spec.pod_id))
+        best_decode = min(
+            decode, key=lambda p: (p.active_decode, p.spec.pod_id)
+        )
         rationale = (
             f"pd prefill={best_prefill.spec.pod_id} decode={best_decode.spec.pod_id}"
         )
