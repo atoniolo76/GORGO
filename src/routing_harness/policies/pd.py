@@ -14,6 +14,14 @@ policy falls back to the full decode pool — degraded but available —
 rather than refusing the request. See go-6i2 (F23) and
 `research/reports/policy_audits/pd_topology.md` §2.4.
 
+Partial-availability fallback: if only one role-pool is populated
+(e.g. every DECODE pod is unreachable but PREFILL/BOTH pods remain),
+the policy collapses to colocated execution on a single pod chosen by
+prefill criteria rather than dropping every request. The chosen pod
+serves both phases; the engine treats `decode_pod_id == prefill_pod_id`
+as a no-handoff path, so degraded mode still produces tokens. See
+go-997 (F24) and `research/reports/policy_audits/pd_topology.md` §2.x.
+
 If no PD roles are present (all pods are Phase.BOTH), the two pools
 collapse to the same set and the policy still picks deterministically —
 prefix-match for prefill, active-decode for decode — over that shared
@@ -63,8 +71,14 @@ class PDPolicy:
     ) -> Decision:
         prefill = [p for p in cluster.pods.values() if p.spec.role in (Phase.PREFILL, Phase.BOTH)]
         decode = [p for p in cluster.pods.values() if p.spec.role in (Phase.DECODE, Phase.BOTH)]
-        if not prefill or not decode:
+        if not prefill and not decode:
             return Decision("__none__", "__none__", "pd-pools-empty")
+
+        colocate_fallback = not prefill or not decode
+        if not prefill:
+            prefill = list(decode)
+        if not decode:
+            decode = list(prefill)
 
         hashes = self._prefix(request)
 
@@ -84,6 +98,12 @@ class PDPolicy:
                 p.spec.pod_id,
             ),
         )
+
+        if colocate_fallback:
+            rationale = f"pd colocated={best_prefill.spec.pod_id} one-pool-empty"
+            return Decision(
+                best_prefill.spec.pod_id, best_prefill.spec.pod_id, rationale=rationale
+            )
 
         peers = set(best_prefill.spec.peer_ids)
         peered_decode = [p for p in decode if p.spec.pod_id in peers]

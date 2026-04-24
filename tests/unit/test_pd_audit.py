@@ -85,10 +85,10 @@ def _engine(cluster, kv, policy):
 # ---------------------------------------------------------------------------
 
 
-def test_pd_empty_decode_pool_returns_none():
-    specs = [PodSpec("pf0", Phase.PREFILL, 1, 8 * 1024 * 1024, 4, 0)]
-    cluster = ClusterState.from_specs(specs)
-    kv = KVCacheState.from_specs({s.pod_id: s.kv_cache_bytes for s in specs})
+def test_pd_both_pools_empty_returns_none():
+    """Only when the cluster is truly empty (no pods) does pd refuse."""
+    cluster = ClusterState.from_specs([])
+    kv = KVCacheState.from_specs({})
     p = get_policy("pd", block_size=16)
     d = p.decide(Request("r", "s", 0.0, tuple(range(16)), 4), cluster, kv)
     assert d.prefill_pod_id == "__none__"
@@ -96,13 +96,80 @@ def test_pd_empty_decode_pool_returns_none():
     assert "pd-pools-empty" in d.rationale
 
 
-def test_pd_empty_prefill_pool_returns_none():
-    specs = [PodSpec("dc0", Phase.DECODE, 1, 4 * 1024 * 1024, 0, 8)]
+def test_pd_f24_empty_decode_pool_colocates_on_prefill():
+    """F24 fix: when only prefill-capable pods remain, degrade to
+    colocated execution rather than dropping every request.
+    """
+    specs = [
+        PodSpec("pf0", Phase.PREFILL, 1, 8 * 1024 * 1024, 4, 0),
+        PodSpec("pf1", Phase.PREFILL, 1, 8 * 1024 * 1024, 4, 0),
+    ]
     cluster = ClusterState.from_specs(specs)
     kv = KVCacheState.from_specs({s.pod_id: s.kv_cache_bytes for s in specs})
     p = get_policy("pd", block_size=16)
     d = p.decide(Request("r", "s", 0.0, tuple(range(16)), 4), cluster, kv)
-    assert d.prefill_pod_id == "__none__"
+    assert d.prefill_pod_id == "pf0"
+    assert d.decode_pod_id == "pf0"
+    assert d.prefill_pod_id == d.decode_pod_id
+    assert "colocated" in d.rationale
+    assert "one-pool-empty" in d.rationale
+
+
+def test_pd_f24_empty_prefill_pool_colocates_on_decode():
+    """F24 fix: when only decode-capable pods remain, degrade to
+    colocated execution on a decode pod rather than refusing service.
+    """
+    specs = [
+        PodSpec("dc0", Phase.DECODE, 1, 4 * 1024 * 1024, 0, 8),
+        PodSpec("dc1", Phase.DECODE, 1, 4 * 1024 * 1024, 0, 8),
+    ]
+    cluster = ClusterState.from_specs(specs)
+    kv = KVCacheState.from_specs({s.pod_id: s.kv_cache_bytes for s in specs})
+    p = get_policy("pd", block_size=16)
+    d = p.decide(Request("r", "s", 0.0, tuple(range(16)), 4), cluster, kv)
+    assert d.prefill_pod_id in {"dc0", "dc1"}
+    assert d.decode_pod_id == d.prefill_pod_id
+    assert "colocated" in d.rationale
+    assert "one-pool-empty" in d.rationale
+
+
+def test_pd_f24_empty_decode_prefers_prefill_with_cache_match():
+    """F24 fallback still honors cache-affinity: among prefill-only
+    survivors, the one holding the longer consecutive prefix wins.
+    """
+    specs = [
+        PodSpec("pfA", Phase.PREFILL, 1, 16 * 1024 * 1024, 4, 0),
+        PodSpec("pfB", Phase.PREFILL, 1, 16 * 1024 * 1024, 4, 0),
+    ]
+    cluster = ClusterState.from_specs(specs)
+    kv = KVCacheState.from_specs({s.pod_id: s.kv_cache_bytes for s in specs})
+    tokens = tuple(range(32))
+    hashes = enumerate_prefix_hashes(tokens, block_size=16)
+    for h in hashes:
+        kv.install("pfB", PrefixEntry(h, 16, 1024), now=1.0)
+    p = get_policy("pd", block_size=16)
+    d = p.decide(Request("r", "s", 2.0, tokens, 4), cluster, kv)
+    assert d.prefill_pod_id == "pfB"
+    assert d.decode_pod_id == "pfB"
+
+
+def test_pd_f24_engine_serves_requests_under_degraded_mode():
+    """Under partial-availability fallback the engine must produce token
+    records instead of silently dropping every request.
+    """
+    specs = [
+        PodSpec("pf0", Phase.PREFILL, 1, 16 * 1024 * 1024, 4, 0),
+        PodSpec("pf1", Phase.PREFILL, 1, 16 * 1024 * 1024, 4, 0),
+    ]
+    cluster = ClusterState.from_specs(specs)
+    kv = KVCacheState.from_specs({s.pod_id: s.kv_cache_bytes for s in specs})
+    eng = _engine(cluster, kv, get_policy("pd", block_size=16))
+    reqs = [Request(f"r{i}", "s", float(i) * 0.1, tuple(range(32)), 4) for i in range(5)]
+    eng.run(reqs)
+    assert len(eng.metrics.records) == len(reqs)
+    for rec in eng.metrics.records:
+        assert rec.migrated is False
+        assert rec.kv_transport_bytes == 0
 
 
 def test_pd_single_phase_both_pod_colocates():
