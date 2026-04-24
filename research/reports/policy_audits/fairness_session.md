@@ -175,24 +175,28 @@ paths:
 
 Either is fine. Filed as discovered bead (medium priority).
 
-**F16 (medium, fairness): no decay, no window, counters are monotonic.** The
+**F16 (FIXED in go-e9r): sliding window + reset for paper-fidelity.** The
 VTC paper uses a sliding window `W` (default 60s in §5.2) beyond which token
-consumption ages out. Our `counters` and `pod_tenant_tokens` are append-only
-`defaultdict(float)`. Consequences:
+consumption ages out. The original `counters` and `pod_tenant_tokens` were
+append-only `defaultdict(float)`, with the consequences:
 
-- A tenant who was heavy early in the trace is steered away from
-  early-warmed pods forever, even if they've since gone idle.
-- On long Modal runs (>1h), a new tenant looks nominally "catchable" but
-  older tenants' counters dominate — `tenant_debt` is orders of magnitude
+- A tenant who was heavy early in the trace was steered away from
+  early-warmed pods forever, even if they'd since gone idle.
+- On long Modal runs (>1h), a new tenant looked nominally "catchable" but
+  older tenants' counters dominated — `tenant_debt` was orders of magnitude
   asymmetric by the end.
-- There is no "reset" knob for test / experiment isolation; each new
-  instance starts fresh because the counters live on the policy instance,
-  but within one run there's no way to clear history.
+- There was no "reset" knob for test / experiment isolation.
 
-Recommended fix: add a configurable half-life or sliding window. For the
-current simulator regime (≤ 30s traces in sweep-v4) this has no observable
-impact, but it must be fixed before any claim of paper-fidelity. Filed as
-discovered bead.
+Fix (go-e9r): added `window_s: float | None = None` parameter. When set,
+`observe_completion` records event timestamps, and both `decide` and
+`observe_completion` evict events older than `arrival_ts - window_s`. When
+`None` (the default), behavior is unchanged — kept for backward compatibility
+with short-trace sweeps (sweep-v4, ≤30s) where windowing has no observable
+impact. A `reset()` method was also added for experiment isolation. Tests
+pin both modes (`test_vtc_counters_monotonic_when_window_unset_F16`,
+`test_vtc_sliding_window_ages_out_consumption_F16`,
+`test_vtc_sliding_window_unpins_heavy_tenant_F16`,
+`test_vtc_reset_clears_all_state_F16`).
 
 **F17 (low, fairness signal freshness): in-flight requests do not contribute
 to `tenant_debt`.** `pod_tenant_tokens[pod][k]` only advances in
@@ -214,10 +218,10 @@ benefit). Filed for awareness.
 | Dimension | VTC paper (Sheng et al., OSDI'24) | Our impl | Status |
 |---|---|---|---|
 | Scheduling axis | Admission order (which queued request to serve next) | Pod selection (which replica to dispatch to) | **Mismatch** |
-| Fairness metric | Continuous-time virtual counter per client | Monotonic token counter per `(pod, tenant)` | **Partial** (no decay) |
+| Fairness metric | Continuous-time virtual counter per client | Windowed token counter per `(pod, tenant)` when `window_s` set; monotonic otherwise | **Closer** (window available; still per-pod) |
 | Guarantee | Bounded `|U_i − U_j| ≤ U` for active clients in window | None | **Missing** |
 | Starvation bound | Yes (via admission deferral) | No | **Missing** |
-| Window / decay | Sliding window `W` | None | **Missing** |
+| Window / decay | Sliding window `W` | Sliding window `window_s` (opt-in; default off) | **Available** (go-e9r) |
 | Per-client vs. per-pod | Per-client (single engine) | Per-pod × per-tenant | **Different design** |
 
 ## 4. Test coverage assessment
@@ -258,8 +262,9 @@ New file `tests/unit/test_fairness_session_audit.py`:
   falls back to `str(session_id)`.
 - Determinism: two instances with identical input sequence produce
   identical decisions.
-- Unbounded monotonic counters: audit test demonstrates counter growth
-  across many completions (F16 pin; documents current behavior).
+- Monotonic counters (default `window_s=None`): counter growth is
+  documented by the F16 pin; windowed mode (`window_s=60.0`) and `reset()`
+  are exercised by the F16 follow-up tests (go-e9r).
 - Integration against `SimulationEngine`: heavy + light mix on 3-pod
   cluster, heavy tenant's pod-count skew is bounded (`max-min` ≤ a small
   constant) — proves the policy does *spread* even if it doesn't *throttle*.
@@ -301,8 +306,8 @@ Config is marked `# HUMAN-GATED` per epic protocol; execution tracked under
   informational, no code change proposed.
 - **F15**: `vtc-basic` is not VTC as defined in Sheng et al. (OSDI'24) —
   rename or implement admission-order variant.
-- **F16**: `vtc-basic` counters are monotonic; add decay/window to approach
-  paper-fidelity.
+- **F16** (FIXED, go-e9r): `vtc-basic` now supports an opt-in sliding
+  window `window_s` and a `reset()` method; default remains monotonic.
 - **F17**: `vtc-basic` in-flight requests not reflected in `tenant_debt` —
   one-round-trip lag in fairness signal; informational.
 
