@@ -42,6 +42,15 @@ if str(SRC_ROOT) not in sys.path:
 
 from routing_harness.core import Request  # noqa: E402
 from routing_harness.kv_cache import enumerate_prefix_hashes  # noqa: E402
+from routing_harness.workload.code_completion import (  # noqa: E402
+    CodeCompletionConfig,
+)
+from routing_harness.workload.code_completion import (  # noqa: E402
+    TraceParams as CCTraceParams,
+)
+from routing_harness.workload.code_completion import (  # noqa: E402
+    build_trace as build_code_completion_trace,
+)
 from routing_harness.workload.synthetic import SyntheticParams  # noqa: E402
 from routing_harness.workload.synthetic import generate as generate_synthetic  # noqa: E402
 from routing_harness.workload.trace import InMemoryTrace  # noqa: E402
@@ -76,6 +85,106 @@ def load_synthetic(n_requests: int, seed: int) -> tuple[InMemoryTrace, dict]:
     return trace, {"kind": "synthetic", "params": asdict(params)}
 
 
+# A realistic "system template" for a code-completion endpoint. Every
+# deployed copilot-style service wraps each user task in a preamble like
+# this — the specifics vary, but the structural role is identical:
+# a constant, moderately long token prefix that dominates KV reuse
+# across independent tasks. The prefix below is ~200 cl100k tokens,
+# which is in the same ballpark as real production templates.
+CODE_COMPLETION_INSTRUCTION_PREFIX = (
+    "You are an AI programming assistant. Follow the user's "
+    "requirements carefully and to the letter. First, think "
+    "step-by-step: describe your plan in pseudocode, written out "
+    "in detail. Then, output the final code in a single code "
+    "block. Minimize any other prose. Use the language the user "
+    "specifies; if unspecified, prefer Python 3.11. Do not invent "
+    "APIs or libraries; if a standard library suffices, use it. "
+    "Handle edge cases (empty input, None, off-by-one, overflow) "
+    "unless the task explicitly excludes them. Match the exact "
+    "function signature the user gives, including type hints and "
+    "docstring format. Never add input() calls, print statements, "
+    "or example invocations unless asked. If the task is "
+    "ambiguous, state the ambiguity once and proceed with the "
+    "most reasonable interpretation. Task follows.\n\n"
+)
+
+
+def load_code_completion(
+    n_requests: int,
+    seed: int,
+    local_path: str | None = None,
+) -> tuple[InMemoryTrace, dict]:
+    """Load a real code-completion dataset (HumanEval + MBPP).
+
+    Tasks are independent — each task is its own session. A constant
+    ``instruction_prefix`` is prepended to every prompt before
+    tokenization, matching how production code-assistants wrap each
+    request in a static system template. This is the dominant source
+    of cross-request KV prefix reuse for this workload, so we include
+    it explicitly rather than profiling a denuded dataset.
+
+    Tokenizer is ``cl100k_base`` (GPT-4/Claude-ish) rather than the mock
+    tokenizer: code tokenizes at a noticeably different tokens/char ratio
+    than prose, and the mock bias would misstate prompt-length
+    distributions here.
+    """
+    abs_path = local_path or str(REPO_ROOT / "data" / "code_completion" / "combined.jsonl")
+    cfg = CodeCompletionConfig(
+        local_path=abs_path,
+        max_tasks=n_requests,  # naturally caps to dataset size if smaller
+        instruction_prefix=CODE_COMPLETION_INSTRUCTION_PREFIX,
+        seed=seed,
+    )
+    params = CCTraceParams(
+        arrival_rate_qps=4.0,
+        max_output_tokens=256,
+        tokenizer="tiktoken:cl100k_base",
+        seed=seed,
+    )
+    trace = build_code_completion_trace(cfg, params)
+    # Normalize source to a repo-relative form so the rendered report
+    # doesn't leak the machine's absolute home directory.
+    try:
+        rel = Path(abs_path).resolve().relative_to(REPO_ROOT)
+        trace.source = f"code_completion:{rel.as_posix()}"
+        path_for_info = rel.as_posix()
+    except ValueError:
+        path_for_info = abs_path
+    # Record the prefix's token length so the report can explain where
+    # the cache-hit curve saturates (once the cache fits the prefix,
+    # additional capacity buys near-zero hits for independent tasks).
+    try:
+        import tiktoken
+
+        prefix_token_len = int(
+            len(tiktoken.get_encoding("cl100k_base").encode(CODE_COMPLETION_INSTRUCTION_PREFIX))
+        )
+    except Exception:  # pragma: no cover — tiktoken is required by the loader
+        prefix_token_len = None
+    prefix_block_len = None if prefix_token_len is None else int(prefix_token_len // 16)
+    return trace, {
+        "kind": "code_completion",
+        "local_path": path_for_info,
+        "config": {
+            "max_tasks": cfg.max_tasks,
+            "language_filter": list(cfg.language_filter),
+            "instruction_prefix_tokens": prefix_token_len,
+            "instruction_prefix_blocks_16": prefix_block_len,
+            "seed": cfg.seed,
+        },
+        "params": {
+            "arrival_rate_qps": params.arrival_rate_qps,
+            "max_output_tokens": params.max_output_tokens,
+            "tokenizer": params.tokenizer,
+            "seed": params.seed,
+        },
+        "data_acquisition": [
+            "# Fetch HumanEval + MBPP into data/code_completion/ (gitignored).",
+            "python scripts/fetch_code_completion_data.py",
+        ],
+    }
+
+
 def _not_implemented(name: str) -> Callable[..., tuple[InMemoryTrace, dict]]:
     def _raise(*_args, **_kwargs):
         raise NotImplementedError(
@@ -88,7 +197,7 @@ def _not_implemented(name: str) -> Callable[..., tuple[InMemoryTrace, dict]]:
 
 DATASET_LOADERS: dict[str, Callable[..., tuple[InMemoryTrace, dict]]] = {
     "synthetic": load_synthetic,
-    "code_completion": _not_implemented("code_completion"),
+    "code_completion": load_code_completion,
     "lmsys": _not_implemented("lmsys"),
     "sharegpt": _not_implemented("sharegpt"),
 }
@@ -187,6 +296,7 @@ def compute_metrics(
     *,
     block_size: int = 16,
     cache_capacities: tuple[int, ...] = (64, 256, 1024, 4096, 16384),
+    is_natural_language: bool = False,
 ) -> dict:
     """Extract the full descriptive-metrics bundle for a trace.
 
@@ -396,7 +506,7 @@ def compute_metrics(
     else:
         token_id_summary = {}
     text = {
-        "is_natural_language": False,
+        "is_natural_language": bool(is_natural_language),
         "token_id_summary": token_id_summary,
         "n_empty_prompts": int(np.sum(prompt_lens == 0)),
         "n_degenerate_prompts_lt_16": int(np.sum(prompt_lens < block_size)),
@@ -558,6 +668,13 @@ def render_report(
     lines.append("")
     lines.append(f"- **kind**: `{loader_info.get('kind', dataset)}`")
     lines.append(f"- **trace source**: `{v['source']}`")
+    if "config" in loader_info:
+        lines.append("- **loader config**:")
+        lines.append("")
+        lines.append("  ```json")
+        for line in json.dumps(loader_info["config"], indent=2).splitlines():
+            lines.append(f"  {line}")
+        lines.append("  ```")
     if "params" in loader_info:
         lines.append("- **loader params**:")
         lines.append("")
@@ -701,9 +818,16 @@ def render_report(
 
     lines.append("## Reproduction")
     lines.append("")
-    lines.append("```bash")
-    lines.append(f"python scripts/dataset_metrics.py --dataset {dataset}")
-    lines.append("```")
+    if loader_info.get("data_acquisition"):
+        lines.append("```bash")
+        for cmd in loader_info["data_acquisition"]:
+            lines.append(cmd)
+        lines.append(f"python scripts/dataset_metrics.py --dataset {dataset}")
+        lines.append("```")
+    else:
+        lines.append("```bash")
+        lines.append(f"python scripts/dataset_metrics.py --dataset {dataset}")
+        lines.append("```")
     lines.append("")
 
     return "\n".join(lines)
@@ -714,7 +838,32 @@ def render_report(
 # ---------------------------------------------------------------------------
 
 
-def distinctive_summary(dataset: str, metrics: dict) -> str:
+def distinctive_summary(dataset: str, metrics: dict, loader_info: dict | None = None) -> str:
+    if dataset == "code_completion":
+        v = metrics["volume"]
+        p = metrics["prefix"]
+        curve = metrics["cache_hit_curve"]
+        # Pick the capacity just above the prefix's block count to show
+        # where the hit rate saturates.
+        prefix_blocks = None
+        if loader_info is not None:
+            prefix_blocks = loader_info.get("config", {}).get("instruction_prefix_blocks_16")
+        sat = curve[-1]
+        for row in curve:
+            if prefix_blocks is not None and row["capacity_blocks"] >= prefix_blocks:
+                sat = row
+                break
+        return (
+            "code_completion is the single-turn dataset: every request is its own "
+            f"session (n_sessions={v['n_sessions']:,} ≈ n_requests={v['n_requests']:,}, "
+            "turns≈1), so prefix reuse is NOT driven by conversation history — it "
+            "comes entirely from the constant instruction template we prepend to "
+            f"every task. That template is {prefix_blocks} blocks; the oracle hit "
+            f"rate at capacity={sat['capacity_blocks']} blocks is {sat['hit_rate']:.2f}, "
+            f"and first-block top-10 share is {p['first_block_top10_share']:.3f} "
+            "(one block wins essentially all first-block slots). Routing gain above "
+            "that saturation point comes from somewhere other than cross-task reuse."
+        )
     if dataset == "synthetic":
         fz = metrics["prefix"]["family_zipf"]
         cv2 = metrics["timing"]["cv2_of_interarrival"]
@@ -763,15 +912,13 @@ def main(argv: list[str] | None = None) -> int:
 
     t0 = time.time()
     loader = DATASET_LOADERS[args.dataset]
-    # Only synthetic consumes n_requests currently; pass explicitly.
-    if args.dataset == "synthetic":
-        trace, loader_info = loader(args.n_requests, args.seed)
-    else:
-        trace, loader_info = loader(n_requests=args.n_requests, seed=args.seed)
+    trace, loader_info = loader(n_requests=args.n_requests, seed=args.seed)
     t_load = time.time() - t0
 
+    # Real-text datasets use tiktoken; synthetic emits random token ids.
+    is_nl = loader_info.get("kind") in {"code_completion", "lmsys", "sharegpt"}
     t0 = time.time()
-    metrics = compute_metrics(trace, block_size=args.block_size)
+    metrics = compute_metrics(trace, block_size=args.block_size, is_natural_language=is_nl)
     metrics["_runtime"] = {"load_s": t_load, "compute_s": time.time() - t0}
 
     # Write JSON.
@@ -792,7 +939,7 @@ def main(argv: list[str] | None = None) -> int:
     figure_paths = make_plots(
         trace, metrics, dataset=args.dataset, figures_dir=figures_dir, block_size=args.block_size
     )
-    summary = distinctive_summary(args.dataset, metrics)
+    summary = distinctive_summary(args.dataset, metrics, loader_info)
     md = render_report(
         args.dataset,
         metrics,
