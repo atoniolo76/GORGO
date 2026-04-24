@@ -33,11 +33,11 @@ class ThroughputPolicy:
         cands = cluster.prefill_capable()
         if not cands:
             return Decision("__none__", "__none__", "no-prefill-capable-pod")
-        pick = max(
+        pick = min(
             cands,
             key=lambda p: (
-                p.ewma_throughput_tps / (1 + p.active_prefill + p.active_decode),
-                -ord(p.spec.pod_id[0]),
+                -(p.ewma_throughput_tps / (1 + p.active_prefill + p.active_decode)),
+                p.spec.pod_id,
             ),
         )
         return Decision(
