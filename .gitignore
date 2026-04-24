@@ -28,6 +28,7 @@ uv.lock
 
 # data
 data/
+!research/data/
 results/
 
 # Gas Town (added by gt)

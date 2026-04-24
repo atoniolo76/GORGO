@@ -1,0 +1,257 @@
+{
+  "dataset": "synthetic",
+  "loader": {
+    "kind": "synthetic",
+    "params": {
+      "n_requests": 10000,
+      "arrival_rate_qps": 8.0,
+      "n_prefix_families": 64,
+      "zipf_s": 1.1,
+      "prompt_len_min": 256,
+      "prompt_len_max": 2048,
+      "max_output_tokens": 128,
+      "n_sessions": 200,
+      "seed": 0,
+      "shared_prefix_tokens": 512
+    }
+  },
+  "metrics": {
+    "volume": {
+      "n_requests": 10000,
+      "n_sessions": 200,
+      "n_families": 64,
+      "trace_duration_s": 1250.1395303517838,
+      "source": "synthetic(seed=0)"
+    },
+    "lengths": {
+      "prompt_tokens": {
+        "n": 10000,
+        "mean": 1152.6062,
+        "std": 518.7454240005978,
+        "min": 256.0,
+        "max": 2048.0,
+        "p50": 1146.0,
+        "p90": 1874.0,
+        "p95": 1958.0,
+        "p99": 2030.0
+      },
+      "output_tokens_budget": {
+        "n": 10000,
+        "mean": 128.0,
+        "std": 0.0,
+        "min": 128.0,
+        "max": 128.0,
+        "p50": 128.0,
+        "p90": 128.0,
+        "p95": 128.0,
+        "p99": 128.0
+      },
+      "prompt_histogram": [
+        317,
+        311,
+        309,
+        321,
+        294,
+        306,
+        334,
+        292,
+        291,
+        319,
+        364,
+        304,
+        305,
+        296,
+        345,
+        322,
+        300,
+        310,
+        329,
+        312,
+        330,
+        287,
+        276,
+        272,
+        304,
+        310,
+        324,
+        293,
+        350,
+        343,
+        307,
+        323
+      ],
+      "prompt_histogram_edges": [
+        256.0,
+        312.0,
+        368.0,
+        424.0,
+        480.0,
+        536.0,
+        592.0,
+        648.0,
+        704.0,
+        760.0,
+        816.0,
+        872.0,
+        928.0,
+        984.0,
+        1040.0,
+        1096.0,
+        1152.0,
+        1208.0,
+        1264.0,
+        1320.0,
+        1376.0,
+        1432.0,
+        1488.0,
+        1544.0,
+        1600.0,
+        1656.0,
+        1712.0,
+        1768.0,
+        1824.0,
+        1880.0,
+        1936.0,
+        1992.0,
+        2048.0
+      ]
+    },
+    "timing": {
+      "interarrival": {
+        "n": 9999,
+        "mean": 0.12502645568074647,
+        "std": 0.1242760662722605,
+        "min": 4.152935161982896e-06,
+        "max": 1.171775730673346,
+        "p50": 0.08593256610656397,
+        "p90": 0.29138154251252246,
+        "p95": 0.37533841414715424,
+        "p99": 0.5638938656605615
+      },
+      "cv2_of_interarrival": 0.9880323321340105,
+      "empirical_qps": 7.999107105417299,
+      "fano_factor_1s": 0.9719948840927257,
+      "fano_factor_10s": 1.406720634920635,
+      "arrivals_gini": 0.5000441495894563
+    },
+    "prefix": {
+      "block_size": 16,
+      "blocks_per_request": {
+        "n": 10000,
+        "mean": 71.5723,
+        "std": 32.422621311516444,
+        "min": 16.0,
+        "max": 128.0,
+        "p50": 71.0,
+        "p90": 117.0,
+        "p95": 122.0,
+        "p99": 126.0
+      },
+      "n_unique_blocks": 409937,
+      "n_total_block_occurrences": 715723,
+      "block_reuse_ratio": 0.42724070625088195,
+      "n_unique_first_blocks": 64,
+      "first_block_top10_share": 0.6697,
+      "first_block_zipf": {
+        "s": 1.1044035490903619,
+        "log_C": 7.83779963844553,
+        "r2": 0.9964524315289308,
+        "n_ranks": 64
+      },
+      "all_block_zipf": {
+        "s": 0.11753226334401186,
+        "log_C": 1.4226932275552544,
+        "r2": 0.14537282593367584,
+        "n_ranks": 409937
+      },
+      "family_zipf": {
+        "s": 1.1044035490903619,
+        "log_C": 7.83779963844553,
+        "r2": 0.9964524315289308,
+        "n_ranks": 64
+      },
+      "family_gini": 0.65065,
+      "family_top10_share": 0.6697
+    },
+    "cache_hit_curve": [
+      {
+        "capacity_blocks": 64,
+        "capacity_tokens": 1024,
+        "hit_rate": 0.017012168115318357,
+        "hits": 12176,
+        "lookups": 715723
+      },
+      {
+        "capacity_blocks": 256,
+        "capacity_tokens": 4096,
+        "hit_rate": 0.09830898266508133,
+        "hits": 70362,
+        "lookups": 715723
+      },
+      {
+        "capacity_blocks": 1024,
+        "capacity_tokens": 16384,
+        "hit_rate": 0.23030418192513025,
+        "hits": 164834,
+        "lookups": 715723
+      },
+      {
+        "capacity_blocks": 4096,
+        "capacity_tokens": 65536,
+        "hit_rate": 0.34075473332560224,
+        "hits": 243886,
+        "lookups": 715723
+      },
+      {
+        "capacity_blocks": 16384,
+        "capacity_tokens": 262144,
+        "hit_rate": 0.40944192096663096,
+        "hits": 293047,
+        "lookups": 715723
+      }
+    ],
+    "sessions": {
+      "turns_per_session": {
+        "n": 200,
+        "mean": 50.0,
+        "std": 7.078135347674555,
+        "min": 33.0,
+        "max": 70.0,
+        "p50": 50.0,
+        "p90": 60.0,
+        "p95": 61.0,
+        "p99": 67.02999999999997
+      },
+      "turns_per_session_gini": 0.07966300000000004,
+      "intra_session_first_block_reuse_rate": 0.5735714285714286,
+      "n_sessions_with_gte_3_turns": 200,
+      "prompt_growth_slope_tokens_per_turn": {
+        "n": 200,
+        "mean": -0.4160052580657463,
+        "std": 5.576718972842739,
+        "min": -14.510194404931257,
+        "max": 13.259227095093358,
+        "p50": -0.27679215449391115,
+        "p90": 6.3039492593165996,
+        "p95": 8.270706215275498,
+        "p99": 11.336880769568618
+      }
+    },
+    "text": {
+      "is_natural_language": false,
+      "token_id_summary": {
+        "sampled_from_first_n_requests": 500,
+        "unique_token_ids_in_sample": 31998,
+        "id_min": 0,
+        "id_max": 31999,
+        "id_mean": 15965.80512843232
+      },
+      "n_empty_prompts": 0,
+      "n_degenerate_prompts_lt_16": 0
+    },
+    "_runtime": {
+      "load_s": 6.3532984256744385,
+      "compute_s": 11.339451551437378
+    }
+  }
+}
