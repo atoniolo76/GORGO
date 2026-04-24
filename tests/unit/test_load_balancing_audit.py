@@ -317,46 +317,41 @@ def test_throughput_rotates_under_real_engine():
     assert max(counts.values()) - min(counts.values()) <= 4, counts
 
 
-def test_throughput_tiebreak_uses_only_first_char_of_pod_id():
-    """NEGATIVE: documents F8.
+def test_throughput_tiebreak_uses_full_pod_id():
+    """POSITIVE: F8 fixed.
 
-    Tie-break key is `-ord(pod_id[0])`. For pods whose first characters
-    DIFFER, the tie-break resolves. For pods whose first characters MATCH
-    (e.g., canonical p0/p1/p2), the tie-break is a no-op.
-
-    We construct two pods with distinct first chars to show the tie-break
-    does *something*; and we construct two pods with identical first
-    chars to show it does *nothing*.
+    Tie-break uses the full pod_id (not just the first character),
+    matching the 'smallest pod_id wins ties' convention of sibling
+    policies (F11). If this test fails, the tie-break has regressed to
+    -ord(pod_id[0]) and F8 is back.
     """
-    kv = KVCacheState.from_specs({"a0": 1, "b0": 1})
+    p = get_policy("throughput")
 
-    # a0 and b0 have distinct first chars. First request, cold start,
-    # all scores 0 → tie broken on -ord('a')=-97 vs -ord('b')=-98. max
-    # picks the LARGER value → -97 → 'a0'.
+    # Distinct first chars: smallest pod_id ('a0') wins over 'b0'.
+    kv_ab = KVCacheState.from_specs({"a0": 1, "b0": 1})
     cluster_ab = ClusterState.from_specs(
         [
             PodSpec("a0", Phase.BOTH, 1, 1 << 20, 2, 8),
             PodSpec("b0", Phase.BOTH, 1, 1 << 20, 2, 8),
         ]
     )
-    p = get_policy("throughput")
-    d = p.decide(Request("r", "s", 0.0, (1, 2), 4), cluster_ab, kv)
-    assert d.prefill_pod_id == "a0", "F8: tie-break on -ord(first_char) picks smallest first char."
+    d = p.decide(Request("r", "s", 0.0, (1, 2), 4), cluster_ab, kv_ab)
+    assert d.prefill_pod_id == "a0", (
+        "F8: tie-break on full pod_id picks lexicographically smallest."
+    )
 
-    # a0 and a1 share first char 'a'. Scores all zero → tie-break also
-    # all -97. Python's max on fully-tied sequence returns the first
-    # element in iteration order.
-    kv2 = KVCacheState.from_specs({"a0": 1, "a1": 1})
+    # Identical first chars, reverse insertion order: a1 inserted before
+    # a0. Old bug would collapse to iteration order and pick 'a1'. Fix
+    # picks smallest full pod_id → 'a0' regardless of insertion order.
+    kv_aa = KVCacheState.from_specs({"a1": 1, "a0": 1})
     cluster_aa = ClusterState.from_specs(
         [
-            PodSpec("a0", Phase.BOTH, 1, 1 << 20, 2, 8),
             PodSpec("a1", Phase.BOTH, 1, 1 << 20, 2, 8),
+            PodSpec("a0", Phase.BOTH, 1, 1 << 20, 2, 8),
         ]
     )
-    d2 = p.decide(Request("r", "s", 0.0, (1, 2), 4), cluster_aa, kv2)
-    # Iteration order follows dict insertion order: a0 inserted first.
+    d2 = p.decide(Request("r", "s", 0.0, (1, 2), 4), cluster_aa, kv_aa)
     assert d2.prefill_pod_id == "a0", (
-        "F8: when first chars are identical, tie-break collapses to "
-        "iteration order. If this flips, the tie-break was strengthened "
-        "to use the full pod_id — update this test and close the F8 bead."
+        "F8: when first chars match, tie-break still picks smallest full "
+        "pod_id — not iteration order."
     )
