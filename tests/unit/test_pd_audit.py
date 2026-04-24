@@ -9,8 +9,6 @@ See `research/reports/policy_audits/pd_topology.md` §4.2 for the gap list.
 
 from __future__ import annotations
 
-from collections import Counter
-
 import pytest
 
 from routing_harness import policies  # noqa: F401 — registers policies
@@ -159,8 +157,15 @@ def test_pd_prefill_cache_match_routes_to_owner():
 
 
 def test_pd_decode_busy_picks_least_loaded():
-    specs, cluster, kv = _pd_cluster_2x2()
-    # Make dcA clearly busier on active_decode; policy picks dcB.
+    # Two-decode island both peered to pfA; within the peered set the
+    # least-loaded decode wins.
+    specs = [
+        PodSpec("pfA", Phase.PREFILL, 1, 16 * 1024 * 1024, 4, 0, peer_ids=("dcA", "dcB")),
+        PodSpec("dcA", Phase.DECODE, 1, 4 * 1024 * 1024, 0, 8, peer_ids=("pfA",)),
+        PodSpec("dcB", Phase.DECODE, 1, 4 * 1024 * 1024, 0, 8, peer_ids=("pfA",)),
+    ]
+    cluster = ClusterState.from_specs(specs)
+    kv = KVCacheState.from_specs({s.pod_id: s.kv_cache_bytes for s in specs})
     cluster.pods["dcA"].active_decode = 8
     cluster.pods["dcB"].active_decode = 1
     p = get_policy("pd", block_size=16)
@@ -184,9 +189,7 @@ def test_pd_prefix_key_path():
     # Short prompt, opaque prefix_key — the _prefix path returns [prefix_key].
     kv.install("pfA", PrefixEntry("opaque-key", 16, 1024), now=1.0)
     p = get_policy("pd", block_size=16)
-    req = Request(
-        "r", "s", 0.0, tuple(range(4)), 4, prefix_key="opaque-key"
-    )
+    req = Request("r", "s", 0.0, tuple(range(4)), 4, prefix_key="opaque-key")
     d = p.decide(req, cluster, kv)
     assert d.prefill_pod_id == "pfA"
 
@@ -258,10 +261,7 @@ def test_pd_f19_engine_no_gratuitous_handoff_on_both_cluster():
     cluster = ClusterState.from_specs(specs)
     kv = KVCacheState.from_specs({s.pod_id: s.kv_cache_bytes for s in specs})
     eng = _engine(cluster, kv, get_policy("pd", block_size=16))
-    reqs = [
-        Request(f"r{i}", "s", float(i) * 0.1, tuple(range(32)), 4)
-        for i in range(5)
-    ]
+    reqs = [Request(f"r{i}", "s", float(i) * 0.1, tuple(range(32)), 4) for i in range(5)]
     eng.run(reqs)
     for rec in eng.metrics.records:
         assert rec.migrated is False
@@ -283,7 +283,15 @@ def test_pd_f20_decode_selection_ignores_stale_ewma():
     another's artificially large while active_decode points the other
     way: the decision must follow active_decode, not the multiplier.
     """
-    specs, cluster, kv = _pd_cluster_2x2()
+    # pfA is peered to both decodes so the peer filter (F23) does not
+    # constrain the decode choice; active_decode alone decides.
+    specs = [
+        PodSpec("pfA", Phase.PREFILL, 1, 16 * 1024 * 1024, 4, 0, peer_ids=("dcA", "dcB")),
+        PodSpec("dcA", Phase.DECODE, 1, 4 * 1024 * 1024, 0, 8, peer_ids=("pfA",)),
+        PodSpec("dcB", Phase.DECODE, 1, 4 * 1024 * 1024, 0, 8, peer_ids=("pfA",)),
+    ]
+    cluster = ClusterState.from_specs(specs)
+    kv = KVCacheState.from_specs({s.pod_id: s.kv_cache_bytes for s in specs})
     # Artificially diverge the (stale) decode EWMAs. Under the old
     # multiplier, dcA would win despite higher load because its EWMA is
     # tiny. Under the fix, active_decode alone decides — dcB wins.
@@ -304,10 +312,7 @@ def test_pd_f20_decode_ewma_still_stale_on_pure_decode_pods():
     """
     specs, cluster, kv = _pd_cluster_2x2()
     eng = _engine(cluster, kv, get_policy("pd", block_size=16))
-    reqs = [
-        Request(f"r{i}", "s", float(i) * 0.01, tuple(range(32)), 16)
-        for i in range(30)
-    ]
+    reqs = [Request(f"r{i}", "s", float(i) * 0.01, tuple(range(32)), 16) for i in range(30)]
     eng.run(reqs)
     warm = eng.config.initial_warm_latency_ms
     assert cluster.pods["dcA"].ewma_latency_ms == pytest.approx(warm)
@@ -315,27 +320,25 @@ def test_pd_f20_decode_ewma_still_stale_on_pure_decode_pods():
 
 
 # ---------------------------------------------------------------------------
-# F23: peer_ids ignored (pins current quirk)
+# F23: peer_ids respected (with fallback)
 # ---------------------------------------------------------------------------
 
 
-def test_pd_f23_peer_ids_ignored():
-    """F23: the policy does not consult PodSpec.peer_ids, so it can pair a
-    prefill pod with a decode pod that is not in its peer set.
+def test_pd_f23_peer_ids_prefer_peered_decode():
+    """F23 fix: the policy filters decode candidates to the chosen prefill
+    pod's `peer_ids`, keeping transfers on-fabric.
 
     Topology here: pfA is peered only with dcA; pfB is peered only with
-    dcB. We pre-load pfA's cache so prefill→pfA, then make dcA busy so
-    decode→dcB. Under a peer-aware policy this would either (a) refuse
-    the pair or (b) prefer the peer-matched dcA. Current pd picks (pfA,
-    dcB) — a mispaired transfer across un-peered pods.
+    dcB. We pre-load pfA's cache so prefill→pfA, then make dcA busier
+    than dcB. Pre-fix, the policy chose dcB on raw load. Post-fix, the
+    peer filter prefers dcA even though it's more loaded — the on-fabric
+    pairing wins over cross-fabric load-balancing.
     """
     specs, cluster, kv = _pd_cluster_2x2()
-    # Cache prefix only on pfA.
     tokens = tuple(range(32))
     hashes = enumerate_prefix_hashes(tokens, block_size=16)
     for h in hashes:
         kv.install("pfA", PrefixEntry(h, 16, 1024), now=1.0)
-    # Make dcA (pfA's peer) the busier decode.
     cluster.pods["dcA"].ewma_latency_ms = 10.0
     cluster.pods["dcB"].ewma_latency_ms = 10.0
     cluster.pods["dcA"].active_decode = 8
@@ -343,6 +346,44 @@ def test_pd_f23_peer_ids_ignored():
     p = get_policy("pd", block_size=16)
     d = p.decide(Request("r", "s", 2.0, tokens, 4), cluster, kv)
     assert d.prefill_pod_id == "pfA"
-    # F23: policy ignored peer_ids; picks dcB even though pfA's peer is dcA.
-    assert d.decode_pod_id == "dcB"
-    assert d.decode_pod_id not in cluster.pods["pfA"].spec.peer_ids
+    assert d.decode_pod_id == "dcA"
+    assert d.decode_pod_id in cluster.pods["pfA"].spec.peer_ids
+    assert "peer" in d.rationale
+
+
+def test_pd_f23_no_peers_falls_back_to_full_pool():
+    """When the chosen prefill pod has empty peer_ids, the policy must
+    fall back to the full decode pool rather than return nothing.
+    """
+    specs = [
+        PodSpec("pf0", Phase.PREFILL, 1, 16 * 1024 * 1024, 4, 0),
+        PodSpec("dc0", Phase.DECODE, 1, 4 * 1024 * 1024, 0, 8),
+        PodSpec("dc1", Phase.DECODE, 1, 4 * 1024 * 1024, 0, 8),
+    ]
+    cluster = ClusterState.from_specs(specs)
+    kv = KVCacheState.from_specs({s.pod_id: s.kv_cache_bytes for s in specs})
+    cluster.pods["dc0"].active_decode = 5
+    cluster.pods["dc1"].active_decode = 0
+    p = get_policy("pd", block_size=16)
+    d = p.decide(Request("r", "s", 0.0, tuple(range(16)), 4), cluster, kv)
+    assert d.prefill_pod_id == "pf0"
+    assert d.decode_pod_id == "dc1"
+    assert "nopeers" in d.rationale
+
+
+def test_pd_f23_declared_peers_absent_falls_back():
+    """When the prefill pod's peer_ids reference pods not present in the
+    decode pool (misconfigured / degraded topology), the policy falls
+    back to the full decode pool rather than refusing service.
+    """
+    specs = [
+        PodSpec("pf0", Phase.PREFILL, 1, 16 * 1024 * 1024, 4, 0, peer_ids=("dc_missing",)),
+        PodSpec("dc0", Phase.DECODE, 1, 4 * 1024 * 1024, 0, 8),
+    ]
+    cluster = ClusterState.from_specs(specs)
+    kv = KVCacheState.from_specs({s.pod_id: s.kv_cache_bytes for s in specs})
+    p = get_policy("pd", block_size=16)
+    d = p.decide(Request("r", "s", 0.0, tuple(range(16)), 4), cluster, kv)
+    assert d.prefill_pod_id == "pf0"
+    assert d.decode_pod_id == "dc0"
+    assert "unpeered" in d.rationale
