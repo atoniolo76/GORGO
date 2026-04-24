@@ -254,20 +254,21 @@ def test_least_kv_cache_rotates_on_unique_prefixes():
     assert max(counts.values()) - min(counts.values()) <= 2, counts
 
 
-def test_least_kv_cache_tie_break_picks_largest_pod_id():
-    """NEGATIVE: documents F9.
+def test_least_kv_cache_tie_break_picks_smallest_pod_id():
+    """POSITIVE: regression test for F9 (fix).
 
-    All pods empty → free = cap for all → `max` with `(free, pod_id)`
-    picks the largest pod_id (p2). This is inconsistent with the rest
-    of the load-balancing group (which prefers smallest pod_id). When
-    F9 is fixed, this test must flip and the discovered bead closed.
+    All pods empty → free = cap for all → tie on `(free, active_prefill)`
+    falls through to pod_id. The fix (go-edm) restructures the selection
+    as `min` over negated free bytes so the pod_id tie-break prefers the
+    smallest id, matching the rest of the load-balancing group. If this
+    flips back to 'p2', F9 has regressed.
     """
     cluster, kv = _fresh_cluster(_specs())
     p = get_policy("least-kv-cache")
     d = p.decide(Request("r", "s", 0.0, (1, 2), 4), cluster, kv)
-    assert d.prefill_pod_id == "p2", (
-        "F9 expected: max(pod_id) wins ties. If this assertion flips to "
-        "'p0', F9 has been fixed — update this test and close the bead."
+    assert d.prefill_pod_id == "p0", (
+        "F9 regression: tie-break must prefer smallest pod_id, matching "
+        "the rest of the load-balancing group."
     )
 
 
