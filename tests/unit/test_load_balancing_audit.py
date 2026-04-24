@@ -9,13 +9,11 @@ the test must be updated and the corresponding bead closed.
 
 from __future__ import annotations
 
-import statistics
-
 import pytest
 
 from routing_harness import policies  # noqa: F401 — register
 from routing_harness.cluster import ClusterState
-from routing_harness.core import Phase, PodRuntime, PodSpec, Request
+from routing_harness.core import Phase, PodSpec, Request
 from routing_harness.cost_model import (
     AnalyticCostModel,
     ComputeParams,
@@ -26,7 +24,6 @@ from routing_harness.kv_cache import KVCacheState
 from routing_harness.policy import get_policy
 from routing_harness.simulator.engine import EngineConfig, SimulationEngine
 from routing_harness.simulator.metrics import MetricsCollector
-
 
 LOAD_BALANCING_POLICIES = (
     "random",
@@ -102,9 +99,7 @@ def _run_trace(
     engine.run(trace)
     counts: dict[str, int] = {}
     for rec in metrics.records:
-        counts[rec.decision.prefill_pod_id] = (
-            counts.get(rec.decision.prefill_pod_id, 0) + 1
-        )
+        counts[rec.decision.prefill_pod_id] = counts.get(rec.decision.prefill_pod_id, 0) + 1
     return counts
 
 
@@ -276,26 +271,22 @@ def test_least_kv_cache_tie_break_picks_largest_pod_id():
     )
 
 
-def test_least_kv_cache_starves_on_shared_prefix():
-    """NEGATIVE: documents F10.
+def test_least_kv_cache_rotates_on_shared_prefix():
+    """POSITIVE: regression test for F10 (fix).
 
-    When every request shares the same prefix, the first install on the
-    tie-break winner (p2, per F9) warms its cache; subsequent installs
-    on p2 are byte-level no-ops, so p2.free never shrinks. Result: p2
-    captures the overwhelming majority of dispatches.
-
-    When F10 is fixed (e.g., by adding a load-aware secondary key),
-    this assertion will flip and the discovered bead must close.
+    Under shared-prefix workloads, install-after-cache-hit is a byte-level
+    no-op, so the first-warmed pod's `free` never shrinks. Without a
+    load-aware secondary key, that pod captures the overwhelming majority
+    of dispatches (reproduced at 58/1/1 on the baseline). The fix
+    (go-fw8) adds `-active_prefill` as a secondary sort key so free-byte
+    ties fall back to load balancing. Post-fix: 20/20/20 at 50 QPS.
+    If this flips back to starvation, F10 has regressed.
     """
     tokens = tuple(range(64))
     trace = [Request(f"r{i}", "s", i * 0.02, tokens, 32) for i in range(60)]
     counts = _run_trace("least-kv-cache", trace)
-    top = max(counts.values())
-    assert top >= 50, (
-        f"F10 expected: one pod captures ≥ 50/60 under shared prefix. "
-        f"Got {counts}. If this is no longer true, F10 has been mitigated; "
-        f"update this test and close the bead."
-    )
+    assert set(counts) == {"p0", "p1", "p2"}, counts
+    assert max(counts.values()) - min(counts.values()) <= 4, counts
 
 
 # -------------------------------------------------------------------------
@@ -349,9 +340,7 @@ def test_throughput_tiebreak_uses_only_first_char_of_pod_id():
     )
     p = get_policy("throughput")
     d = p.decide(Request("r", "s", 0.0, (1, 2), 4), cluster_ab, kv)
-    assert d.prefill_pod_id == "a0", (
-        "F8: tie-break on -ord(first_char) picks smallest first char."
-    )
+    assert d.prefill_pod_id == "a0", "F8: tie-break on -ord(first_char) picks smallest first char."
 
     # a0 and a1 share first char 'a'. Scores all zero → tie-break also
     # all -97. Python's max on fully-tied sequence returns the first

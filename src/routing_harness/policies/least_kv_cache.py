@@ -37,7 +37,15 @@ class LeastKVCachePolicy:
             used = kv_cache.size_bytes(p.spec.pod_id) if p.spec.pod_id in kv_cache.pods else 0
             return cap - used
 
-        pick = max(cands, key=lambda p: (free(p), p.spec.pod_id))
+        # Secondary key -active_prefill falls back to load-balancing when free
+        # bytes tie. Without it, shared-prefix workloads starve 2/3 of pods:
+        # the first pod warmed absorbs all subsequent requests because install
+        # on an already-cached prefix is a byte-level no-op, so its `free`
+        # never shrinks (F10, go-fw8).
+        pick = max(
+            cands,
+            key=lambda p: (free(p), -p.active_prefill, p.spec.pod_id),
+        )
         return Decision(
             pick.spec.pod_id,
             pick.spec.pod_id,
