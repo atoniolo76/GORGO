@@ -238,28 +238,24 @@ def test_pd_f18_consecutive_match_beats_scattered_blocks():
 # ---------------------------------------------------------------------------
 
 
-def test_pd_f19_colocated_fallback_tie_triggers_handoff():
-    """F19: under perfect ties, prefill's max picks largest pod_id and
-    decode's min picks smallest. On a BOTH-mode colocated cluster this
-    forces a cross-pod handoff on every dispatch.
-
-    When F19 is fixed (both branches agree on smallest-wins), flip to
-        assert d.prefill_pod_id == d.decode_pod_id
+def test_pd_f19_colocated_fallback_tie_colocates():
+    """F19 fix: under perfect ties, both branches settle on the smallest
+    pod_id, so a colocated BOTH-mode cluster stays on one pod and no
+    gratuitous handoff is charged.
     """
     specs = [PodSpec(f"p{i}", Phase.BOTH, 1, 8 * 1024 * 1024, 2, 8) for i in range(3)]
     cluster = ClusterState.from_specs(specs)
     kv = KVCacheState.from_specs({s.pod_id: s.kv_cache_bytes for s in specs})
     p = get_policy("pd", block_size=16)
     d = p.decide(Request("r", "s", 0.0, tuple(range(16)), 4), cluster, kv)
-    # F19: prefill='p2' (max), decode='p0' (min) — pods differ.
-    assert d.prefill_pod_id == "p2"
+    assert d.prefill_pod_id == "p0"
     assert d.decode_pod_id == "p0"
-    assert d.prefill_pod_id != d.decode_pod_id
+    assert d.prefill_pod_id == d.decode_pod_id
 
 
-def test_pd_f19_engine_charges_gratuitous_handoff_on_both_cluster():
-    """Engine-level reproduction of F19: pd_handoff_bytes fires on every
-    request in a colocated BOTH cluster even though no role-split exists.
+def test_pd_f19_engine_no_gratuitous_handoff_on_both_cluster():
+    """F19 fix: on a colocated BOTH cluster with no role-split, no
+    request should be charged pd_handoff_bytes under the tie-break fix.
     """
     specs = [PodSpec(f"p{i}", Phase.BOTH, 1, 8 * 1024 * 1024, 2, 8) for i in range(3)]
     cluster = ClusterState.from_specs(specs)
@@ -270,10 +266,9 @@ def test_pd_f19_engine_charges_gratuitous_handoff_on_both_cluster():
         for i in range(5)
     ]
     eng.run(reqs)
-    # Every request migrated and carried kv_transport_bytes > 0.
     for rec in eng.metrics.records:
-        assert rec.migrated is True
-        assert rec.kv_transport_bytes > 0
+        assert rec.migrated is False
+        assert rec.kv_transport_bytes == 0
 
 
 # ---------------------------------------------------------------------------
