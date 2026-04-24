@@ -40,6 +40,7 @@ class EngineConfig:
     kv_ewma_alpha: float = 0.2
     block_size: int = 16
     initial_warm_latency_ms: float = 5.0
+    initial_warm_tokens_per_req: float = 100.0
 
 
 @dataclass
@@ -60,9 +61,14 @@ class SimulationEngine:
     _seq: int = 0
 
     def __post_init__(self) -> None:
+        warm_tps = self.config.initial_warm_tokens_per_req / (
+            self.config.initial_warm_latency_ms / 1000.0
+        )
         for p in self.cluster.pods.values():
             if p.ewma_latency_ms == 0.0:
                 p.ewma_latency_ms = self.config.initial_warm_latency_ms
+            if p.ewma_throughput_tps == 0.0:
+                p.ewma_throughput_tps = warm_tps
 
     def _prefix_hashes(self, req: Request) -> list[str]:
         if req.prefix_key:

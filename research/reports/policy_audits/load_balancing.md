@@ -16,14 +16,17 @@ Four of the six policies (`random`, `least-request`, `least-busy-time`,
 traffic in the expected regimes. Two have bugs that are reproducible against
 the full engine on a tiny trace:
 
-- **`throughput` (F7, HIGH):** the starvation fix in commit `4540cca` is
-  *incomplete*. `ewma_throughput_tps` is initialized to `0.0` and only
-  advances via `_apply_side_effects` at dispatch — so cold pods never
-  accumulate a positive score. `max(score)` picks the first-warm pod on
-  every subsequent request. Reproduced: 60/0/0 dispatch across 3 colocated
-  pods at 50 QPS on a synthetic trace (§2.6.3). The 4540cca change
-  normalizes by `1 + active`, which helps only after all pods have
-  non-zero EWMA; under the realistic init path they never do.
+- **`throughput` (F7, HIGH — FIXED, go-z51):** the starvation fix in
+  commit `4540cca` was *incomplete*. `ewma_throughput_tps` was initialized
+  to `0.0` and only advanced via `_apply_side_effects` at dispatch — so
+  cold pods never accumulated a positive score. `max(score)` picked the
+  first-warm pod on every subsequent request. Reproduced: 60/0/0 dispatch
+  across 3 colocated pods at 50 QPS on a synthetic trace (§2.6.3).
+  **Fix (F7a):** engine `__post_init__` now warm-inits `ewma_throughput_tps`
+  to `initial_warm_tokens_per_req / (initial_warm_latency_ms/1000)` for
+  every pod with `ewma_throughput_tps == 0`, parallel to the existing
+  `ewma_latency_ms` warm. Post-fix: 20/20/20 at 50 QPS, 10/10/10 at 5 QPS.
+  Regression test: `test_throughput_rotates_under_real_engine`.
 - **`least-kv-cache` (F10, MEDIUM):** under shared-prefix workloads,
   install-after-cache-hit is a byte-level no-op, so the pod that was first
   warmed holds its `free = cap - bytes_used` value forever. Combined with
@@ -251,7 +254,7 @@ single-pod monopoly seen in sweep v4.
 #### 2.6.3 Findings
 
 **F7 (HIGH, throughput): cold-start starvation — the 4540cca fix is
-incomplete.** `pod.ewma_throughput_tps` is initialized to `0.0` (the
+incomplete. FIXED in go-z51 via F7a (see §2.6.4).** `pod.ewma_throughput_tps` was initialized to `0.0` (the
 default in `PodRuntime`, `core.py:90`). The engine's `__post_init__`
 warms **only** `ewma_latency_ms`, not `ewma_throughput_tps`
 (`engine.py:63–65`). `ewma_throughput_tps` is updated *exclusively*
@@ -299,6 +302,36 @@ Suggested fixes (any one suffices; F7a is simplest and least invasive):
 
 Filing F7 as discovered.
 
+#### 2.6.4 F7 fix (go-z51)
+
+F7a landed: `SimulationEngine.__post_init__` now warm-inits
+`ewma_throughput_tps` to
+`config.initial_warm_tokens_per_req / (config.initial_warm_latency_ms/1000)`
+for every pod whose EWMA is still `0.0`, mirroring the existing
+`ewma_latency_ms` warm. Defaults: `initial_warm_tokens_per_req=100.0`,
+`initial_warm_latency_ms=5.0` → initial implied throughput `20_000 tps`,
+identical across pods. The initial absolute value is immaterial for
+cold-start fairness; what matters is that (a) it is positive and (b) it
+is equal across pods, so the `/(1+active)` normalization from `4540cca`
+now drives the decision from the very first dispatch.
+
+Post-fix dispatch counts (same traces as §2.6.3):
+
+```
+throughput dispatch, 30 req @ 5 QPS:  {'p0': 10, 'p1': 10, 'p2': 10}
+throughput dispatch, 60 req @ 50 QPS: {'p0': 20, 'p1': 20, 'p2': 20}
+```
+
+Perfect rotation — 4540cca's normalization is now load-bearing instead of
+decorative. Regression captured in
+`tests/unit/test_load_balancing_audit.py::test_throughput_rotates_under_real_engine`
+(POSITIVE; replaces the NEGATIVE `test_throughput_cold_start_starvation`).
+
+F8 (tie-break collapse) remains open and now matters for exactly-tied
+cold-start states, but in practice the `/(1+active)` normalization
+desynchronizes scores after the first dispatch so the F8 path is rarely
+hit in realistic traces.
+
 **F8 (LOW, throughput): tie-break uses only the first character of
 `pod_id`.** Line 41: `-ord(p.spec.pod_id[0])`. For canonical ids
 `p0,p1,p2,...` all pods share the first character `'p'` and the tie-break
@@ -339,7 +372,7 @@ F3 from the prefix-aware audit, which flagged the same wart on
 |---|---|---|---|
 | `active_prefill`, `active_decode`, `queued` | `_apply_side_effects` (dispatch) + `_retire_up_to` (start of every `decide`) | Fresh-as-of-`now` at every decide | None |
 | `ewma_latency_ms` | `_apply_side_effects` at dispatch only | Only updates on dispatch; a retirement does not push the EWMA | Low — `least-busy-time` zeroes via the `(active+queued)` multiplier; `least-latency` self-corrects because observed > warm-init |
-| `ewma_throughput_tps` | same | same | **High** (F7) — no warm init, no retirement update |
+| `ewma_throughput_tps` | same | same | Medium — F7a landed warm-init; retirement update still absent (an idle pod's EWMA does not decay) |
 | `kv_cache.size_bytes` | `install` at dispatch (and LRU eviction at install-time) | Fresh for each decide | None — but F10 shows the signal is non-informative under shared-prefix workloads |
 | `pending_work_ms` | `+observed` at dispatch, `-service` at retirement, clamped ≥0 | Fresh at every decide | Used only by `prefix-cache-preble`; see prior audit F5 |
 
@@ -384,9 +417,11 @@ New file `tests/unit/test_load_balancing_audit.py`:
 - `test_least_kv_cache_tiebreak_picks_max_id` — **documents F9**;
   asserts current behavior (largest pod_id wins). Same negative-
   regression pattern.
-- `test_throughput_cold_start_starvation` — **documents F7**; asserts
-  one pod captures ≥ 90% of dispatches on a tiny trace. Forces attention
-  when F7 is fixed.
+- `test_throughput_rotates_under_real_engine` — **POSITIVE regression
+  for F7 fix (go-z51)**; asserts balanced rotation (`max-min ≤ 4`) at
+  both 5 QPS and 50 QPS. Replaces the prior NEGATIVE
+  `test_throughput_cold_start_starvation`. Will fail if the warm-init
+  added in F7a is removed or bypassed.
 - `test_throughput_tiebreak_uses_first_char_only` — **documents F8**;
   asserts pods named `a0` and `b0` tie-break differently from `p0` vs
   `p1`. Forces attention when F8 is fixed.
@@ -435,12 +470,12 @@ signal-freshness question against real traffic on three colocated pods.
 | `least-busy-time` | ≤ 0.10 |
 | `least-latency` | ≤ 0.20 (EWMA-driven cycling; may lag) |
 | `least-kv-cache` | 0.40–0.70 — **if F10 reproduces**; 0.10–0.20 if Modal's engine makes installs cost something extra (e.g., per-dispatch write-through) that our simulator misses |
-| `throughput` | ≥ 0.80 — **if F7 reproduces**; if Modal shows balanced traffic, the sim's warm-init idealization is hiding a different failure mode |
+| `throughput` | ≤ 0.20 post-F7a — near-rotation once all pods share an equal warm floor; a σ ≥ 0.40 on Modal would indicate the warm-init pathway differs in production (e.g., pods constructed outside `SimulationEngine.__post_init__`) and would reopen F7 |
 
-A `throughput` σ below 0.4 on Modal would be *more* alarming than
-reproduction: it would indicate that our simulator and production
-disagree on initial EWMA populations and that further auditing of the
-warm-init contract is warranted.
+Historical note: before F7a, this row expected σ ≥ 0.80 in the sim and
+used Modal σ < 0.4 as the *alarming* signal (simulator-vs-production
+disagreement on warm-init). With F7a landed, the sim itself rotates, so
+that framing no longer applies — now a high σ on Modal is the alarm.
 
 **Budget.** Mirrors the prefix-aware smoke: 3 pods × 6 runs × ~35 s
 active wall-clock ≈ 10.5 pod-minutes on A10G/L4 class. Estimated < $1
@@ -454,7 +489,7 @@ execution to `go-3j8`.
 
 - **F7**: `throughput` cold-start starvation — 4540cca fix incomplete;
   warm-init `ewma_throughput_tps` or treat zero-EWMA as infinite-
-  available.
+  available. **Fixed via F7a in go-z51** (see §2.6.4).
 - **F8**: `throughput` tie-break uses only `pod_id[0]`; collapses on
   canonical `p0/p1/p2` ids.
 - **F9**: `least-kv-cache` tie-break direction inconsistent with the
@@ -477,12 +512,13 @@ execution to `go-3j8`.
 | `least-busy-time` | **pass** — product formulation neutralizes EWMA staleness. |
 | `least-latency` | **pass** — depends on `initial_warm_latency_ms` warm-init; covered by new regression. |
 | `least-kv-cache` | **fail (correctness, MEDIUM)** — F10 reproducible on shared-prefix workloads. F9 is a contributing tie-break bug. Negative-regression tests pin current behavior. |
-| `throughput` | **fail (correctness, HIGH)** — F7 reproducible. `4540cca` fix does not eliminate the pathology it advertises fixing. F8 is a secondary tie-break bug. |
+| `throughput` | **pass post-F7a (go-z51)** — warm-init of `ewma_throughput_tps` restores cold-start fairness; `4540cca`'s `/(1+active)` normalization is now load-bearing. F8 tie-break wart remains open as a LOW finding. |
 
 Ready for Modal smoke (via `configs/smoke_load_balancing_modal.yaml`,
 gated on human approval). The two "fail" entries do not block the
 existing sweep conclusions in `research/reports/routing-comparison.md`
 — those sweeps did not use a cold-start single-family trace against
 `throughput`, and their `least-kv-cache` results were downweighted per
-§7.4 of that report — but they do flag F7 and F10 for fix-before-ship
-on any real-traffic deployment that would route through these policies.
+§7.4 of that report. With F7 fixed in go-z51, only F10 remains as a
+fix-before-ship item for any real-traffic deployment routing through
+these policies.
