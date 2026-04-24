@@ -23,9 +23,14 @@ as a no-handoff path, so degraded mode still produces tokens. See
 go-997 (F24) and `research/reports/policy_audits/pd_topology.md` §2.x.
 
 If no PD roles are present (all pods are Phase.BOTH), the two pools
-collapse to the same set and the policy still picks deterministically —
-prefix-match for prefill, active-decode for decode — over that shared
-set.
+collapse to the same set, but prefill and decode are still chosen
+independently — prefix-match for prefill, active-decode for decode —
+so they may land on different BOTH pods when those two signals
+disagree. When they do, the engine treats it as a same-cluster KV
+handoff and charges `pd_handoff_bytes` accordingly
+(engine.py:168–175). Under perfect ties both branches settle on the
+smallest `pod_id` and colocate (no gratuitous handoff); see go-5dt
+(F19) and `research/reports/policy_audits/pd_topology.md` §2.5.
 
 The decode signal is pod.active_decode directly, not
 ewma_latency_ms * active_decode. The engine only updates
@@ -101,9 +106,7 @@ class PDPolicy:
 
         if colocate_fallback:
             rationale = f"pd colocated={best_prefill.spec.pod_id} one-pool-empty"
-            return Decision(
-                best_prefill.spec.pod_id, best_prefill.spec.pod_id, rationale=rationale
-            )
+            return Decision(best_prefill.spec.pod_id, best_prefill.spec.pod_id, rationale=rationale)
 
         peers = set(best_prefill.spec.peer_ids)
         peered_decode = [p for p in decode if p.spec.pod_id in peers]
