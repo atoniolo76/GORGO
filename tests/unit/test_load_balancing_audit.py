@@ -303,27 +303,26 @@ def test_least_kv_cache_starves_on_shared_prefix():
 # -------------------------------------------------------------------------
 
 
-def test_throughput_cold_start_starvation():
-    """NEGATIVE: documents F7.
+def test_throughput_rotates_under_real_engine():
+    """POSITIVE: regression test for F7 (fix).
 
-    `ewma_throughput_tps` is never warm-initialized. Cold pods stay at
-    0.0; the first-warmed pod's score is positive for every subsequent
-    decide. Under both low and high load, p0 captures ~100% of traffic.
-
-    The commit 4540cca message claims this mode is fixed. It is not —
-    the normalization `/(1+active)` only helps after all pods have a
-    positive EWMA, which never happens in this trace. When F7 is fixed,
-    flip this assertion and close the bead.
+    With the engine warm-initializing `ewma_throughput_tps` in parallel
+    to `ewma_latency_ms`, all pods start equal and the `/(1+active)`
+    normalization carries the rotation. Cold-start starvation is gone
+    in both low- and high-load regimes. If this test flips back to
+    starvation, F7 has regressed.
     """
     tokens = tuple(range(64))
+    # High-load: 60 req @ 50 QPS — the regime that originally pinned p0.
     trace = [Request(f"r{i}", "s", i * 0.02, tokens, 32) for i in range(60)]
     counts = _run_trace("throughput", trace)
-    top = max(counts.values())
-    assert top >= 54, (
-        f"F7 expected: throughput cold-start starves non-warm pods ≥ 54/60. "
-        f"Got {counts}. If this no longer holds, F7 has been mitigated; "
-        f"update this test and close the bead."
-    )
+    assert set(counts) == {"p0", "p1", "p2"}, counts
+    assert max(counts.values()) - min(counts.values()) <= 4, counts
+    # Low-load: 30 req @ 5 QPS — same pathology under the bug.
+    trace = [Request(f"r{i}", "s", i * 0.2, tokens, 32) for i in range(30)]
+    counts = _run_trace("throughput", trace)
+    assert set(counts) == {"p0", "p1", "p2"}, counts
+    assert max(counts.values()) - min(counts.values()) <= 4, counts
 
 
 def test_throughput_tiebreak_uses_only_first_char_of_pod_id():

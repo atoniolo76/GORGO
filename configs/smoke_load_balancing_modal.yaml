@@ -10,12 +10,15 @@
 # checking whether the two starvation pathologies observed in simulation
 # reproduce against real vLLM timing on Modal.
 #
-#   F7 (throughput cold-start starvation, HIGH):
-#     In simulation, `throughput` sends 100% of traffic to p0 because
-#     `ewma_throughput_tps` is never warm-initialized. If Modal's engine
-#     populates this signal differently (e.g. warms it via idle tokens/s
-#     or admission probes), the pathology may be simulator-only. Smoke
-#     answers: does the sim reproduce on real traffic?
+#   F7 (throughput cold-start starvation, HIGH — FIXED in go-z51):
+#     Simulator previously sent 100% of traffic to p0 because
+#     `ewma_throughput_tps` was never warm-initialized. Fixed in go-z51:
+#     `SimulationEngine.__post_init__` now warm-inits the signal parallel
+#     to `ewma_latency_ms`. Sim now rotates 20/20/20 at 50 QPS. The Modal
+#     smoke now asks the *opposite* question: does production agree with
+#     the rotation the sim shows, or does Modal surface a different
+#     warm-init pathway (e.g. pods constructed outside the engine) that
+#     would resurrect the bug on real traffic?
 #
 #   F10 (least-kv-cache shared-prefix starvation, MEDIUM):
 #     In simulation, `least-kv-cache` sends ~97% of traffic to one pod
