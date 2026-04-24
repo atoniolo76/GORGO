@@ -156,6 +156,9 @@ def enumerate_prefix_hashes(tokens: Iterable[int], block_size: int = 16) -> list
     implementation: each block's hash is still blake2b over
     ``b",".join(str(t).encode() for t in seq[:end])``.
     """
+    if block_size <= 0:
+        raise ValueError(f"block_size must be positive, got {block_size}")
+
     import hashlib
 
     hasher = hashlib.blake2b(digest_size=16)
