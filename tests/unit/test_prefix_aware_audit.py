@@ -249,6 +249,28 @@ def test_preble_prefix_key_path_binds_to_owner(pod_specs):
     assert "exploit" in d.rationale
 
 
+def test_preble_prefix_key_short_prompt_missed_tokens_nonnegative(pod_specs):
+    """F4 regression: prefix_key with len(prompt) < block_size.
+
+    Under prefix_key, best_match∈{0,1} on a single opaque hash. If the
+    prompt is shorter than block_size, cached_tokens (= block_size) > len,
+    so missed_tokens would go negative without clamping. The exploit gate
+    still fires (full-prompt hit is defensible), but the missed_tokens
+    value fed to the gate must be a non-negative token count.
+    """
+    cluster, kv = _fresh(pod_specs)
+    _install_prefix(kv, "p1", ["opaque-key"])
+    p = get_policy("prefix-cache-preble", block_size=16)
+    # 8-token prompt, block_size=16 → pre-fix: cached=16, missed=-8.
+    d = p.decide(
+        Request("r", "s", 0.0, tuple(range(8)), 4, prefix_key="opaque-key"),
+        cluster,
+        kv,
+    )
+    assert d.prefill_pod_id == "p1"
+    assert "exploit" in d.rationale
+
+
 def test_preble_stable_under_repeated_identical_requests(pod_specs):
     """Without load changes, exploit stays sticky on the owner."""
     cluster, kv = _fresh(pod_specs)

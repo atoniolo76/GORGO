@@ -95,8 +95,13 @@ class PreblePrefixCachePolicy:
         )
 
         # Exploit/explore gate (Preble E2).
+        # Clamp missed_tokens at 0: under prefix_key, best_match is {0,1} on a
+        # single opaque hash regardless of prompt length, so cached_tokens
+        # (block-granularity estimate) can exceed the actual prompt length.
+        # Without the clamp, short prompts produce negative missed_tokens and
+        # spuriously satisfy `missed < cached`.
         cached_tokens = best_match * self.block_size
-        missed_tokens = len(request.prompt_tokens) - cached_tokens
+        missed_tokens = max(0, len(request.prompt_tokens) - cached_tokens)
 
         if best_match > 0 and missed_tokens < cached_tokens:
             # EXPLOIT: prefix reuse dominates. Bind to owner unless
