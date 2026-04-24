@@ -1,0 +1,155 @@
+# HUMAN-GATED — Modal smoke config for the load-balancing (stateless)
+# policy group: random, least-request, least-busy-time, least-latency,
+# least-kv-cache, throughput.
+#
+# Bead: go-651 (child of go-czi, linked to go-3j8 for actually running).
+# Spend ceiling: ≤ $1 on A10G/L4-class instances. 3 pods × 6 policies ×
+# ~35s active ≈ 10.5 pod-minutes; under the epic's per-smoke budget.
+#
+# Purpose: resolve the signal-freshness question from the audit by
+# checking whether the two starvation pathologies observed in simulation
+# reproduce against real vLLM timing on Modal.
+#
+#   F7 (throughput cold-start starvation, HIGH):
+#     In simulation, `throughput` sends 100% of traffic to p0 because
+#     `ewma_throughput_tps` is never warm-initialized. If Modal's engine
+#     populates this signal differently (e.g. warms it via idle tokens/s
+#     or admission probes), the pathology may be simulator-only. Smoke
+#     answers: does the sim reproduce on real traffic?
+#
+#   F10 (least-kv-cache shared-prefix starvation, MEDIUM):
+#     In simulation, `least-kv-cache` sends ~97% of traffic to one pod
+#     under shared-prefix workloads because `install` is a byte-level
+#     no-op once the hashes exist. Modal may show the same effect; or
+#     may show load balancing if real vLLM charges extra for install-
+#     after-hit (e.g., via a write-through cost).
+#
+# Workload is deliberately small (200 req @ 6 QPS ≈ 33s wall-clock) so
+# all six policy runs fit inside one container lifetime.
+#
+# See `research/reports/policy_audits/load_balancing.md` §5 for expected
+# per-policy skew bands.
+
+name: "smoke-load-balancing"
+
+policy:
+  # Base value only; the six companion_runs below override this. A
+  # single-policy invocation defaults to `random` as a safe, balanced
+  # baseline.
+  policy_id: "random"
+  params:
+    seed: 0
+
+topology:
+  pods:
+    - pod_id: "p0"
+      role: "both"
+      gpu_count: 1
+      # 1 GiB KV budget — matches smoke_prefix_aware_modal for
+      # comparability.
+      kv_cache_bytes: 1073741824
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 16
+    - pod_id: "p1"
+      role: "both"
+      gpu_count: 1
+      kv_cache_bytes: 1073741824
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 16
+    - pod_id: "p2"
+      role: "both"
+      gpu_count: 1
+      kv_cache_bytes: 1073741824
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 16
+
+# Modal-calibrated analytic costs (aligned with smoke_prefix_aware_modal
+# for back-to-back comparability. Simulator uses these locally to
+# predict; Modal runner uses the real engine in engine/modal_sglang.py).
+compute:
+  prefill_ms_per_token: 0.08
+  decode_ms_per_token: 6.0
+  prefill_overhead_ms: 5.0
+  decode_overhead_ms: 2.0
+
+network:
+  client_rtt_ms: 5.0
+  inter_pod_rtt_ms: 0.2
+  inter_pod_bandwidth_gbps: 100.0
+  kv_bytes_per_token: 131072
+  serialization_overhead_ms: 0.5
+
+scheduler:
+  base_routing_ms: 0.2
+  per_pod_consideration_us: 5.0
+
+engine:
+  kv_ewma_alpha: 0.2
+  block_size: 16
+  initial_warm_latency_ms: 5.0
+
+workload:
+  kind: "synthetic"
+  params:
+    n_requests: 200              # ~33s wall-clock at 6 QPS
+    arrival_rate_qps: 6.0        # moderate — enough to force queueing, not enough to saturate
+    n_prefix_families: 4         # few families → F10 reproduction regime
+    zipf_s: 1.3                  # moderate skew; one dominant family
+    prompt_len_min: 512
+    prompt_len_max: 1536
+    max_output_tokens: 64
+    n_sessions: 32
+    shared_prefix_tokens: 1024   # 64 blocks; exercises F10's install-after-hit regime
+
+seeds: [0]
+output_dir: "results/smoke-load-balancing-modal"
+
+# Six companion runs — one per policy. If the Modal runner accepts only
+# a single policy per invocation, dispatch each with an override:
+#   modal run ... --policy random
+#   modal run ... --policy least-request
+#   ... etc.
+companion_runs:
+  - name: "random"
+    policy_id: "random"
+    params:
+      seed: 0
+  - name: "least-request"
+    policy_id: "least-request"
+    params: {}
+  - name: "least-busy-time"
+    policy_id: "least-busy-time"
+    params: {}
+  - name: "least-latency"
+    policy_id: "least-latency"
+    params: {}
+  - name: "least-kv-cache"
+    policy_id: "least-kv-cache"
+    params: {}
+  - name: "throughput"
+    policy_id: "throughput"
+    params: {}
+
+# Acceptance criteria (checked post-run by reviewer before closing go-3j8).
+# All six policies must complete; the shape of the result determines whether
+# each sim-observed pathology reproduces.
+#
+# Per-pod dispatch skew s = stdev(per_pod_counts) / mean(per_pod_counts) over
+# 3 pods. Expected bands:
+#   - random:           s ≤ 0.15   (law of large numbers on N=200)
+#   - least-request:    s ≤ 0.05
+#   - least-busy-time:  s ≤ 0.10
+#   - least-latency:    s ≤ 0.20   (EWMA-driven cycle; cold init may lag)
+#   - least-kv-cache:   s in [0.40, 0.70]  if F10 reproduces
+#                       s ≤ 0.20              if Modal's install has a cost the sim misses
+#   - throughput:       s ≥ 0.80   if F7 reproduces
+#                       s ≤ 0.40   would be MORE alarming — indicates sim/prod disagreement
+#                                   on warm-init that merits a fresh audit
+#
+# Total Modal spend ≤ $1 (enforced by per-run container ceiling).
+#
+# Reporting format (for the reviewer):
+#   - Dispatch counts per pod per policy (6 rows × 3 cols)
+#   - Computed skew s per policy
+#   - p50/p95/p99 end-to-end latency per policy
+#   - Per-pod max concurrent in-flight (for F12 oversubscription awareness)
