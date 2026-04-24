@@ -8,7 +8,27 @@ Expects::
     <root>/train/data-*.arrow
 
 Tokenization matches ``build_eval_dataset`` (tiktoken ``gpt-4o``; message ``content``
-concatenated in order). Supports ``conversation`` / ``messages`` / ``conversations``.
+concatenated in order). LMSYS / WildChat expose a ``conversation`` column (role/content
+list): trie ingest and per-key dedup use **only** that column when present. The winning
+row per ``conversation_id`` / ``conversation_hash`` is the one with the **longest**
+tiktoken sequence (tie: earliest row). Splits without ``conversation`` fall back to the
+first non-empty among ``messages`` / ``conversations``, with winner = max **message
+count**.
+
+**Content-hash prefix dedup** (``--dedup-content-prefix-sha256``): build a trie on
+**SHA256(UTF-8 content)** per message (order preserved; role ignored). Rows are comparable
+as prefixes iff digests match element-wise up to ``min(len)``; only **maximal** rows
+(longest digest list in each prefix chain) are inserted into the radix trie. With this
+mode, **tokens-per-conversation** stats use only those same ingested rows (no extra pass
+or tiktoken for conversation-key winners); row-count / duplicate metrics still use all
+rows with a key.
+**WildChat default:** this mode is **on by default** when the resolved disk path looks
+like WildChat or you pass ``--preset wildchat`` (including custom ``--dataset-disk-path``).
+Use ``--no-dedup-content-prefix-sha256`` for the legacy longest-row-per-conversation-key
+behavior. LMSYS and other roots default to **off** unless you pass the dedup flag.
+When the split has ``hashed_ip`` (e.g. WildChat), prefix chains are resolved **per IP
+bucket** so only same-user rows compete—smaller tries and the same assumption as
+cross-row shared prefixes coming from one user.
 
 **User key:** tries ``user_id``, ``hashed_user_id``, ``hashed_ip`` (WildChat),
 ``user_hash``, ``ip_hash``, ``conversation_id``, ``conversation_hash``. Override with
@@ -17,24 +37,24 @@ overlap ~0).
 
 **Conversation stats:** if the split has ``conversation_id`` or ``conversation_hash``,
 also reports duplicate conversation keys (rows with count > 1), rows-per-conversation
-distribution, and tokens-per-conversation (tiktoken ``gpt-4o``, summed across rows in
-the processed range). Aggregates are included in checkpoints; old checkpoints without
+distribution, and tokens-per-conversation for the winning row per key (not summed
+across duplicate rows). Aggregates are included in checkpoints; old checkpoints without
 them skip this block until you delete ``prefix_trie_checkpoints/`` and rerun from row 0.
 
 After a full pass, per-conversation aggregates are written to
 ``prefix_trie_conversation_aggregates.pkl`` and
 ``prefix_trie_checkpoints/conversation_aggregates.pkl`` (small files, no tries).
-``--conversation-stats-only`` tries the **newest** ``prefix_trie_checkpoints/rows_*.pkl``
-first (heavy unpickle), then small aggregate pickles. Partial checkpoints
-(``next_row`` < ``limit``) still yield conversation stats with a warning; small caches
-are only written after a **full**-run checkpoint load.
+``--conversation-stats-only`` loads small aggregate pickles only (does **not** unpickle
+``rows_*.pkl``). If those are missing, scans the split with tiktoken and recomputes
+conversation aggregates (slower, works with old trie checkpoints that lack
+``conversation_*`` in the pickle). Written caches speed up the next stats-only run.
 
 Volumes: ``GORGO-lmsys-chat-1m`` at ``/lmsys``, ``GORGO-hf-datasets`` at ``/datasets``.
 
 Examples::
 
-    modal run --env=alessio-dev data_processing/build_hf_prefix_trie.py::prefix_trie
-    modal run --detach --env=alessio-dev data_processing/build_hf_prefix_trie.py::prefix_trie --preset wildchat
+    modal run --env=GORGO data_processing/build_hf_prefix_trie.py::prefix_trie
+    modal run --detach --env=GORGO data_processing/build_hf_prefix_trie.py::prefix_trie --preset wildchat
     modal run data_processing/build_hf_prefix_trie.py::prefix_trie --preset lmsys \\
         --dataset-disk-path /lmsys/lmsys-chat-1m
     # ``--preset auto`` tries LMSYS paths first, then WildChat. Override search order with
@@ -94,11 +114,27 @@ WILDCHAT_DISK_CANDIDATES: list[tuple[str, str]] = [
 CONVERSATION_AGGREGATES_FILENAME = "prefix_trie_conversation_aggregates.pkl"
 # Small pickle next to ``rows_*.pkl`` (no tries); fast path for ``--conversation-stats-only``.
 CHECKPOINT_CONVERSATION_AGGREGATES_FILENAME = "conversation_aggregates.pkl"
-CONVERSATION_AGGREGATES_VERSION = 1
+CONVERSATION_AGGREGATES_VERSION = 6
+# Bumped when trie ingest or per-conversation token semantics change (v2: one row per
+# conversation key, the longest by message count; v3: ingest accounting in aggregate
+# pickles; trie checkpoint schema 3 adds persisted ingest counters on rows_*.pkl;
+# v4: when ``conversation`` column exists, messages and winner selection use that
+# column only; winner is longest by tiktoken length, not message count;
+# v5: with ``--dedup-content-prefix-sha256``, conversation token totals come only from
+# prefix-ingested rows (no separate conversation-key winner pass);
+# v6: content-hash dedup may partition by ``hashed_ip`` when present (checkpoint field
+# ``dhfpt_content_hash_partition``).
+TRIE_CHECKPOINT_SCHEMA_VERSION = 4
 # Progress logs while computing overlap stats over per-user tries (can be millions of keys).
 OVERLAP_STATS_LOG_EVERY_USERS = 50_000
 # Log sort progress inside ``_summarize_int_distribution`` when this many values or more.
 DISTRIBUTION_SORT_LOG_MIN = 300_000
+# How many ``rows_*.pkl`` files to try (after exact name; rest by largest file size first).
+ROWS_CHECKPOINT_MAX_LOAD_ATTEMPTS = 15
+# If this basename exists under ``prefix_trie_checkpoints/``, use **only** that file for
+# conversation aggregates from rows checkpoints (WildChat train full run). Remove when
+# generic resolution is enough.
+HARDCODED_ROWS_CHECKPOINT_BASENAME = "rows_03199860.pkl"
 
 
 def _fmt_pct(num: float, den: float) -> str:
@@ -174,6 +210,21 @@ def _candidates_for_preset(preset: str) -> list[tuple[str, str]]:
     raise ValueError(f"unknown --preset {preset!r}; use auto, lmsys, or wildchat")
 
 
+def _is_wildchat_disk_root(root: str) -> bool:
+    return "wildchat" in os.path.normpath(root).lower()
+
+
+def _preset_is_wildchat(preset: str | None) -> bool:
+    if not preset:
+        return False
+    p = preset.lower().strip().replace("-", "_")
+    return p in ("wildchat", "wild_chat", "allenai_wildchat")
+
+
+def _default_dedup_content_prefix_sha256(root: str, run_preset: str | None) -> bool:
+    return _is_wildchat_disk_root(root) or _preset_is_wildchat(run_preset)
+
+
 def _merge_disk_candidates(
     preset: str,
     extra_candidates: str | None,
@@ -195,10 +246,20 @@ def _stats_basename(root: str) -> str:
     return safe or "dataset"
 
 
-def _messages_from_row(row: dict) -> list:
+def _messages_from_row(
+    row: dict,
+    *,
+    message_source: str | None = None,
+) -> list:
+    """Message list for tokenization / dedup.
+
+    If ``message_source`` is set (e.g. ``conversation``), only that column is
+    used. Otherwise the first non-empty among ``MESSAGE_COLUMNS`` is used.
+    """
     import json
 
-    for key in MESSAGE_COLUMNS:
+    keys = (message_source,) if message_source else MESSAGE_COLUMNS
+    for key in keys:
         if key not in row:
             continue
         conv = row[key]
@@ -212,6 +273,31 @@ def _messages_from_row(row: dict) -> list:
         if isinstance(conv, list):
             return conv
     return []
+
+
+def _dedup_message_source(columns: set[str]) -> str | None:
+    """Prefer canonical ``conversation`` list (role/content) when the column exists."""
+    if "conversation" in columns:
+        return "conversation"
+    return None
+
+
+def _dedup_stats_labels(
+    message_source: str | None,
+) -> tuple[str, str]:
+    """JSON semantic key and console caption for per-conversation token stats."""
+    if message_source == "conversation":
+        return (
+            "longest_row_by_tiktoken_gpt4o_on_conversation_column",
+            (
+                "Tokens / conversation (tiktoken gpt-4o, longest row per key by length "
+                "on column 'conversation'):  "
+            ),
+        )
+    return (
+        "longest_row_by_message_count_first_matching_message_column",
+        ("Tokens / conversation (tiktoken gpt-4o, longest row per key by message count):  "),
+    )
 
 
 def _conversation_key_column(columns: set[str]) -> str | None:
@@ -247,7 +333,7 @@ def _try_load_conversation_aggregates(
     n_total: int,
     min_sequence_len: int,
     conv_col: str,
-) -> tuple[dict[str, int], dict[str, int]] | None:
+) -> tuple[dict[str, int], dict[str, int], int, int] | None:
     import pickle
 
     if not os.path.isfile(path):
@@ -274,7 +360,11 @@ def _try_load_conversation_aggregates(
     ctt = payload.get("conversation_token_totals")
     if not isinstance(crc, dict) or not isinstance(ctt, dict):
         return None
-    return crc, ctt
+    rm = payload.get("rows_missing_conversation_key")
+    rs = payload.get("rows_skipped_duplicate_conversation")
+    if not isinstance(rm, int) or not isinstance(rs, int):
+        return None
+    return crc, ctt, rm, rs
 
 
 def _save_conversation_aggregates(
@@ -286,6 +376,8 @@ def _save_conversation_aggregates(
     conv_col: str,
     conversation_row_counts: dict[str, int],
     conversation_token_totals: dict[str, int],
+    rows_missing_conversation_key: int,
+    rows_skipped_duplicate_conversation: int,
     completed_next_row: int | None = None,
 ) -> None:
     import pickle
@@ -303,6 +395,8 @@ def _save_conversation_aggregates(
                 "completed_next_row": done,
                 "conversation_row_counts": conversation_row_counts,
                 "conversation_token_totals": conversation_token_totals,
+                "rows_missing_conversation_key": rows_missing_conversation_key,
+                "rows_skipped_duplicate_conversation": rows_skipped_duplicate_conversation,
             },
             f,
             protocol=pickle.HIGHEST_PROTOCOL,
@@ -310,15 +404,41 @@ def _save_conversation_aggregates(
     os.replace(tmp_path, path)
 
 
-def _try_load_conversation_aggregates_from_latest_rows_checkpoint(
+def _rows_checkpoint_exact_path(tries_dir: str, limit: int) -> str:
+    """Path for ``rows_{limit:08d}.pkl`` (same naming as checkpoint writer)."""
+    return os.path.join(tries_dir, f"rows_{limit:08d}.pkl")
+
+
+def _try_load_conversation_aggregates_from_rows_checkpoints(
     tries_dir: str,
     *,
     limit: int,
-) -> tuple[dict[str, int], dict[str, int], str, bool, int | None] | None:
-    """Load aggregates from the **single newest** ``rows_*.pkl`` (by row suffix; unpickle is heavy).
+) -> (
+    tuple[
+        dict[str, int],
+        dict[str, int],
+        str,
+        bool,
+        int | None,
+        int | None,
+        int,
+        int,
+    ]
+    | None
+):
+    """Load conversation aggregates from ``rows_*.pkl`` (unpickle is heavy).
 
-    Returns ``(row_counts, token_totals, path, full_run, checkpoint_next_row)`` where
-    ``full_run`` means ``payload[\"next_row\"] == limit``.
+    Tries the canonical ``rows_{limit:08d}.pkl`` first, then up to
+    ``ROWS_CHECKPOINT_MAX_LOAD_ATTEMPTS - 1`` other files ordered by **file size**
+    (largest first — usually the final full trie snapshot). Within each load, prefers
+    ``payload[\"limit\"] == limit``; otherwise records the best **complete** checkpoint
+    (``next_row == payload[\"limit\"]``) with the largest ``limit`` (caller warns if
+    below current split).
+
+    Returns
+    ``(row_counts, token_totals, path, full_run, checkpoint_next_row, payload_limit,
+    rows_missing_conversation_key, rows_skipped_duplicate_conversation)`` where
+    ``full_run`` means ``checkpoint_next_row == limit`` (current dataset row cap).
     """
     import pickle
 
@@ -332,25 +452,128 @@ def _try_load_conversation_aggregates_from_latest_rows_checkpoint(
             numbered.append((int(m.group(1)), name))
     if not numbered:
         return None
-    _row_end, name = max(numbered, key=lambda x: x[0])
-    path = os.path.join(tries_dir, name)
-    try:
-        with open(path, "rb") as f:
-            payload = pickle.load(f)
-    except (OSError, pickle.UnpicklingError, EOFError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    if payload.get("limit") != limit:
-        return None
-    crc = payload.get("conversation_row_counts")
-    ctt = payload.get("conversation_token_totals")
-    if not isinstance(crc, dict) or not isinstance(ctt, dict):
-        return None
-    next_row = payload.get("next_row")
-    full_run = next_row == limit
-    ckpt_next = int(next_row) if isinstance(next_row, int) else None
-    return crc, ctt, path, full_run, ckpt_next
+
+    sized: list[tuple[int, str]] = []
+    for _row_end, name in numbered:
+        p = os.path.join(tries_dir, name)
+        try:
+            sz = os.path.getsize(p)
+        except OSError:
+            continue
+        sized.append((sz, p))
+    sized.sort(key=lambda x: x[0], reverse=True)
+
+    paths_to_try: list[str] = []
+    seen: set[str] = set()
+    hardcoded = os.path.join(tries_dir, HARDCODED_ROWS_CHECKPOINT_BASENAME)
+    if os.path.isfile(hardcoded):
+        paths_to_try.append(hardcoded)
+        seen.add(hardcoded)
+    else:
+        exact = _rows_checkpoint_exact_path(tries_dir, limit)
+        if os.path.isfile(exact):
+            paths_to_try.append(exact)
+            seen.add(exact)
+        for sz, p in sized:
+            if p in seen:
+                continue
+            seen.add(p)
+            paths_to_try.append(p)
+            if len(paths_to_try) >= ROWS_CHECKPOINT_MAX_LOAD_ATTEMPTS:
+                break
+
+    best_relaxed: tuple[int, str, dict, dict, int, int, int] | None = None
+
+    for path in paths_to_try:
+        base = os.path.basename(path)
+        try:
+            with open(path, "rb") as f:
+                payload = pickle.load(f)
+        except (OSError, pickle.UnpicklingError, EOFError) as e:
+            print(f"[prefix_trie] skip {base}: unpickle error ({type(e).__name__})", flush=True)
+            continue
+        if not isinstance(payload, dict):
+            print(f"[prefix_trie] skip {base}: not a dict payload", flush=True)
+            continue
+
+        crc = payload.get("conversation_row_counts")
+        ctt = payload.get("conversation_token_totals")
+        if not isinstance(crc, dict) or not isinstance(ctt, dict):
+            print(
+                f"[prefix_trie] skip {base}: missing conversation_row_counts / "
+                "conversation_token_totals",
+                flush=True,
+            )
+            continue
+        if payload.get("conversation_aggregates_version") != CONVERSATION_AGGREGATES_VERSION:
+            print(
+                f"[prefix_trie] skip {base}: conversation_aggregates_version "
+                f"{payload.get('conversation_aggregates_version')!r} "
+                f"!= {CONVERSATION_AGGREGATES_VERSION}",
+                flush=True,
+            )
+            continue
+        rm_ck = payload.get("rows_missing_conversation_key")
+        rs_ck = payload.get("rows_skipped_duplicate_conversation")
+        if not isinstance(rm_ck, int) or not isinstance(rs_ck, int):
+            print(
+                f"[prefix_trie] skip {base}: missing rows_missing_conversation_key / "
+                "rows_skipped_duplicate_conversation",
+                flush=True,
+            )
+            continue
+
+        plimit = payload.get("limit")
+        nrow = payload.get("next_row")
+        if not isinstance(plimit, int) or not isinstance(nrow, int):
+            print(
+                f"[prefix_trie] skip {base}: invalid limit/next_row types",
+                flush=True,
+            )
+            continue
+
+        if plimit == limit:
+            full_run = nrow == limit
+            ckpt_next = nrow
+            try:
+                sz_gb = os.path.getsize(path) / (1024**3)
+                sz_note = f", {sz_gb:.2f} GiB on disk"
+            except OSError:
+                sz_note = ""
+            print(
+                f"[prefix_trie] using rows checkpoint {base} (limit={plimit:,}{sz_note})",
+                flush=True,
+            )
+            return crc, ctt, path, full_run, ckpt_next, plimit, rm_ck, rs_ck
+
+        if nrow == plimit:
+            if best_relaxed is None or plimit > best_relaxed[0]:
+                best_relaxed = (plimit, path, crc, ctt, nrow, rm_ck, rs_ck)
+        else:
+            print(
+                f"[prefix_trie] skip {base}: incomplete (next_row={nrow:,} "
+                f"vs checkpoint limit={plimit:,})",
+                flush=True,
+            )
+
+    if best_relaxed is not None:
+        plimit, path, crc, ctt, nrow, rm_ck, rs_ck = best_relaxed
+        base = os.path.basename(path)
+        full_run = nrow == limit
+        try:
+            sz_gb = os.path.getsize(path) / (1024**3)
+            sz_note = f", {sz_gb:.2f} GiB on disk"
+        except OSError:
+            sz_note = ""
+        print(
+            f"[prefix_trie] using rows checkpoint {base} (checkpoint limit={plimit:,}, "
+            f"current dataset limit={limit:,}; stats cover the checkpoint run only"
+            f"{sz_note})",
+            flush=True,
+        )
+        return crc, ctt, path, full_run, nrow, plimit, rm_ck, rs_ck
+
+    return None
 
 
 def _resolve_conversation_aggregates_stats_only(
@@ -360,23 +583,44 @@ def _resolve_conversation_aggregates_stats_only(
     n_total: int,
     min_sequence_len: int,
     conv_col: str,
-) -> tuple[dict[str, int], dict[str, int], str, bool, int | None] | None:
-    """Return (row_counts, token_totals, source_label, full_run, checkpoint_next_row)."""
+    skip_rows_checkpoints: bool = False,
+) -> (
+    tuple[
+        dict[str, int],
+        dict[str, int],
+        str,
+        bool,
+        int | None,
+        int | None,
+        int,
+        int,
+    ]
+    | None
+):
+    """Return (row_counts, token_totals, source, full_run, ckpt_next, payload_limit,
+    rows_missing_conversation_key, rows_skipped_duplicate_conversation).
+
+    When ``skip_rows_checkpoints`` (``--conversation-stats-only``), only tries small
+    aggregate pickles — avoids unpickling multi-GB ``rows_*.pkl`` that often lack
+    ``conversation_*`` keys on older runs; caller may scan the dataset instead.
+    """
 
     tries_dir = os.path.join(root, "prefix_trie_checkpoints")
 
-    from_ckpt = _try_load_conversation_aggregates_from_latest_rows_checkpoint(
-        tries_dir, limit=limit
-    )
-    if from_ckpt is not None:
-        crc, ctt, ck_path, full_run, ckpt_next = from_ckpt
-        return (
-            crc,
-            ctt,
-            f"latest rows checkpoint ({ck_path!r})",
-            full_run,
-            ckpt_next,
-        )
+    if not skip_rows_checkpoints:
+        from_ckpt = _try_load_conversation_aggregates_from_rows_checkpoints(tries_dir, limit=limit)
+        if from_ckpt is not None:
+            crc, ctt, ck_path, full_run, ckpt_next, plimit, rm_ck, rs_ck = from_ckpt
+            return (
+                crc,
+                ctt,
+                f"rows checkpoint ({ck_path!r})",
+                full_run,
+                ckpt_next,
+                plimit,
+                rm_ck,
+                rs_ck,
+            )
 
     for path, label in (
         (_conversation_aggregates_path(root), "dataset root aggregate file"),
@@ -393,7 +637,8 @@ def _resolve_conversation_aggregates_stats_only(
             conv_col=conv_col,
         )
         if got is not None:
-            return got[0], got[1], f"{label} ({path!r})", True, None
+            crc, ctt, rm, rs = got
+            return crc, ctt, f"{label} ({path!r})", True, None, limit, rm, rs
 
     return None
 
@@ -403,8 +648,19 @@ def _emit_conversation_stats(
     conv_stats_incomplete: bool,
     conv_row_counts: dict[str, int],
     conv_token_totals: dict[str, int],
+    *,
+    tokens_per_conversation_semantic: str = "longest_row_by_message_count_first_matching_message_column",
+    tokens_per_conversation_caption: str = (
+        "Tokens / conversation (tiktoken gpt-4o, longest row per key by message count):  "
+    ),
+    survivor_token_lengths: list[int] | None = None,
 ) -> dict | None:
-    """Print the conversation block; return the JSON-able ``conversation_stats`` dict."""
+    """Print the conversation block; return the JSON-able ``conversation_stats`` dict.
+
+    If ``survivor_token_lengths`` is set (content-hash dedup runs), the token distribution
+    is over **those rows only** (one length per maximal prefix chain), not one value per
+    conversation key with zeros for non-survivors.
+    """
     if conv_col and not conv_stats_incomplete and conv_row_counts:
         import time
 
@@ -424,11 +680,22 @@ def _emit_conversation_stats(
             flush=True,
         )
         rows_per_conv = list(conv_row_counts.values())
-        tok_per_conv = [conv_token_totals.get(k, 0) for k in conv_row_counts]
+        if survivor_token_lengths is not None:
+            tok_per_conv = list(survivor_token_lengths)
+            tok_sem = "tiktoken_gpt4o_per_content_hash_survivor_row"
+            tok_caption = (
+                "Tokens per prefix-survivor row (tiktoken gpt-4o, after content-hash dedup):  "
+            )
+            tok_log = "tokens per prefix-survivor row"
+        else:
+            tok_per_conv = [conv_token_totals.get(k, 0) for k in conv_row_counts]
+            tok_sem = tokens_per_conversation_semantic
+            tok_caption = tokens_per_conversation_caption
+            tok_log = "tokens per conversation"
         print(f"  [stats] summarizing row-count distribution...", flush=True)
         row_dist = _summarize_int_distribution(rows_per_conv, log_label="rows per conversation")
         print(f"  [stats] summarizing token-count distribution...", flush=True)
-        tok_dist = _summarize_int_distribution(tok_per_conv, log_label="tokens per conversation")
+        tok_dist = _summarize_int_distribution(tok_per_conv, log_label=tok_log)
         print(
             f"  [stats] ranking conversations for top-10 display ({n_distinct:,} keys)...",
             flush=True,
@@ -446,11 +713,17 @@ def _emit_conversation_stats(
             f"p50={row_dist['p50']:,}  p90={row_dist['p90']:,}  p99={row_dist['p99']:,}"
         )
         print(
-            "Tokens / conversation (tiktoken gpt-4o, summed over rows in split):  "
+            f"{tok_caption}"
             f"min={tok_dist['min']:,}  max={tok_dist['max']:,}  "
             f"mean={tok_dist['mean']:.2f}  stdev={tok_dist['stdev']:.2f}  "
             f"p50={tok_dist['p50']:,}  p90={tok_dist['p90']:,}  p99={tok_dist['p99']:,}"
         )
+        if survivor_token_lengths is not None:
+            print(
+                f"  (token stats over {len(survivor_token_lengths):,} survivor rows, "
+                f"not {n_distinct:,} conversation keys)",
+                flush=True,
+            )
         print("Top 10 conversations by row count:")
         for cnt, key in top_by_rows:
             print(f"  {cnt:>10,}  rows  {key!s}")
@@ -460,8 +733,9 @@ def _emit_conversation_stats(
             flush=True,
         )
 
-        return {
+        out = {
             "conversation_key_column": conv_col,
+            "tokens_per_conversation_semantic": tok_sem,
             "rows_with_conversation_key": rows_attributed,
             "distinct_conversations": n_distinct,
             "conversations_with_duplicate_rows": dup_conv_keys,
@@ -472,6 +746,10 @@ def _emit_conversation_stats(
                 {"conversation_key": k, "row_count": c} for c, k in top_by_rows
             ],
         }
+        if survivor_token_lengths is not None:
+            out["token_distribution_survivor_row_count"] = len(survivor_token_lengths)
+            out["token_distribution_scope"] = "content_hash_survivor_rows_only"
+        return out
     if conv_col and conv_stats_incomplete:
         print(
             "\n--- Conversation stats ---\n"
@@ -571,8 +849,13 @@ def _user_key(
     return f"row:{row_index}"
 
 
-def _row_to_token_ids(row: dict, enc) -> list[int]:
-    messages = _messages_from_row(row)
+def _row_to_token_ids(
+    row: dict,
+    enc,
+    *,
+    message_source: str | None = None,
+) -> list[int]:
+    messages = _messages_from_row(row, message_source=message_source)
     out: list[int] = []
     for msg in messages:
         if isinstance(msg, dict):
@@ -584,6 +867,257 @@ def _row_to_token_ids(row: dict, enc) -> list[int]:
         if text:
             out.extend(enc.encode(text, disallowed_special=()))
     return out
+
+
+def _message_count_from_row(
+    row: dict,
+    *,
+    message_source: str | None = None,
+) -> int:
+    return len(_messages_from_row(row, message_source=message_source))
+
+
+class _ContentHashTrieNode:
+    __slots__ = ("children", "end_rows", "subtree_max_term_depth")
+
+    def __init__(self) -> None:
+        self.children: dict[bytes, _ContentHashTrieNode] = {}
+        self.end_rows: list[int] = []
+        self.subtree_max_term_depth: int = -1
+
+
+def _content_sha256_digest_sequence(
+    row: dict,
+    *,
+    message_source: str | None,
+) -> tuple[bytes, ...]:
+    """SHA256 of UTF-8 ``content`` per message, in order (role ignored)."""
+    import hashlib
+
+    digests: list[bytes] = []
+    for msg in _messages_from_row(row, message_source=message_source):
+        if isinstance(msg, dict):
+            text = _content_to_str(msg.get("content"))
+        elif isinstance(msg, str):
+            text = msg
+        else:
+            text = ""
+        digests.append(hashlib.sha256(text.encode("utf-8")).digest())
+    return tuple(digests)
+
+
+def _content_hash_partition_key(row: dict, partition_column: str) -> str:
+    """Stable bucket key for partitioning prefix dedup (e.g. WildChat ``hashed_ip``)."""
+    v = row.get(partition_column)
+    if v is None or str(v) == "":
+        return "__missing__"
+    return str(v)
+
+
+def _winners_from_single_content_hash_root(root: _ContentHashTrieNode) -> set[int]:
+    """Maximal row indices for one content-hash prefix trie (one user bucket or global)."""
+
+    def subtree_max_term_depth(node: _ContentHashTrieNode, depth: int) -> int:
+        m = depth if node.end_rows else -1
+        for ch in node.children.values():
+            m = max(m, subtree_max_term_depth(ch, depth + 1))
+        node.subtree_max_term_depth = m
+        return m
+
+    subtree_max_term_depth(root, 0)
+    winners: set[int] = set()
+
+    def collect(node: _ContentHashTrieNode, depth: int) -> None:
+        if node.end_rows and node.subtree_max_term_depth <= depth:
+            winners.add(min(node.end_rows))
+        for ch in node.children.values():
+            collect(ch, depth + 1)
+
+    collect(root, 0)
+    return winners
+
+
+def _maximal_row_indices_content_prefix_sha256(
+    dset,
+    *,
+    limit: int,
+    row_batch_size: int,
+    message_source: str | None,
+    partition_column: str | None = None,
+) -> frozenset[int]:
+    """Row indices to ingest: maximal under prefix order on per-turn content SHA256 lists.
+
+    Rows ``a`` and ``b`` compare as prefixes iff digests match element-wise up to
+    ``min(len(a), len(b))``; equivalently one digest sequence is a prefix of the other.
+    Among a chain, only the **longest** sequence is kept (tie at same node: smallest
+    row index).
+
+    If ``partition_column`` is set (e.g. ``hashed_ip``), each row is inserted only into
+    that column's bucket's trie—prefix dominance is **within bucket**, not global.
+    """
+    import time
+
+    roots: dict[str, _ContentHashTrieNode] = {}
+    t0 = time.time()
+    for start in range(0, limit, row_batch_size):
+        end = min(start + row_batch_size, limit)
+        batch = dset[start:end]
+        keys = list(batch.keys())
+        batch_len = len(batch[keys[0]]) if keys else 0
+        for j in range(batch_len):
+            row = {k: batch[k][j] for k in keys}
+            row_index = start + j
+            digests = _content_sha256_digest_sequence(row, message_source=message_source)
+            if partition_column:
+                pkey = _content_hash_partition_key(row, partition_column)
+                root = roots.setdefault(pkey, _ContentHashTrieNode())
+            else:
+                root = roots.setdefault("__global__", _ContentHashTrieNode())
+            node = root
+            for d in digests:
+                node = node.children.setdefault(d, _ContentHashTrieNode())
+            node.end_rows.append(row_index)
+        print(
+            f"  [content-hash prefix trie] rows {end:,}/{limit:,} | "
+            f"{len(roots):,} partition(s) | {time.time() - t0:,.0f}s",
+            flush=True,
+        )
+
+    winners: set[int] = set()
+    for root in roots.values():
+        winners |= _winners_from_single_content_hash_root(root)
+    print(
+        f"  [content-hash prefix trie] maximal rows for radix ingest: {len(winners):,} / {limit:,}",
+        flush=True,
+    )
+    return frozenset(winners)
+
+
+DEDUP_TRIE_CONVERSATION_KEY = "conversation_key"
+DEDUP_TRIE_CONTENT_PREFIX_SHA256 = "content_prefix_sha256"
+
+
+def _conversation_winners_from_dataset(
+    dset,
+    *,
+    conv_col: str,
+    limit: int,
+    row_batch_size: int,
+    message_source: str | None = None,
+    enc=None,
+) -> dict[str, int]:
+    """Map conversation key -> row index of the longest variant (tie: smallest index).
+
+    When ``enc`` is set (``conversation`` column datasets), compares
+    ``len(_row_to_token_ids(..., message_source=message_source))``. Otherwise uses
+    message count only (HF sets without a dedicated ``conversation`` column).
+    """
+    import time
+
+    winners: dict[str, int] = {}
+    best_score: dict[str, int] = {}
+    use_tokens = enc is not None
+    t0 = time.time()
+    for start in range(0, limit, row_batch_size):
+        end = min(start + row_batch_size, limit)
+        batch = dset[start:end]
+        keys = list(batch.keys())
+        batch_len = len(batch[keys[0]]) if keys else 0
+        for j in range(batch_len):
+            row = {k: batch[k][j] for k in keys}
+            row_index = start + j
+            ckey = _conversation_key_value(row, conv_col)
+            if ckey is None:
+                continue
+            if use_tokens:
+                score = len(_row_to_token_ids(row, enc, message_source=message_source))
+            else:
+                score = _message_count_from_row(row, message_source=message_source)
+            prev = best_score.get(ckey)
+            if prev is None or score > prev:
+                best_score[ckey] = score
+                winners[ckey] = row_index
+        elapsed = time.time() - t0
+        mode = "tiktoken length" if use_tokens else "message count"
+        print(
+            f"  [conversation winners] rows {end:,}/{limit:,} | "
+            f"{len(winners):,} distinct keys | score={mode} | {elapsed:,.0f}s",
+            flush=True,
+        )
+    return winners
+
+
+def _scan_dataset_for_conversation_aggregates(
+    dset,
+    *,
+    conv_col: str,
+    limit: int,
+    row_batch_size: int,
+    message_source: str | None = None,
+) -> tuple[dict[str, int], dict[str, int], int, int]:
+    """Rebuild ``conversation_row_counts`` / ``conversation_token_totals`` by scanning rows.
+
+    Used when ``--conversation-stats-only`` but checkpoints predate those fields.
+    Row counts include every row with a non-empty key. Token totals use the winning row
+    per key only, same tie-breaking as the trie ingest pass.
+
+    Also returns ``rows_missing_conversation_key`` and ``rows_skipped_duplicate_conversation``
+    over ``0..limit`` (same semantics as the trie ingest pass).
+    """
+    import time
+
+    import tiktoken
+
+    enc = tiktoken.encoding_for_model("gpt-4o")
+    win_enc = enc if message_source == "conversation" else None
+    print(
+        "[prefix_trie] Resolving winning row per conversation key ("
+        f"{'tiktoken length on conversation' if win_enc else 'message count'})...",
+        flush=True,
+    )
+    winners = _conversation_winners_from_dataset(
+        dset,
+        conv_col=conv_col,
+        limit=limit,
+        row_batch_size=row_batch_size,
+        message_source=message_source,
+        enc=win_enc,
+    )
+    conv_row_counts: dict[str, int] = {}
+    conv_token_totals: dict[str, int] = {}
+    rows_missing_conversation_key = 0
+    rows_skipped_duplicate_conversation = 0
+    t0 = time.time()
+    for start in range(0, limit, row_batch_size):
+        end = min(start + row_batch_size, limit)
+        batch = dset[start:end]
+        keys = list(batch.keys())
+        batch_len = len(batch[keys[0]]) if keys else 0
+        for j in range(batch_len):
+            row = {k: batch[k][j] for k in keys}
+            row_index = start + j
+            ckey = _conversation_key_value(row, conv_col)
+            if ckey is None:
+                rows_missing_conversation_key += 1
+                continue
+            conv_row_counts[ckey] = conv_row_counts.get(ckey, 0) + 1
+            if row_index != winners.get(ckey):
+                rows_skipped_duplicate_conversation += 1
+                continue
+            token_ids = _row_to_token_ids(row, enc, message_source=message_source)
+            conv_token_totals[ckey] = len(token_ids)
+        elapsed = time.time() - t0
+        print(
+            f"  [conversation scan] rows {end:,}/{limit:,} | "
+            f"{len(conv_row_counts):,} distinct conversations | {elapsed:,.0f}s",
+            flush=True,
+        )
+    return (
+        conv_row_counts,
+        conv_token_totals,
+        rows_missing_conversation_key,
+        rows_skipped_duplicate_conversation,
+    )
 
 
 def _commit_for_root(root: str) -> None:
@@ -615,6 +1149,7 @@ def build_hf_disk_prefix_tries(
     max_rows: int | None = None,
     stats_tag: str | None = None,
     conversation_stats_only: bool = False,
+    dedup_content_prefix_sha256: bool | None = None,
 ):
     import json
     import pickle
@@ -632,6 +1167,15 @@ def build_hf_disk_prefix_tries(
             else (LMSYS_DISK_CANDIDATES + WILDCHAT_DISK_CANDIDATES)
         )
         _, root = _find_disk_root(cands)
+
+    if dedup_content_prefix_sha256 is None:
+        dedup_content_prefix_sha256 = _default_dedup_content_prefix_sha256(root, run_preset)
+        if dedup_content_prefix_sha256:
+            print(
+                "[prefix_trie] Default: content-hash prefix dedup "
+                "(WildChat disk path or --preset wildchat).",
+                flush=True,
+            )
 
     sys.setrecursionlimit(1_000_000)
 
@@ -651,6 +1195,14 @@ def build_hf_disk_prefix_tries(
     limit = n_total if max_rows is None else min(n_total, max_rows)
     columns = set(dset.column_names)
     conv_col = _conversation_key_column(columns)
+    message_source = _dedup_message_source(columns)
+    content_hash_partition_column = "hashed_ip" if "hashed_ip" in columns else None
+    expected_ch_partition = content_hash_partition_column if dedup_content_prefix_sha256 else None
+    if message_source:
+        print(
+            f"[prefix_trie] Message list for trie + per-key dedup: {message_source!r} "
+            "(not messages/conversations fallback for those steps)."
+        )
     print(
         f"Loaded {root!r} split len={n_total:,} (processing {limit:,}); "
         f"columns={sorted(columns)[:24]}{'…' if len(columns) > 24 else ''}"
@@ -678,29 +1230,68 @@ def build_hf_disk_prefix_tries(
             n_total=n_total,
             min_sequence_len=min_sequence_len,
             conv_col=conv_col,
+            skip_rows_checkpoints=True,
         )
         if resolved is None:
             tries_dir = os.path.join(root, "prefix_trie_checkpoints")
             print(
-                f"[prefix_trie] No usable conversation aggregates (tried latest rows_*.pkl "
-                f"under {tries_dir!r}, then dataset root {CONVERSATION_AGGREGATES_FILENAME!r}, "
-                f"then prefix_trie_checkpoints/{CHECKPOINT_CONVERSATION_AGGREGATES_FILENAME!r}). "
-                f"Latest checkpoint must match limit={limit:,} and include "
-                "conversation_row_counts / conversation_token_totals."
+                f"[prefix_trie] No small aggregate files "
+                f"({CONVERSATION_AGGREGATES_FILENAME!r} or "
+                f"prefix_trie_checkpoints/{CHECKPOINT_CONVERSATION_AGGREGATES_FILENAME!r}). "
+                f"Large rows_*.pkl under {tries_dir!r} are skipped in stats-only mode "
+                f"(older checkpoints often lack conversation_* fields). "
+                f"Scanning {limit:,} rows with tiktoken…"
             )
-            return {}
-        conv_row_counts, conv_token_totals, agg_source, aggregates_full_run, ckpt_next = resolved
-        print(
-            f"[prefix_trie] Loaded conversation aggregates from {agg_source} "
-            "(skipping trie build and per-row tokenization)."
-        )
-        if not aggregates_full_run and ckpt_next is not None:
+            (
+                conv_row_counts,
+                conv_token_totals,
+                rows_missing_conversation_key,
+                rows_skipped_duplicate_conversation,
+            ) = _scan_dataset_for_conversation_aggregates(
+                dset,
+                conv_col=conv_col,
+                limit=limit,
+                row_batch_size=row_batch_size,
+                message_source=message_source,
+            )
+            agg_source = (
+                "dataset scan (recomputed; no small aggregate cache; "
+                "rows checkpoints not loaded in --conversation-stats-only)"
+            )
+            aggregates_full_run = True
+            ckpt_next = limit
+            checkpoint_payload_limit = limit
+        else:
+            (
+                conv_row_counts,
+                conv_token_totals,
+                agg_source,
+                aggregates_full_run,
+                ckpt_next,
+                checkpoint_payload_limit,
+                rows_missing_conversation_key,
+                rows_skipped_duplicate_conversation,
+            ) = resolved
+            print(
+                f"[prefix_trie] Loaded conversation aggregates from {agg_source} "
+                "(skipping trie build and dataset scan)."
+            )
+        if checkpoint_payload_limit is not None and checkpoint_payload_limit != limit:
+            print(
+                f"[prefix_trie] WARNING: aggregates are for checkpoint limit "
+                f"{checkpoint_payload_limit:,}; current split limit is {limit:,}."
+            )
+        elif not aggregates_full_run and ckpt_next is not None:
             print(
                 f"[prefix_trie] WARNING: partial checkpoint (next_row={ckpt_next:,} "
                 f"vs limit={limit:,}); conversation stats are only for rows processed "
                 "before that checkpoint."
             )
-        if "rows checkpoint" in agg_source and aggregates_full_run:
+        if (
+            aggregates_full_run
+            and checkpoint_payload_limit == limit
+            and ("rows checkpoint" in agg_source or "dataset scan" in agg_source)
+        ):
             os.makedirs(os.path.join(root, "prefix_trie_checkpoints"), exist_ok=True)
             for save_path in (
                 _conversation_aggregates_path(root),
@@ -714,6 +1305,8 @@ def build_hf_disk_prefix_tries(
                     conv_col=conv_col,
                     conversation_row_counts=conv_row_counts,
                     conversation_token_totals=conv_token_totals,
+                    rows_missing_conversation_key=rows_missing_conversation_key,
+                    rows_skipped_duplicate_conversation=rows_skipped_duplicate_conversation,
                     completed_next_row=limit,
                 )
             print(
@@ -722,18 +1315,38 @@ def build_hf_disk_prefix_tries(
                 f"prefix_trie_checkpoints/{CHECKPOINT_CONVERSATION_AGGREGATES_FILENAME!r}) "
                 "for faster loads next time."
             )
+        print(
+            f"\n[ingest accounting] rows_processed={limit:,}  "
+            f"rows_missing_conversation_key={rows_missing_conversation_key:,}  "
+            f"rows_skipped_duplicate_conversation={rows_skipped_duplicate_conversation:,}  "
+            f"(column {conv_col!r})",
+            flush=True,
+        )
+        _t_sem, _t_cap = _dedup_stats_labels(message_source)
         conversation_stats = _emit_conversation_stats(
-            conv_col, False, conv_row_counts, conv_token_totals
+            conv_col,
+            False,
+            conv_row_counts,
+            conv_token_totals,
+            tokens_per_conversation_semantic=_t_sem,
+            tokens_per_conversation_caption=_t_cap,
         )
         stats = {
             "dataset_disk_path": root,
             "stats_tag": tag,
             "preset": run_preset,
             "extra_candidates": extra_candidates_logged,
+            "dedup_message_source": message_source,
+            "content_hash_dedup_partition_column": expected_ch_partition,
             "conversation_stats_only": True,
+            "rows_processed": limit,
+            "sequences_ingested": None,
+            "rows_missing_conversation_key": rows_missing_conversation_key,
+            "rows_skipped_duplicate_conversation": rows_skipped_duplicate_conversation,
             "conversation_aggregates_source": agg_source,
             "conversation_aggregates_full_run": aggregates_full_run,
             "checkpoint_next_row": ckpt_next,
+            "checkpoint_payload_limit": checkpoint_payload_limit,
             "conversation_stats": conversation_stats,
         }
         stats_path = os.path.join(root, f"prefix_trie_stats_{tag}.json")
@@ -757,6 +1370,15 @@ def build_hf_disk_prefix_tries(
     conv_row_counts: dict[str, int] = {}
     conv_token_totals: dict[str, int] = {}
     conv_stats_incomplete = False
+    rows_missing_conversation_key = 0
+    rows_skipped_duplicate_conversation = 0
+    prefix_survivor_token_lens: list[int] = []
+    prefix_survivor_token_lens_resume_incomplete = False
+    expected_dedup_trie = (
+        DEDUP_TRIE_CONTENT_PREFIX_SHA256
+        if dedup_content_prefix_sha256
+        else DEDUP_TRIE_CONVERSATION_KEY
+    )
 
     ckpt_files = sorted(
         f for f in os.listdir(tries_dir) if f.startswith("rows_") and f.endswith(".pkl")
@@ -766,21 +1388,75 @@ def build_hf_disk_prefix_tries(
         print(f"Resuming from checkpoint: {latest}")
         with open(latest, "rb") as f:
             payload = pickle.load(f)
-        global_trie = payload["global_trie"]
-        per_user_tries = payload["per_user_tries"]
-        total_tokens = payload["total_tokens"]
-        total_sequences = payload["total_sequences"]
-        skipped_empty = payload["skipped_empty"]
-        resume_row = payload["next_row"]
-        if conv_col and payload.get("conversation_row_counts") is not None:
-            conv_row_counts = payload["conversation_row_counts"]
-            conv_token_totals = payload.get("conversation_token_totals") or {}
-        elif conv_col:
-            conv_stats_incomplete = True
-            print(
-                "  WARNING: checkpoint has no conversation_row_counts; "
-                "duplicate / per-conversation token stats omitted this run."
-            )
+        ckpt_schema = int(payload.get("trie_build_schema", 1))
+        saved_dedup = payload.get("dhfpt_dedup", DEDUP_TRIE_CONVERSATION_KEY)
+        saved_ch_part = payload.get("dhfpt_content_hash_partition")
+        dedup_mismatch = (
+            saved_dedup != expected_dedup_trie or saved_ch_part != expected_ch_partition
+        )
+        if ckpt_schema < TRIE_CHECKPOINT_SCHEMA_VERSION or dedup_mismatch:
+            if dedup_mismatch and ckpt_schema >= TRIE_CHECKPOINT_SCHEMA_VERSION:
+                print(
+                    "  WARNING: checkpoint trie dedup "
+                    f"(mode {saved_dedup!r} vs {expected_dedup_trie!r}, "
+                    f"content-hash partition {saved_ch_part!r} vs {expected_ch_partition!r}); "
+                    "rebuilding tries from row 0.",
+                    flush=True,
+                )
+            if ckpt_schema < TRIE_CHECKPOINT_SCHEMA_VERSION:
+                print(
+                    "  WARNING: checkpoint predates current trie schema "
+                    f"(trie_build_schema={ckpt_schema} < {TRIE_CHECKPOINT_SCHEMA_VERSION}); "
+                    "rebuilding tries from row 0. Delete stale rows_*.pkl to silence this."
+                )
+            global_trie = RadixTrie()
+            per_user_tries = {}
+            total_tokens = 0
+            total_sequences = 0
+            skipped_empty = 0
+            resume_row = 0
+            conv_row_counts = {}
+            conv_token_totals = {}
+            rows_missing_conversation_key = 0
+            rows_skipped_duplicate_conversation = 0
+            prefix_survivor_token_lens = []
+            prefix_survivor_token_lens_resume_incomplete = False
+        else:
+            global_trie = payload["global_trie"]
+            per_user_tries = payload["per_user_tries"]
+            total_tokens = payload["total_tokens"]
+            total_sequences = payload["total_sequences"]
+            skipped_empty = payload["skipped_empty"]
+            resume_row = payload["next_row"]
+            rm_ck = payload.get("rows_missing_conversation_key")
+            rs_ck = payload.get("rows_skipped_duplicate_conversation")
+            if isinstance(rm_ck, int) and isinstance(rs_ck, int):
+                rows_missing_conversation_key = rm_ck
+                rows_skipped_duplicate_conversation = rs_ck
+            if conv_col and payload.get("conversation_row_counts") is not None:
+                conv_row_counts = payload["conversation_row_counts"]
+                conv_token_totals = payload.get("conversation_token_totals") or {}
+            elif conv_col:
+                conv_stats_incomplete = True
+                print(
+                    "  WARNING: checkpoint has no conversation_row_counts; "
+                    "duplicate / per-conversation token stats omitted this run."
+                )
+            if dedup_content_prefix_sha256:
+                ptl = payload.get("prefix_survivor_token_lens")
+                if isinstance(ptl, list):
+                    prefix_survivor_token_lens = [int(x) for x in ptl]
+                elif resume_row > 0:
+                    prefix_survivor_token_lens = []
+                    prefix_survivor_token_lens_resume_incomplete = True
+                    print(
+                        "  WARNING: checkpoint has no prefix_survivor_token_lens; "
+                        "token distribution falls back to one value per conversation key. "
+                        "Remove prefix_trie_checkpoints/ for survivor-only token stats.",
+                        flush=True,
+                    )
+                else:
+                    prefix_survivor_token_lens = []
         if payload.get("limit") != limit:
             print(
                 f"  WARNING: checkpoint limit={payload.get('limit')} vs current {limit}; "
@@ -789,6 +1465,57 @@ def build_hf_disk_prefix_tries(
         print(
             f"  restored at row {resume_row:,} | {total_sequences:,} seqs, "
             f"{total_tokens:,} toks, {len(per_user_tries):,} user keys"
+        )
+
+    conversation_winners: dict[str, int] | None = None
+    prefix_ingest_rows: frozenset[int] | None = None
+    if dedup_content_prefix_sha256:
+        if expected_ch_partition:
+            print(
+                f"[prefix_trie] Trie dedup: SHA256(content) per message; maximal prefixes "
+                f"within each {expected_ch_partition!r} bucket (same-user chains only).",
+                flush=True,
+            )
+        else:
+            print(
+                "[prefix_trie] Trie dedup: SHA256(content) per message in order; "
+                "keep maximal rows under global prefix order (no hashed_ip column).",
+                flush=True,
+            )
+        prefix_ingest_rows = _maximal_row_indices_content_prefix_sha256(
+            dset,
+            limit=limit,
+            row_batch_size=row_batch_size,
+            message_source=message_source,
+            partition_column=expected_ch_partition,
+        )
+    if conv_col and dedup_content_prefix_sha256:
+        print(
+            f"[prefix_trie] Per-conversation token totals (pickle/cache) use max length among "
+            f"prefix-ingested rows ({conv_col!r}). Printed token *distribution* is one value "
+            "per content-hash survivor row (longest chains after dedup). Row counts still "
+            "include every row with a key.",
+            flush=True,
+        )
+    elif conv_col:
+        win_enc = enc if message_source == "conversation" else None
+        score_desc = (
+            "tiktoken gpt-4o length on column 'conversation'"
+            if win_enc
+            else "message count (first matching messages/conversations column)"
+        )
+        print(
+            f"[prefix_trie] Longest row per {conv_col!r} ({score_desc}; tie: earliest "
+            "row index). Only those rows are inserted into tries.",
+            flush=True,
+        )
+        conversation_winners = _conversation_winners_from_dataset(
+            dset,
+            conv_col=conv_col,
+            limit=limit,
+            row_batch_size=row_batch_size,
+            message_source=message_source,
+            enc=win_enc,
         )
 
     t0 = time.time()
@@ -804,6 +1531,14 @@ def build_hf_disk_prefix_tries(
             row_index = start + j
 
             ckey = _conversation_key_value(row, conv_col)
+            if conv_col and ckey is None:
+                rows_missing_conversation_key += 1
+            if dedup_content_prefix_sha256 and prefix_ingest_rows is not None:
+                if row_index not in prefix_ingest_rows:
+                    rows_skipped_duplicate_conversation += 1
+            elif conv_col and ckey is not None:
+                if conversation_winners is not None and row_index != conversation_winners.get(ckey):
+                    rows_skipped_duplicate_conversation += 1
             if ckey is not None and not conv_stats_incomplete:
                 conv_row_counts[ckey] = conv_row_counts.get(ckey, 0) + 1
 
@@ -816,24 +1551,63 @@ def build_hf_disk_prefix_tries(
                     "your schema has a grouping column."
                 )
 
-            token_ids = _row_to_token_ids(row, enc)
+            if dedup_content_prefix_sha256:
+                ingest_trie = prefix_ingest_rows is not None and row_index in prefix_ingest_rows
+                need_tokenize = ingest_trie
+            else:
+                ingest_trie = True
+                need_tokenize = (
+                    conv_col is None
+                    or ckey is None
+                    or conversation_winners is None
+                    or row_index == conversation_winners.get(ckey)
+                )
+                if (
+                    conversation_winners is not None
+                    and ckey is not None
+                    and row_index != conversation_winners.get(ckey)
+                ):
+                    ingest_trie = False
+
+            if need_tokenize:
+                token_ids = _row_to_token_ids(row, enc, message_source=message_source)
+            else:
+                token_ids = []
             if ckey is not None and not conv_stats_incomplete:
-                conv_token_totals[ckey] = conv_token_totals.get(ckey, 0) + len(token_ids)
+                if dedup_content_prefix_sha256:
+                    if prefix_ingest_rows is not None and row_index in prefix_ingest_rows:
+                        conv_token_totals[ckey] = max(
+                            conv_token_totals.get(ckey, 0),
+                            len(token_ids),
+                        )
+                elif conversation_winners is not None and row_index == conversation_winners.get(
+                    ckey
+                ):
+                    conv_token_totals[ckey] = len(token_ids)
 
-            if len(token_ids) < min_sequence_len:
-                skipped_empty += 1
-                continue
-            seq = array("I", token_ids)
+            if (
+                dedup_content_prefix_sha256
+                and prefix_ingest_rows is not None
+                and row_index in prefix_ingest_rows
+                and need_tokenize
+            ):
+                prefix_survivor_token_lens.append(len(token_ids))
 
-            global_trie.insert(seq)
-            user_trie = per_user_tries.get(uid)
-            if user_trie is None:
-                user_trie = RadixTrie()
-                per_user_tries[uid] = user_trie
-            user_trie.insert(seq)
+            if ingest_trie:
+                if len(token_ids) < min_sequence_len:
+                    skipped_empty += 1
+                    continue
+                seq = array("I", token_ids)
 
-            total_tokens += len(seq)
-            total_sequences += 1
+                global_trie.insert(seq)
+                user_trie = per_user_tries.get(uid)
+                if user_trie is None:
+                    user_trie = RadixTrie()
+                    per_user_tries[uid] = user_trie
+                user_trie.insert(seq)
+
+                total_tokens += len(seq)
+                total_sequences += 1
 
         elapsed = time.time() - t0
         print(
@@ -846,16 +1620,24 @@ def build_hf_disk_prefix_tries(
             ckpt_path = os.path.join(tries_dir, f"rows_{end:08d}.pkl")
             tmp_path = ckpt_path + ".tmp"
             payload = {
+                "trie_build_schema": TRIE_CHECKPOINT_SCHEMA_VERSION,
+                "dhfpt_dedup": expected_dedup_trie,
+                "dhfpt_content_hash_partition": expected_ch_partition,
+                "conversation_aggregates_version": CONVERSATION_AGGREGATES_VERSION,
                 "next_row": end,
                 "limit": limit,
                 "total_sequences": total_sequences,
                 "total_tokens": total_tokens,
                 "skipped_empty": skipped_empty,
+                "rows_missing_conversation_key": rows_missing_conversation_key,
+                "rows_skipped_duplicate_conversation": rows_skipped_duplicate_conversation,
                 "global_trie": global_trie,
                 "per_user_tries": per_user_tries,
                 "conversation_row_counts": conv_row_counts,
                 "conversation_token_totals": conv_token_totals,
             }
+            if dedup_content_prefix_sha256:
+                payload["prefix_survivor_token_lens"] = list(prefix_survivor_token_lens)
             with open(tmp_path, "wb") as f:
                 pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
             os.replace(tmp_path, ckpt_path)
@@ -868,6 +1650,8 @@ def build_hf_disk_prefix_tries(
                     conv_col=conv_col,
                     conversation_row_counts=conv_row_counts,
                     conversation_token_totals=conv_token_totals,
+                    rows_missing_conversation_key=rows_missing_conversation_key,
+                    rows_skipped_duplicate_conversation=rows_skipped_duplicate_conversation,
                     completed_next_row=end,
                 )
             if _is_hf_save_dir(root):
@@ -877,6 +1661,34 @@ def build_hf_disk_prefix_tries(
     if total_sequences == 0:
         print("No sequences ingested; nothing to report.")
         return {}
+
+    if conv_col:
+        print(
+            f"\n[ingest accounting] rows_processed={limit:,}  "
+            f"sequences_ingested={total_sequences:,}  "
+            f"rows_missing_conversation_key={rows_missing_conversation_key:,}  "
+            f"rows_skipped_duplicate_conversation={rows_skipped_duplicate_conversation:,}  "
+            f"(column {conv_col!r})",
+            flush=True,
+        )
+        att = (
+            sum(conv_row_counts.values()) if conv_row_counts and not conv_stats_incomplete else None
+        )
+        if att is not None and not conv_stats_incomplete:
+            check = rows_missing_conversation_key + att
+            if check != limit:
+                print(
+                    f"  [ingest accounting] note: missing + rows_with_key ({check:,}) != "
+                    f"limit ({limit:,})",
+                    flush=True,
+                )
+    else:
+        print(
+            f"\n[ingest accounting] rows_processed={limit:,}  "
+            f"sequences_ingested={total_sequences:,}  "
+            "(no conversation_id / conversation_hash column)",
+            flush=True,
+        )
 
     print("\nComputing overlap stats...", flush=True)
     t_overlap = time.time()
@@ -923,7 +1735,11 @@ def build_hf_disk_prefix_tries(
 
     print(f"\n{'=' * 72}")
     print(f"Dataset root:                    {root}")
+    print(f"Rows processed:                {limit:>14,}")
     print(f"Sequences inserted:            {total_sequences:>14,}")
+    if conv_col:
+        print(f"Rows missing {conv_col}:       {rows_missing_conversation_key:>14,}")
+        print(f"Rows skipped (dup conv):       {rows_skipped_duplicate_conversation:>14,}")
     print(f"User / group keys:             {user_count:>14,}")
     print(f"Empty / short skipped:         {skipped_empty:>14,}")
     print(f"Total tokens T:                {total_tokens:>14,}")
@@ -954,8 +1770,18 @@ def build_hf_disk_prefix_tries(
     )
     print(f"{'=' * 72}")
 
+    _t_sem, _t_cap = _dedup_stats_labels(message_source)
+    survivor_tok_lens = None
+    if dedup_content_prefix_sha256 and not prefix_survivor_token_lens_resume_incomplete:
+        survivor_tok_lens = prefix_survivor_token_lens
     conversation_stats = _emit_conversation_stats(
-        conv_col, conv_stats_incomplete, conv_row_counts, conv_token_totals
+        conv_col,
+        conv_stats_incomplete,
+        conv_row_counts,
+        conv_token_totals,
+        tokens_per_conversation_semantic=_t_sem,
+        tokens_per_conversation_caption=_t_cap,
+        survivor_token_lengths=survivor_tok_lens,
     )
 
     if (
@@ -974,6 +1800,8 @@ def build_hf_disk_prefix_tries(
             conv_col=conv_col,
             conversation_row_counts=conv_row_counts,
             conversation_token_totals=conv_token_totals,
+            rows_missing_conversation_key=rows_missing_conversation_key,
+            rows_skipped_duplicate_conversation=rows_skipped_duplicate_conversation,
             completed_next_row=limit,
         )
         print(f"[prefix_trie] Wrote conversation aggregates cache {agg_path!r}")
@@ -990,13 +1818,22 @@ def build_hf_disk_prefix_tries(
         "stats_tag": tag,
         "preset": run_preset,
         "extra_candidates": extra_candidates_logged,
+        "dedup_message_source": message_source,
+        "dedup_trie_mode": expected_dedup_trie,
+        "content_hash_dedup_partition_column": expected_ch_partition,
         "user_key_column": user_key_column,
         "row_batch_size": row_batch_size,
         "min_sequence_len": min_sequence_len,
         "max_rows": max_rows,
+        "rows_processed": limit,
         "total_sequences": total_sequences,
+        "sequences_ingested": total_sequences,
         "total_tokens": total_tokens,
         "skipped_empty": skipped_empty,
+        "rows_missing_conversation_key": (rows_missing_conversation_key if conv_col else None),
+        "rows_skipped_duplicate_conversation": (
+            rows_skipped_duplicate_conversation if conv_col else None
+        ),
         "user_count": user_count,
         "global_unique_tokens": global_unique,
         "sum_intra_unique_tokens": sum_intra_unique,
@@ -1037,6 +1874,8 @@ def prefix_trie(
     max_rows: int | None = None,
     stats_tag: str | None = None,
     conversation_stats_only: bool = False,
+    dedup_content_prefix_sha256: bool = False,
+    no_dedup_content_prefix_sha256: bool = False,
 ):
     """KV prefix-trie overlap stats for HF ``save_to_disk`` data on ``/lmsys`` or ``/datasets`` mounts.
 
@@ -1044,9 +1883,25 @@ def prefix_trie(
     * ``--preset lmsys`` / ``wildchat`` — only that dataset’s default paths.
     * ``--dataset-disk-path /abs/root`` — use this tree; ``preset`` / ``extra_candidates`` ignored for resolution.
     * ``--extra-candidates /path/a,/path/b`` — try these directories first (comma-separated), then ``preset`` paths.
-    * ``--conversation-stats-only`` — load the **newest** ``rows_*.pkl`` first, then small
-      aggregate pickles; materialize small caches only after a full-run checkpoint load.
+    * ``--conversation-stats-only`` — small aggregate pickles only, else full split scan
+      (tiktoken); does not load ``rows_*.pkl``. Writes aggregate caches when recomputing.
+    * Content-hash prefix dedup — radix trie ingests only maximal rows under per-message
+      content SHA256 prefix order (see module docstring). **Default on** for WildChat
+      (path or ``--preset wildchat``). **Default off** for LMSYS. Pass
+      ``--dedup-content-prefix-sha256`` to force on; ``--no-dedup-content-prefix-sha256``
+      to force off (e.g. WildChat with legacy per-conversation-key winners).
     """
+    if dedup_content_prefix_sha256 and no_dedup_content_prefix_sha256:
+        raise ValueError(
+            "Use at most one of --dedup-content-prefix-sha256 and --no-dedup-content-prefix-sha256"
+        )
+    if dedup_content_prefix_sha256:
+        dedup_opt: bool | None = True
+    elif no_dedup_content_prefix_sha256:
+        dedup_opt = False
+    else:
+        dedup_opt = None
+
     disk_candidates: list[tuple[str, str]] | None = None
     if dataset_disk_path is None:
         disk_candidates = _merge_disk_candidates(preset, extra_candidates)
@@ -1063,4 +1918,5 @@ def prefix_trie(
         max_rows=max_rows,
         stats_tag=stats_tag,
         conversation_stats_only=conversation_stats_only,
+        dedup_content_prefix_sha256=dedup_opt,
     )

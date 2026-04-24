@@ -6,15 +6,15 @@ Pass a hub id (``org/name``) or a dataset page URL. Data is stored under
 Examples::
 
     modal run data_processing/download_hf_dataset.py::download_hf_cli
-    modal run --env=alessio-dev data_processing/download_hf_dataset.py::download_hf_cli --dataset allenai/WildChat-4.8M
+    modal run --env=GORGO data_processing/download_hf_dataset.py::download_hf_cli --dataset allenai/WildChat-4.8M
 
 Large downloads (multi-million rows): use ``--detach`` so the job keeps running if
 your laptop sleeps or the CLI disconnects::
 
-    modal run --detach --env=alessio-dev data_processing/download_hf_dataset.py::download_hf_cli --dataset allenai/WildChat-4.8M
+    modal run --detach --env=GORGO data_processing/download_hf_dataset.py::download_hf_cli --dataset allenai/WildChat-4.8M
 
 Gated datasets: accept the license on the Hub and create a Modal secret (e.g.
-``modal secret create --env=alessio-dev huggingface HF_TOKEN=hf_...``) named
+``modal secret create --env=GORGO huggingface HF_TOKEN=hf_...``) named
 ``huggingface`` with ``HF_TOKEN`` or ``HUGGING_FACE_HUB_TOKEN``.
 """
 

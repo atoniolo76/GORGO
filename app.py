@@ -1,6 +1,6 @@
 import modal
 
-ENVIRONMENT_NAME = "alessio-dev"
+ENVIRONMENT_NAME = "GORGO"
 
 app = modal.App(name="GORGO")
 replicas = modal.Dict.from_name(
