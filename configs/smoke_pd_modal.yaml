@@ -1,0 +1,117 @@
+# HUMAN-GATED — Modal smoke config for the PD topology policy.
+#
+# Bead: go-h0b (child of go-czi, linked to go-3j8 for actually running).
+# Spend ceiling: ≤ $1 on A10G/L4-class instances. 4 pods × ~45s active ≈
+# 3 pod-minutes; under the epic's per-smoke budget.
+#
+# Purpose: exercise the PD handoff path on every request (prefill ≠
+# decode by construction) so we can observe:
+#   1. KV-transport accounting fires for every record
+#      (kv_transport_bytes ≈ len(prompt_tokens) * kv_bytes_per_token).
+#   2. Prefill pool distributes under a moderate-Zipf workload (not
+#      cache-locked to a single pod; see audit §2.6 F25 — hotspot risk).
+#   3. Decode pool rotates on active_decode (current `busy` signal
+#      reduces to active_decode for pure-DECODE pods per F20; this
+#      smoke is the place the pathology would manifest on real vLLM).
+#
+# NOTE: this smoke runs `pd` only (baseline comparison is not useful here
+# since `prefix-cache` etc. do not split roles — they would just pick one
+# BOTH pod). Cross-policy comparison belongs in a colocated topology
+# smoke; this one establishes PD-specific correctness on real hardware.
+
+name: "smoke-pd-topology"
+
+policy:
+  policy_id: "pd"
+  params:
+    block_size: 16
+
+topology:
+  pods:
+    - pod_id: "pf0"
+      role: "prefill"
+      gpu_count: 1
+      # 2 GiB KV — prefill pods hold the prefix cache; more headroom
+      # so we observe real prefix-owner routing, not eviction churn.
+      kv_cache_bytes: 2147483648
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 0
+      peer_ids: ["dc0", "dc1"]
+    - pod_id: "pf1"
+      role: "prefill"
+      gpu_count: 1
+      kv_cache_bytes: 2147483648
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 0
+      peer_ids: ["dc0", "dc1"]
+    - pod_id: "dc0"
+      role: "decode"
+      gpu_count: 1
+      # Decode pods need less KV capacity (they hold live attention
+      # state, not cached prefixes).
+      kv_cache_bytes: 1073741824
+      max_concurrent_prefill: 0
+      max_concurrent_decode: 16
+      peer_ids: ["pf0", "pf1"]
+    - pod_id: "dc1"
+      role: "decode"
+      gpu_count: 1
+      kv_cache_bytes: 1073741824
+      max_concurrent_prefill: 0
+      max_concurrent_decode: 16
+      peer_ids: ["pf0", "pf1"]
+
+compute:
+  prefill_ms_per_token: 0.08
+  decode_ms_per_token: 6.0
+  prefill_overhead_ms: 5.0
+  decode_overhead_ms: 2.0
+
+network:
+  client_rtt_ms: 5.0
+  inter_pod_rtt_ms: 0.2
+  # 200 Gbps: typical high-end GPU fabric. PD handoff is the dominant
+  # transport term here — calibration grade for the KV-transport signal.
+  inter_pod_bandwidth_gbps: 200.0
+  kv_bytes_per_token: 131072
+  serialization_overhead_ms: 0.5
+
+scheduler:
+  base_routing_ms: 0.3
+  per_pod_consideration_us: 5.0
+
+engine:
+  kv_ewma_alpha: 0.2
+  block_size: 16
+  initial_warm_latency_ms: 5.0
+
+workload:
+  kind: "synthetic"
+  params:
+    n_requests: 300              # ~45s wall at 7 qps
+    arrival_rate_qps: 7.0        # keep decode pools saturating, not slammed
+    n_prefix_families: 8         # enough to spread prefix owners across pf0/pf1
+    zipf_s: 1.1                  # moderate skew — not cache-lock-inducing
+    prompt_len_min: 512
+    prompt_len_max: 2048
+    max_output_tokens: 128       # nontrivial decode load, drives active_decode
+    n_sessions: 64
+    shared_prefix_tokens: 512    # 32 blocks; real hashes, not opaque keys
+
+seeds: [0]
+output_dir: "results/smoke-pd-topology"
+
+# Acceptance criteria (checked post-run by reviewer before closing go-3j8):
+#   1. Run completes without errors or timeout; total Modal spend ≤ $1.
+#   2. kv_transport_bytes > 0 for every record (PD handoff fires on
+#      every dispatch, since prefill ∈ {pf0, pf1} and decode ∈ {dc0, dc1}
+#      are disjoint sets).
+#   3. Prefill dispatch is spread across {pf0, pf1}: neither pod gets
+#      > 80% of prefill requests. (If pf1 gets ~100%, the F25 hotspot
+#      risk has materialized under this Zipf — escalate for `pd-preble`.)
+#   4. Decode dispatch is spread across {dc0, dc1}: neither pod gets
+#      > 70% of decode requests. (If skew > 70%, F20 may be implicated —
+#      decode-pool signal is not discriminating under real load.)
+#   5. p95 end-to-end latency ≤ 3× p50. (Sanity bound — saturating a
+#      decode pool should blow up p95 beyond this; if satisfied, the
+#      PD handoff + decode rotation is working.)
