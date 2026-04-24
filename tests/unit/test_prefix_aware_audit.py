@@ -122,11 +122,12 @@ def test_preble_explore_tie_break_lowest_pod_id(pod_specs):
     assert "explore" in d.rationale
 
 
-def test_preble_exploit_tie_break_current_behavior(pod_specs):
-    """F3: exploit branch currently picks LARGEST pod_id on ties.
+def test_preble_exploit_tie_break_lowest_pod_id(pod_specs):
+    """F3 fix: exploit branch tie-breaks on LOWEST pod_id, matching explore.
 
-    This is asymmetric with the explore branch (which picks smallest).
-    Test pins current behavior so a future fix flips it safely.
+    Identical match, identical load → smallest pod_id wins. Symmetric with
+    the explore and hotspot-redirect branches so that borderline requests
+    flipping between branches don't also bounce between pods.
     """
     cluster, kv = _fresh(pod_specs)
     tokens = tuple(range(32))
@@ -136,8 +137,7 @@ def test_preble_exploit_tie_break_current_behavior(pod_specs):
     # Identical match, identical load (zero).
     p = get_policy("prefix-cache-preble", block_size=16)
     d = p.decide(Request("r", "s", 2.0, tokens, 4), cluster, kv)
-    # Current behavior: max(pod_data, key=(match, -load, pod_id)) → p2.
-    assert d.prefill_pod_id == "p2"
+    assert d.prefill_pod_id == "p0"
     assert "exploit" in d.rationale
 
 
