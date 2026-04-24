@@ -11,8 +11,9 @@ Writes:
     research/reports/dataset_metrics_<dataset>.md  # narrative + plots
     research/reports/figures/<dataset>_*.png       # plots linked from md
 
-Only `synthetic` is implemented at the moment (see go-igz). Other
-datasets dispatch through ``DATASET_LOADERS`` and share the rest of the
+``synthetic``, ``code_completion``, and ``lmsys`` are implemented;
+``sharegpt`` is not yet (see the go-2n8 epic for status). Datasets
+dispatch through ``DATASET_LOADERS`` and share the rest of the
 pipeline — add a loader entry and everything downstream (metrics,
 report, plots) works unchanged.
 """
@@ -51,6 +52,9 @@ from routing_harness.workload.code_completion import (  # noqa: E402
 from routing_harness.workload.code_completion import (  # noqa: E402
     build_trace as build_code_completion_trace,
 )
+from routing_harness.workload.lmsys import LmsysConfig  # noqa: E402
+from routing_harness.workload.lmsys import TraceParams as LmsysTraceParams  # noqa: E402
+from routing_harness.workload.lmsys import build_trace as build_lmsys_trace  # noqa: E402
 from routing_harness.workload.synthetic import SyntheticParams  # noqa: E402
 from routing_harness.workload.synthetic import generate as generate_synthetic  # noqa: E402
 from routing_harness.workload.trace import InMemoryTrace  # noqa: E402
@@ -185,6 +189,88 @@ def load_code_completion(
     }
 
 
+def load_lmsys(
+    n_requests: int,
+    seed: int,
+    local_path: str | None = None,
+) -> tuple[InMemoryTrace, dict]:
+    """Profile the lmsys workload adapter against a real chat dataset.
+
+    The lmsys workload adapter (``workload.lmsys``) consumes JSONL with
+    one conversation per line. Run ``scripts/fetch_lmsys_data.py``
+    first; it prefers the canonical ``lmsys/lmsys-chat-1m`` (gated,
+    needs ``HF_TOKEN``) and falls back to ``allenai/WildChat-1M``
+    (ungated, identical schema). The actual source is recorded in
+    ``data/lmsys/SOURCE.txt`` and surfaced in the report.
+
+    Tokenizer is ``cl100k_base`` (same as code_completion) so prompt
+    lengths are comparable across datasets without the mock-tokenizer
+    bias that under-counts real text by ~3x.
+
+    No language filter — chat data is multilingual and the language mix
+    is itself a routing-relevant metric we want to capture.
+    """
+    abs_path = local_path or str(REPO_ROOT / "data" / "lmsys" / "lmsys-chat.jsonl")
+    # Conversations × max_turns >= n_requests so the cap doesn't truncate
+    # the trace before we have enough turns to profile. Round up.
+    max_convs = max(1, int(n_requests))
+    cfg = LmsysConfig(
+        local_path=abs_path,
+        max_conversations=max_convs,
+        language_filter=(),  # keep every language; mix is itself a metric
+        min_turns=1,
+        max_turns=16,
+        seed=seed,
+    )
+    params = LmsysTraceParams(
+        arrival_rate_qps=4.0,
+        max_output_tokens=256,
+        tokenizer="tiktoken:cl100k_base",
+        seed=seed,
+    )
+    trace = build_lmsys_trace(cfg, params)
+    # Repo-relative source so the rendered report doesn't leak $HOME.
+    try:
+        rel = Path(abs_path).resolve().relative_to(REPO_ROOT)
+        trace.source = f"lmsys:{rel.as_posix()}"
+        path_for_info = rel.as_posix()
+    except ValueError:
+        path_for_info = abs_path
+    # Surface what fetch_lmsys_data.py actually pulled — distinguishes a
+    # WildChat-1M fallback from real lmsys-chat-1m.
+    source_label = None
+    src_file = REPO_ROOT / "data" / "lmsys" / "SOURCE.txt"
+    if src_file.exists():
+        for line in src_file.read_text().splitlines():
+            if line.startswith("hf_dataset:"):
+                source_label = line.split(":", 1)[1].strip()
+                break
+    return trace, {
+        "kind": "lmsys",
+        "local_path": path_for_info,
+        "hf_source": source_label or "unknown",
+        "config": {
+            "max_conversations": cfg.max_conversations,
+            "language_filter": list(cfg.language_filter) or "all-languages",
+            "min_turns": cfg.min_turns,
+            "max_turns": cfg.max_turns,
+            "seed": cfg.seed,
+        },
+        "params": {
+            "arrival_rate_qps": params.arrival_rate_qps,
+            "max_output_tokens": params.max_output_tokens,
+            "tokenizer": params.tokenizer,
+            "seed": params.seed,
+        },
+        "data_acquisition": [
+            "# Fetch chat data into data/lmsys/ (gitignored).",
+            "# Set HF_TOKEN to access the gated lmsys/lmsys-chat-1m;",
+            "# otherwise falls back to allenai/WildChat-1M.",
+            "python scripts/fetch_lmsys_data.py --max-conversations 10000",
+        ],
+    }
+
+
 def _not_implemented(name: str) -> Callable[..., tuple[InMemoryTrace, dict]]:
     def _raise(*_args, **_kwargs):
         raise NotImplementedError(
@@ -198,7 +284,7 @@ def _not_implemented(name: str) -> Callable[..., tuple[InMemoryTrace, dict]]:
 DATASET_LOADERS: dict[str, Callable[..., tuple[InMemoryTrace, dict]]] = {
     "synthetic": load_synthetic,
     "code_completion": load_code_completion,
-    "lmsys": _not_implemented("lmsys"),
+    "lmsys": load_lmsys,
     "sharegpt": _not_implemented("sharegpt"),
 }
 
@@ -512,7 +598,25 @@ def compute_metrics(
         "n_degenerate_prompts_lt_16": int(np.sum(prompt_lens < block_size)),
     }
 
-    return {
+    # -- language mix (chat datasets) -------------------------------------
+    # Only emit when at least one request carries a `lang` tag; on
+    # synthetic / code_completion this stays absent so the report doesn't
+    # render an empty section.
+    langs = [r.metadata.get("lang") for r in reqs if r.metadata.get("lang")]
+    language_mix = None
+    if langs:
+        lang_counts = Counter(langs)
+        total = sum(lang_counts.values())
+        top = lang_counts.most_common(10)
+        language_mix = {
+            "n_tagged": int(total),
+            "n_unique_langs": int(len(lang_counts)),
+            "top10": [
+                {"lang": lang, "count": int(c), "share": float(c / total)} for lang, c in top
+            ],
+        }
+
+    out = {
         "volume": volume,
         "lengths": lengths,
         "timing": timing,
@@ -521,6 +625,9 @@ def compute_metrics(
         "sessions": sessions_block,
         "text": text,
     }
+    if language_mix is not None:
+        out["language_mix"] = language_mix
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -668,6 +775,21 @@ def render_report(
     lines.append("")
     lines.append(f"- **kind**: `{loader_info.get('kind', dataset)}`")
     lines.append(f"- **trace source**: `{v['source']}`")
+    if loader_info.get("hf_source"):
+        hf = loader_info["hf_source"]
+        if hf == "lmsys-chat-1m":
+            lines.append("- **HF dataset**: `lmsys/lmsys-chat-1m` (canonical, gated)")
+        elif hf == "wildchat-1m":
+            lines.append(
+                "- **HF dataset**: `allenai/WildChat-1M` "
+                "— **substituted** because `lmsys/lmsys-chat-1m` is gated and no "
+                "`HF_TOKEN` was available. The two datasets share the same "
+                "JSONL conversation schema, so the lmsys workload adapter "
+                "consumes them identically. Re-run with `HF_TOKEN` exported "
+                "to profile the canonical dataset."
+            )
+        else:
+            lines.append(f"- **HF dataset**: `{hf}`")
     if "config" in loader_info:
         lines.append("- **loader config**:")
         lines.append("")
@@ -801,6 +923,21 @@ def render_report(
         )
     lines.append("")
 
+    if "language_mix" in metrics:
+        lm = metrics["language_mix"]
+        lines.append("## Language mix")
+        lines.append("")
+        lines.append(
+            f"- Tagged requests: **{lm['n_tagged']:,}**, "
+            f"unique languages: **{lm['n_unique_langs']:,}**"
+        )
+        lines.append("")
+        lines.append("| lang | count | share |")
+        lines.append("|---|---:|---:|")
+        for row in lm["top10"]:
+            lines.append(f"| {row['lang']} | {row['count']:,} | {row['share']:.3f} |")
+        lines.append("")
+
     lines.append("## Text statistics")
     lines.append("")
     text = metrics["text"]
@@ -863,6 +1000,43 @@ def distinctive_summary(dataset: str, metrics: dict, loader_info: dict | None = 
             f"and first-block top-10 share is {p['first_block_top10_share']:.3f} "
             "(one block wins essentially all first-block slots). Routing gain above "
             "that saturation point comes from somewhere other than cross-task reuse."
+        )
+    if dataset == "lmsys":
+        v = metrics["volume"]
+        s = metrics["sessions"]
+        L = metrics["lengths"]["prompt_tokens"]
+        curve = metrics["cache_hit_curve"]
+        # Largest capacity gives the asymptotic hit rate — characterizes
+        # how much aggregate prefix reuse the trace contains at all.
+        big = curve[-1]
+        small = curve[0]
+        lm = metrics.get("language_mix") or {}
+        top_lang = lm.get("top10", [{}])[0] if lm else {}
+        hf = (loader_info or {}).get("hf_source", "unknown")
+        substrate = (
+            "WildChat-1M (lmsys-chat-1m gated; ungated stand-in via the lmsys adapter)"
+            if hf == "wildchat-1m"
+            else f"lmsys-chat-1m ({hf})"
+        )
+        return (
+            f"lmsys is the multi-turn, real-text chat dataset (substrate: {substrate}). "
+            f"n_requests={v['n_requests']:,} across n_sessions={v['n_sessions']:,} "
+            f"(turns_per_session p95={s['turns_per_session']['p95']:.0f}); prompts "
+            f"are heavy-tailed natural language (p50={L['p50']:.0f}, p99={L['p99']:.0f} "
+            "tokens), and prefix reuse is dominated by intra-session conversation "
+            f"history rather than a constant template — intra-session first-block "
+            f"reuse rate is {s['intra_session_first_block_reuse_rate']:.2f}, oracle "
+            f"hit rate climbs from {small['hit_rate']:.2f} at {small['capacity_blocks']} "
+            f"blocks to {big['hit_rate']:.2f} at {big['capacity_blocks']} blocks. "
+            f"Top language is {top_lang.get('lang', '?')} "
+            f"({top_lang.get('share', 0):.0%} share)."
+            if lm
+            else (
+                f"lmsys is the multi-turn, real-text chat dataset "
+                f"(substrate: {substrate}). n_requests={v['n_requests']:,} across "
+                f"n_sessions={v['n_sessions']:,} (turns p95={s['turns_per_session']['p95']:.0f}); "
+                f"prefix reuse is dominated by intra-session history."
+            )
         )
     if dataset == "synthetic":
         fz = metrics["prefix"]["family_zipf"]
