@@ -515,7 +515,11 @@ execution to `go-3j8`.
   workloads (byte-level install no-op + F9 tie-break). **Fixed via
   load-aware secondary key in go-fw8** (see §2.5.3).
 - **F11**: cross-group tie-break direction inconsistency (tracks
-  jointly with prefix-aware F3).
+  jointly with prefix-aware F3). **Resolved in go-dmo** — with F8
+  (go-d7c), F9 (go-edm), and F3 fixed upstream, all load-balancing +
+  prefix fallback policies now converge on 'smallest pod_id wins ties'.
+  Pinned by umbrella regression
+  `test_group_tie_break_picks_smallest_pod_id`.
 - **F12** (info, no bead): no policy admits on `max_concurrent_prefill`.
   Recorded in the report for future policy authors; not a fix request.
 
@@ -534,6 +538,7 @@ execution to `go-3j8`.
 
 Ready for Modal smoke (via `configs/smoke_load_balancing_modal.yaml`,
 gated on human approval). With F7 fixed in go-z51 and F10 fixed in
-go-fw8, no correctness-class findings remain in this group. F8, F9, and
-F11 are LOW tie-break-direction warts tracked on their own beads; they
-do not block deployment.
+go-fw8, no correctness-class findings remain in this group. F8 (go-d7c),
+F9 (go-edm), and F11 (go-dmo) are all resolved; the group now uniformly
+picks the smallest `pod_id` on ties, pinned by
+`test_group_tie_break_picks_smallest_pod_id`.
