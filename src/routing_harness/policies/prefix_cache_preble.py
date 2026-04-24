@@ -86,10 +86,12 @@ class PreblePrefixCachePolicy:
                     break
             pod_data.append((match, self._load_ms(p), p))
 
-        # Exploit candidate: most prefix match, then least load, then pod_id.
-        best_match, best_load, best_pod = max(
+        # Exploit candidate: most prefix match, then least load, then lowest pod_id.
+        # Tie-break on pod_id must match the explore/hotspot branches (smallest
+        # wins) so identical requests don't bounce between branches on ties.
+        best_match, best_load, best_pod = min(
             pod_data,
-            key=lambda t: (t[0], -t[1], t[2].spec.pod_id),
+            key=lambda t: (-t[0], t[1], t[2].spec.pod_id),
         )
 
         # Exploit/explore gate (Preble E2).
@@ -101,15 +103,11 @@ class PreblePrefixCachePolicy:
             # the owner is a hotspot relative to the lightest pod.
             min_load = min(t[1] for t in pod_data)
             if best_load > self.th_bal * min_load:
-                lightest = min(
-                    pod_data, key=lambda t: (t[1], t[2].spec.pod_id)
-                )
+                lightest = min(pod_data, key=lambda t: (t[1], t[2].spec.pod_id))
                 return Decision(
                     lightest[2].spec.pod_id,
                     lightest[2].spec.pod_id,
-                    rationale=(
-                        f"exploit-hotspot-redirect from={best_pod.spec.pod_id}"
-                    ),
+                    rationale=(f"exploit-hotspot-redirect from={best_pod.spec.pod_id}"),
                     score=float(lightest[0]),
                 )
             return Decision(
