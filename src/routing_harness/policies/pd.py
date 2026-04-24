@@ -58,11 +58,11 @@ class PDPolicy:
                 n += 1
             return n
 
-        best_prefill = max(
+        best_prefill = min(
             prefill,
             key=lambda p: (
-                _match_len(p.spec.pod_id),
-                -p.active_prefill,
+                -_match_len(p.spec.pod_id),
+                p.active_prefill,
                 p.spec.pod_id,
             ),
         )
