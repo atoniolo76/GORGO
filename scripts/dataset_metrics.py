@@ -11,11 +11,11 @@ Writes:
     research/reports/dataset_metrics_<dataset>.md  # narrative + plots
     research/reports/figures/<dataset>_*.png       # plots linked from md
 
-``synthetic``, ``code_completion``, and ``lmsys`` are implemented;
-``sharegpt`` is not yet (see the go-2n8 epic for status). Datasets
-dispatch through ``DATASET_LOADERS`` and share the rest of the
-pipeline — add a loader entry and everything downstream (metrics,
-report, plots) works unchanged.
+All four datasets (``synthetic``, ``code_completion``, ``lmsys``,
+``sharegpt``) are implemented. Datasets dispatch through
+``DATASET_LOADERS`` and share the rest of the pipeline — add a loader
+entry and everything downstream (metrics, report, plots) works
+unchanged.
 """
 
 from __future__ import annotations
@@ -55,6 +55,9 @@ from routing_harness.workload.code_completion import (  # noqa: E402
 from routing_harness.workload.lmsys import LmsysConfig  # noqa: E402
 from routing_harness.workload.lmsys import TraceParams as LmsysTraceParams  # noqa: E402
 from routing_harness.workload.lmsys import build_trace as build_lmsys_trace  # noqa: E402
+from routing_harness.workload.sharegpt import ShareGPTConfig  # noqa: E402
+from routing_harness.workload.sharegpt import TraceParams as ShareGPTTraceParams  # noqa: E402
+from routing_harness.workload.sharegpt import build_trace as build_sharegpt_trace  # noqa: E402
 from routing_harness.workload.synthetic import SyntheticParams  # noqa: E402
 from routing_harness.workload.synthetic import generate as generate_synthetic  # noqa: E402
 from routing_harness.workload.trace import InMemoryTrace  # noqa: E402
@@ -271,21 +274,89 @@ def load_lmsys(
     }
 
 
-def _not_implemented(name: str) -> Callable[..., tuple[InMemoryTrace, dict]]:
-    def _raise(*_args, **_kwargs):
-        raise NotImplementedError(
-            f"Loader for dataset '{name}' not implemented yet. "
-            f"Add an entry to scripts/dataset_metrics.py::DATASET_LOADERS."
-        )
+def load_sharegpt(
+    n_requests: int,
+    seed: int,
+    local_path: str | None = None,
+) -> tuple[InMemoryTrace, dict]:
+    """Profile the sharegpt workload adapter against a real conversation dump.
 
-    return _raise
+    The sharegpt workload adapter (``workload.sharegpt``) consumes JSONL
+    with one conversation per line in ``{id, conversations: [{from,
+    value}]}`` format. Run ``scripts/fetch_sharegpt_data.py`` first; it
+    prefers the parquet-backed ``liyucheng/ShareGPT90K`` (ungated,
+    streamable) and falls back to ``anon8231489123/ShareGPT_Vicuna_unfiltered``'s
+    raw JSON. The actual source is recorded in
+    ``data/sharegpt/SOURCE.txt`` and surfaced in the report.
+
+    Tokenizer is ``cl100k_base`` so prompt lengths are directly comparable
+    to lmsys and code_completion (mock tokenizer biases natural-text
+    lengths by ~3x).
+
+    ShareGPT conversations come without a ``max_turns`` cap in the wild,
+    but the adapter defaults to 32 which is already more than 99% of the
+    distribution — we keep the default and let longer outliers fall
+    through rather than truncating them to match lmsys's 16-turn cap.
+    """
+    abs_path = local_path or str(REPO_ROOT / "data" / "sharegpt" / "sharegpt.jsonl")
+    max_convs = max(1, int(n_requests))
+    cfg = ShareGPTConfig(
+        local_path=abs_path,
+        max_conversations=max_convs,
+        min_turns=1,
+        max_turns=32,
+        seed=seed,
+    )
+    params = ShareGPTTraceParams(
+        arrival_rate_qps=4.0,
+        max_output_tokens=256,
+        tokenizer="tiktoken:cl100k_base",
+        seed=seed,
+    )
+    trace = build_sharegpt_trace(cfg, params)
+    try:
+        rel = Path(abs_path).resolve().relative_to(REPO_ROOT)
+        trace.source = f"sharegpt:{rel.as_posix()}"
+        path_for_info = rel.as_posix()
+    except ValueError:
+        path_for_info = abs_path
+    source_label = None
+    src_file = REPO_ROOT / "data" / "sharegpt" / "SOURCE.txt"
+    if src_file.exists():
+        for line in src_file.read_text().splitlines():
+            if line.startswith("hf_dataset:"):
+                source_label = line.split(":", 1)[1].strip()
+                break
+    return trace, {
+        "kind": "sharegpt",
+        "local_path": path_for_info,
+        "hf_source": source_label or "unknown",
+        "config": {
+            "max_conversations": cfg.max_conversations,
+            "min_turns": cfg.min_turns,
+            "max_turns": cfg.max_turns,
+            "seed": cfg.seed,
+        },
+        "params": {
+            "arrival_rate_qps": params.arrival_rate_qps,
+            "max_output_tokens": params.max_output_tokens,
+            "tokenizer": params.tokenizer,
+            "seed": params.seed,
+        },
+        "data_acquisition": [
+            "# Fetch ShareGPT into data/sharegpt/ (gitignored).",
+            "# Primary source: liyucheng/ShareGPT90K (parquet, streamable, ungated).",
+            "# Fallback:       anon8231489123/ShareGPT_Vicuna_unfiltered (raw JSON).",
+            "python scripts/fetch_sharegpt_data.py --max-conversations 10000",
+        ],
+    }
 
 
 DATASET_LOADERS: dict[str, Callable[..., tuple[InMemoryTrace, dict]]] = {
     "synthetic": load_synthetic,
     "code_completion": load_code_completion,
     "lmsys": load_lmsys,
-    "sharegpt": _not_implemented("sharegpt"),
+    "sharegpt": load_sharegpt,
 }
 
 
@@ -1037,6 +1108,40 @@ def distinctive_summary(dataset: str, metrics: dict, loader_info: dict | None = 
                 f"n_sessions={v['n_sessions']:,} (turns p95={s['turns_per_session']['p95']:.0f}); "
                 f"prefix reuse is dominated by intra-session history."
             )
+        )
+    if dataset == "sharegpt":
+        v = metrics["volume"]
+        s = metrics["sessions"]
+        L = metrics["lengths"]["prompt_tokens"]
+        p = metrics["prefix"]
+        curve = metrics["cache_hit_curve"]
+        big = curve[-1]
+        small = curve[0]
+        tps = s["turns_per_session"]
+        hf = (loader_info or {}).get("hf_source", "unknown")
+        return (
+            f"sharegpt is the long-session chat dataset with near-zero prefix "
+            f"reuse (substrate: {hf}). Conversations run materially longer than "
+            f"lmsys (turns_per_session mean {tps['mean']:.1f}, p95 "
+            f"{tps['p95']:.0f}, max {tps['max']:.0f}) across "
+            f"{v['n_requests']:,} requests in {v['n_sessions']:,} sessions, with "
+            f"a heavy-tailed prompt-length distribution "
+            f"(p50={L['p50']:.0f}, p95={L['p95']:.0f}, p99={L['p99']:.0f}, "
+            f"max={L['max']:.0f} tokens). Yet the oracle cache hit rate barely "
+            f"moves with capacity — {small['hit_rate']:.2f} at "
+            f"{small['capacity_blocks']} blocks rising only to "
+            f"{big['hit_rate']:.2f} at {big['capacity_blocks']:,} blocks — "
+            f"and block-reuse ratio is just {p['block_reuse_ratio']:.2f} (lmsys "
+            f"reaches 0.25). Intra-session first-block reuse is "
+            f"{s['intra_session_first_block_reuse_rate']:.2f}, top-10 first-block "
+            f"share is {p['first_block_top10_share']:.3f}, and first-block "
+            f"Zipf fit is nearly flat (s={p['first_block_zipf']['s']:.2f}). "
+            f"Distinctive property: sharegpt is the stress-test for prefix-aware "
+            f"routing — many long sessions, but prompts are so idiosyncratic per "
+            f"conversation that a unified cache captures almost no reuse, so any "
+            f"routing gain here must come from session affinity (keeping a "
+            f"conversation's turns on the same pod) rather than cross-session "
+            f"prefix hits."
         )
     if dataset == "synthetic":
         fz = metrics["prefix"]["family_zipf"]

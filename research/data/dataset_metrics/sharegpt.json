@@ -1,0 +1,265 @@
+{
+  "dataset": "sharegpt",
+  "loader": {
+    "kind": "sharegpt",
+    "local_path": "data/sharegpt/sharegpt.jsonl",
+    "hf_source": "sharegpt90k-parquet",
+    "config": {
+      "max_conversations": 10000,
+      "min_turns": 1,
+      "max_turns": 32,
+      "seed": 0
+    },
+    "params": {
+      "arrival_rate_qps": 4.0,
+      "max_output_tokens": 256,
+      "tokenizer": "tiktoken:cl100k_base",
+      "seed": 0
+    },
+    "data_acquisition": [
+      "# Fetch ShareGPT into data/sharegpt/ (gitignored).",
+      "# Primary source: liyucheng/ShareGPT90K (parquet, streamable, ungated).",
+      "# Fallback:       anon8231489123/ShareGPT_Vicuna_unfiltered (raw JSON).",
+      "python scripts/fetch_sharegpt_data.py --max-conversations 10000"
+    ]
+  },
+  "metrics": {
+    "volume": {
+      "n_requests": 34595,
+      "n_sessions": 8534,
+      "n_families": null,
+      "trace_duration_s": 8656.028741234128,
+      "source": "sharegpt:data/sharegpt/sharegpt.jsonl"
+    },
+    "lengths": {
+      "prompt_tokens": {
+        "n": 34595,
+        "mean": 110.47665847665847,
+        "std": 1178.57398274583,
+        "min": 1.0,
+        "max": 161280.0,
+        "p50": 20.0,
+        "p90": 165.0,
+        "p95": 415.0,
+        "p99": 1674.0
+      },
+      "output_tokens_budget": {
+        "n": 34595,
+        "mean": 256.0,
+        "std": 0.0,
+        "min": 256.0,
+        "max": 256.0,
+        "p50": 256.0,
+        "p90": 256.0,
+        "p95": 256.0,
+        "p99": 256.0
+      },
+      "prompt_histogram": [
+        34567,
+        14,
+        7,
+        2,
+        1,
+        1,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      "prompt_histogram_edges": [
+        1.0,
+        5040.96875,
+        10080.9375,
+        15120.90625,
+        20160.875,
+        25200.84375,
+        30240.8125,
+        35280.78125,
+        40320.75,
+        45360.71875,
+        50400.6875,
+        55440.65625,
+        60480.625,
+        65520.59375,
+        70560.5625,
+        75600.53125,
+        80640.5,
+        85680.46875,
+        90720.4375,
+        95760.40625,
+        100800.375,
+        105840.34375,
+        110880.3125,
+        115920.28125,
+        120960.25,
+        126000.21875,
+        131040.1875,
+        136080.15625,
+        141120.125,
+        146160.09375,
+        151200.0625,
+        156240.03125,
+        161280.0
+      ]
+    },
+    "timing": {
+      "interarrival": {
+        "n": 34594,
+        "mean": 0.250217631416839,
+        "std": 0.25011827410832105,
+        "min": 3.66818221664289e-06,
+        "max": 2.335092396455366,
+        "p50": 0.17511846787010654,
+        "p90": 0.5763073656164579,
+        "p95": 0.7477955773711129,
+        "p99": 1.1467471271399905
+      },
+      "cv2_of_interarrival": 0.9992059905500789,
+      "empirical_qps": 3.9966364523724582,
+      "fano_factor_1s": 0.998088573662234,
+      "fano_factor_10s": 0.9530470201710524,
+      "arrivals_gini": 0.5000218289802096
+    },
+    "prefix": {
+      "block_size": 16,
+      "blocks_per_request": {
+        "n": 34595,
+        "mean": 6.436045671339789,
+        "std": 73.66153445173606,
+        "min": 0.0,
+        "max": 10080.0,
+        "p50": 1.0,
+        "p90": 10.0,
+        "p95": 25.0,
+        "p99": 104.0
+      },
+      "n_unique_blocks": 213859,
+      "n_total_block_occurrences": 222655,
+      "block_reuse_ratio": 0.03950506388807795,
+      "n_unique_first_blocks": 19274,
+      "first_block_top10_share": 0.005370307083923253,
+      "first_block_zipf": {
+        "s": 0.12512976936450648,
+        "log_C": 1.1456994471843238,
+        "r2": 0.4808059344711725,
+        "n_ranks": 19274
+      },
+      "all_block_zipf": {
+        "s": 0.09333598371241592,
+        "log_C": 1.077305756358091,
+        "r2": 0.4143964386191996,
+        "n_ranks": 213859
+      },
+      "family_zipf": {
+        "s": NaN,
+        "log_C": NaN,
+        "r2": NaN,
+        "n_ranks": 0
+      },
+      "family_gini": NaN,
+      "family_top10_share": NaN
+    },
+    "cache_hit_curve": [
+      {
+        "capacity_blocks": 64,
+        "capacity_tokens": 1024,
+        "hit_rate": 0.010091846129662482,
+        "hits": 2247,
+        "lookups": 222655
+      },
+      {
+        "capacity_blocks": 256,
+        "capacity_tokens": 4096,
+        "hit_rate": 0.014138465338752779,
+        "hits": 3148,
+        "lookups": 222655
+      },
+      {
+        "capacity_blocks": 1024,
+        "capacity_tokens": 16384,
+        "hit_rate": 0.015881071613033617,
+        "hits": 3536,
+        "lookups": 222655
+      },
+      {
+        "capacity_blocks": 4096,
+        "capacity_tokens": 65536,
+        "hit_rate": 0.01646942579326761,
+        "hits": 3667,
+        "lookups": 222655
+      },
+      {
+        "capacity_blocks": 16384,
+        "capacity_tokens": 262144,
+        "hit_rate": 0.019649233118501717,
+        "hits": 4375,
+        "lookups": 222655
+      }
+    ],
+    "sessions": {
+      "turns_per_session": {
+        "n": 8534,
+        "mean": 4.053784860557769,
+        "std": 3.718604420518848,
+        "min": 1.0,
+        "max": 18.0,
+        "p50": 3.0,
+        "p90": 10.0,
+        "p95": 12.0,
+        "p99": 15.0
+      },
+      "turns_per_session_gini": 0.4685425645640151,
+      "intra_session_first_block_reuse_rate": 0.043717494535313185,
+      "n_sessions_with_gte_3_turns": 4365,
+      "prompt_growth_slope_tokens_per_turn": {
+        "n": 4365,
+        "mean": -15.746623159702379,
+        "std": 346.9177906838401,
+        "min": -7075.999999999998,
+        "max": 17280.5,
+        "p50": -1.7272727272727277,
+        "p90": 7.559999999999992,
+        "p95": 23.084848484848592,
+        "p99": 148.77199999999993
+      }
+    },
+    "text": {
+      "is_natural_language": true,
+      "token_id_summary": {
+        "sampled_from_first_n_requests": 500,
+        "unique_token_ids_in_sample": 8543,
+        "id_min": 0,
+        "id_max": 100228,
+        "id_mean": 11802.397982981405
+      },
+      "n_empty_prompts": 0,
+      "n_degenerate_prompts_lt_16": 14112
+    },
+    "_runtime": {
+      "load_s": 5.766800880432129,
+      "compute_s": 2.683793783187866
+    }
+  }
+}
