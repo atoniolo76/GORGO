@@ -1,0 +1,117 @@
+# HUMAN-GATED — Modal smoke config for prefix-aware policy group.
+#
+# Bead: go-5m8 (child of go-czi, linked to go-3j8 for actually running).
+# Spend ceiling: ≤ $1 on A10G/L4-class instances. 3 pods × ~30s active ≈
+# 1.5 pod-minutes; under the epic's per-smoke budget.
+#
+# Purpose: exercise the cache-hit-vs-load tradeoff in the regime where
+# sweep-v4 saw the largest Preble→prefix-cache p95 margin (qps=8,
+# moderate Zipf). Runs `prefix-cache` (baseline) and `prefix-cache-preble`
+# back-to-back; expected outcome:
+#   - Preble p95 ≥ 1000 ms lower than plain prefix-cache
+#   - Per-pod request-count skew (σ) ≥ 2× lower under Preble
+# If either signal is absent, escalate — indicates a regression in the
+# hotspot mitigation path.
+#
+# Workload is deliberately small (200 requests @ 8 QPS = 25s wall) so the
+# two back-to-back runs fit inside one Modal container lifetime.
+
+name: "smoke-prefix-aware"
+
+policy:
+  # Overridden by the companion sweep stanza below. Base value is the
+  # Preble policy so a direct single-run smoke works without overrides.
+  policy_id: "prefix-cache-preble"
+  params:
+    block_size: 16
+    th_bal: 1.5
+
+topology:
+  pods:
+    - pod_id: "p0"
+      role: "both"
+      gpu_count: 1
+      # 1 GiB KV budget — tight enough to force eviction on 4 families ×
+      # 64 blocks × 128 KiB/tok × 16 tok/block = 8 GiB working set.
+      kv_cache_bytes: 1073741824
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 16
+    - pod_id: "p1"
+      role: "both"
+      gpu_count: 1
+      kv_cache_bytes: 1073741824
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 16
+    - pod_id: "p2"
+      role: "both"
+      gpu_count: 1
+      kv_cache_bytes: 1073741824
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 16
+
+# Modal-calibrated analytic costs (same envelope as example_run.yaml;
+# the simulator is used locally to predict behavior before spending
+# real dollars. The Modal run itself uses the real engine in
+# engine/modal_sglang.py; this config is the *reference* specification
+# that the Modal runner consumes for topology + workload shape).
+compute:
+  prefill_ms_per_token: 0.08
+  decode_ms_per_token: 6.0
+  prefill_overhead_ms: 5.0
+  decode_overhead_ms: 2.0
+
+network:
+  client_rtt_ms: 5.0
+  inter_pod_rtt_ms: 0.2
+  inter_pod_bandwidth_gbps: 100.0
+  kv_bytes_per_token: 131072
+  serialization_overhead_ms: 0.5
+
+scheduler:
+  base_routing_ms: 0.2
+  per_pod_consideration_us: 5.0
+
+engine:
+  kv_ewma_alpha: 0.2
+  block_size: 16
+  initial_warm_latency_ms: 5.0
+
+workload:
+  kind: "synthetic"
+  params:
+    n_requests: 200              # keeps wall-clock ≤ 30s at 8 qps
+    arrival_rate_qps: 8.0        # sweep-v4 peak Preble-vs-prefix margin
+    n_prefix_families: 4         # small → forces clear hot-family pattern
+    zipf_s: 1.3                  # moderate skew: one dominant family
+    prompt_len_min: 512
+    prompt_len_max: 1536
+    max_output_tokens: 64
+    n_sessions: 32
+    shared_prefix_tokens: 1024   # 64 blocks; real hashes, not opaque keys
+
+seeds: [0]
+output_dir: "results/smoke-prefix-aware-modal"
+
+# Companion runs to execute back-to-back. The Modal runner is expected
+# to pick these up as separate invocations against the same topology;
+# if the runner only accepts a single policy per invocation, dispatch
+# two jobs with overrides:
+#   modal run ... --policy prefix-cache
+#   modal run ... --policy prefix-cache-preble
+companion_runs:
+  - name: "baseline-prefix-cache"
+    policy_id: "prefix-cache"
+    params:
+      block_size: 16
+  - name: "treatment-prefix-cache-preble"
+    policy_id: "prefix-cache-preble"
+    params:
+      block_size: 16
+      th_bal: 1.5
+
+# Acceptance criteria (checked post-run by reviewer before closing go-3j8):
+#   1. Both runs complete without errors or timeout.
+#   2. Preble p95 < prefix-cache p95 by ≥ 1000 ms on end-to-end latency.
+#   3. Per-pod dispatch skew (σ of per-pod request counts) ≥ 2× lower
+#      under Preble.
+#   4. Total Modal spend ≤ $1 (enforced by container runtime ceiling).
