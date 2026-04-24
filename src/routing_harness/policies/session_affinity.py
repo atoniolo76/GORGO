@@ -2,8 +2,9 @@
 
 New sessions land on the pod chosen by a fallback policy (default:
 least-request); subsequent requests from the same session stick. Evicts
-stickiness if the sticky pod has been unhealthy (modeled by an
-"available" flag) or if stickiness_ttl seconds have elapsed.
+stickiness if the sticky pod is no longer in cluster.pods (pod removed
+/ scaled down) or if stickiness_ttl_s seconds have elapsed since the
+binding was recorded.
 
 Memory bound (F13): TTL is checked on read, so never-returning sessions
 would otherwise accumulate in `_bindings` forever. Every
