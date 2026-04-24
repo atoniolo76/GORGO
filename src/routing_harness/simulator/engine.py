@@ -215,6 +215,7 @@ class SimulationEngine:
                 pull_blocks_from_peer=pull_blocks,
                 pd_handoff=pd_handoff_bytes > 0,
                 observed_latency_ms=cost.total_ms,
+                observed_service_ms=cost.service_ms,
                 decision=decision,
             )
 
@@ -247,6 +248,7 @@ class SimulationEngine:
         pull_blocks_from_peer: int,
         pd_handoff: bool,
         observed_latency_ms: float,
+        observed_service_ms: float,
         decision,
     ) -> None:
         alpha = self.config.kv_ewma_alpha
@@ -258,8 +260,12 @@ class SimulationEngine:
         pod.last_update_ts = now
 
         # Record the in-flight arrival on both pods for load-aware policies.
+        # pending_work_ms tracks Σ service time (Preble L_i); adding
+        # total_ms would fold queueing_ms — itself derived from
+        # active_prefill — back into the signal and inflate it on
+        # subsequent decisions. Retirement subtracts the same service_ms.
         pod.active_prefill += 1
-        pod.pending_work_ms += observed_latency_ms
+        pod.pending_work_ms += observed_service_ms
         decode_pod.active_decode += 1
         # Schedule retirement at now + observed latency (ms → s).
         self._seq += 1
@@ -272,7 +278,7 @@ class SimulationEngine:
                 decode_pod.spec.pod_id,
                 req,
                 decision,
-                observed_latency_ms,
+                observed_service_ms,
             ),
         )
 

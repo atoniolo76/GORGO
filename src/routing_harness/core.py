@@ -152,3 +152,15 @@ class CostBreakdown:
             + self.compute_decode_ms
             + self.network_ms
         )
+
+    @property
+    def service_ms(self) -> float:
+        """End-to-end cost excluding `queueing_ms`.
+
+        Used for `PodRuntime.pending_work_ms` accounting (Preble L_i =
+        Σ service time for in-flight requests). `queueing_ms` is itself
+        derived from `pod.active_prefill`, so folding it back into
+        `pending_work_ms` would nest the M/M/1 wait on top of the
+        service-time sum the Preble paper describes.
+        """
+        return self.total_ms - self.queueing_ms

@@ -251,3 +251,24 @@ def test_prefill_block_ms_zero_transport_is_prefill(cost_model, cluster, kv_cach
     c = cost_model.estimate(r, d, cluster, kv_cache, 0, 0)
     assert c.kv_transport_ms == 0.0
     assert c.prefill_block_ms == c.compute_prefill_ms
+
+
+def test_service_ms_excludes_queueing(cost_model, cluster, kv_cache):
+    """service_ms is total_ms minus queueing_ms. Engine uses it for
+    pending_work_ms so the M/M/1 wait (derived from active_prefill)
+    does not compound into the service-time sum on later decisions."""
+    cluster.pods["p0"].active_prefill = 1
+    r = _req(prompt_len=256)
+    d = Decision("p0", "p0", "test")
+    c = cost_model.estimate(r, d, cluster, kv_cache, 0, 0)
+    assert c.queueing_ms > 0.0
+    assert abs(c.service_ms - (c.total_ms - c.queueing_ms)) < 1e-9
+
+
+def test_service_ms_equals_total_when_idle(cost_model, cluster, kv_cache):
+    """With no in-flight prefill, queueing_ms is 0 and service_ms == total_ms."""
+    r = _req(prompt_len=128)
+    d = Decision("p0", "p0", "test")
+    c = cost_model.estimate(r, d, cluster, kv_cache, 0, 0)
+    assert c.queueing_ms == 0.0
+    assert c.service_ms == c.total_ms
