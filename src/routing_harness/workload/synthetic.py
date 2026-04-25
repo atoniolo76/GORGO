@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import random
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from ..core import Request
 from .trace import InMemoryTrace
@@ -120,4 +120,8 @@ def generate(params: SyntheticParams) -> InMemoryTrace:
             metadata={"family": fam_idx},
         )
         reqs.append(req)
-    return InMemoryTrace(requests=reqs, source=f"synthetic(seed={params.seed})")
+    return InMemoryTrace(
+        requests=reqs,
+        source=f"synthetic(seed={params.seed})",
+        params=asdict(params),
+    )
