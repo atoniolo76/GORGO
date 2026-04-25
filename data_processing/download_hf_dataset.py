@@ -13,9 +13,11 @@ your laptop sleeps or the CLI disconnects::
 
     modal run --detach --env=GORGO data_processing/download_hf_dataset.py::download_hf_cli --dataset allenai/WildChat-4.8M
 
-Gated datasets: accept the license on the Hub and create a Modal secret (e.g.
-``modal secret create --env=GORGO huggingface HF_TOKEN=hf_...``) named
-``huggingface`` with ``HF_TOKEN`` or ``HUGGING_FACE_HUB_TOKEN``.
+Gated datasets: on the dataset page, click **Access repository** and accept terms.
+Add ``HF_TOKEN`` to the ``hugging_face`` Modal secret. If you use a **fine-grained**
+Hugging Face token, enable *Access to public gated repositories* (otherwise Hub
+returns 403 with a hint about fine-grained settings). A **classic** read token
+avoids that toggle.
 """
 
 from __future__ import annotations

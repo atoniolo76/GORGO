@@ -30,6 +30,12 @@ When the split has ``hashed_ip`` (e.g. WildChat), prefix chains are resolved **p
 bucket** so only same-user rows compete—smaller tries and the same assumption as
 cross-row shared prefixes coming from one user.
 
+**No dedup** (``--ingest-all-rows``): bypass content-hash prefix dedup **and** the
+per-conversation winner pass; every row is tokenized and inserted. Use this to get
+A/B/C numbers directly comparable to ``build_prefix_trie.py`` (same "one sequence per
+row, no dedup" semantics). Still differs from that script in tokenizer (tiktoken
+``gpt-4o``) and in user/group key selection.
+
 **User key:** tries ``user_id``, ``hashed_user_id``, ``hashed_ip`` (WildChat),
 ``user_hash``, ``ip_hash``, ``conversation_id``, ``conversation_hash``. Override with
 ``--user-key-column``. If nothing matches, falls back to ``row:<index>`` (intra-user
@@ -995,6 +1001,8 @@ def _maximal_row_indices_content_prefix_sha256(
 
 DEDUP_TRIE_CONVERSATION_KEY = "conversation_key"
 DEDUP_TRIE_CONTENT_PREFIX_SHA256 = "content_prefix_sha256"
+# Every row ingested as-is (matches ``build_prefix_trie.py`` semantics).
+DEDUP_TRIE_INGEST_ALL = "ingest_all_rows"
 
 
 def _conversation_winners_from_dataset(
@@ -1129,7 +1137,7 @@ def _commit_for_root(root: str) -> None:
 
 @app.function(
     image=image,
-    memory=1024 * 64,
+    memory=1024 * 256,
     timeout=86400,
     volumes={
         "/lmsys": lmsys_chat_1m_volume,
@@ -1144,12 +1152,13 @@ def build_hf_disk_prefix_tries(
     extra_candidates_logged: str | None = None,
     user_key_column: str | None = None,
     row_batch_size: int = 512,
-    checkpoint_every_rows: int = 50_000,
+    checkpoint_every_rows: int = 250_000,
     min_sequence_len: int = 1,
     max_rows: int | None = None,
     stats_tag: str | None = None,
     conversation_stats_only: bool = False,
     dedup_content_prefix_sha256: bool | None = None,
+    ingest_all_rows: bool = False,
 ):
     import json
     import pickle
@@ -1168,7 +1177,19 @@ def build_hf_disk_prefix_tries(
         )
         _, root = _find_disk_root(cands)
 
-    if dedup_content_prefix_sha256 is None:
+    if ingest_all_rows:
+        if dedup_content_prefix_sha256 is True:
+            raise ValueError(
+                "ingest_all_rows=True is incompatible with dedup_content_prefix_sha256=True"
+            )
+        dedup_content_prefix_sha256 = False
+        print(
+            "[prefix_trie] --ingest-all-rows: every row ingested as-is "
+            "(no content-hash prefix dedup, no conversation-winner selection). "
+            "Matches build_prefix_trie.py semantics for a directly comparable A/B/C.",
+            flush=True,
+        )
+    elif dedup_content_prefix_sha256 is None:
         dedup_content_prefix_sha256 = _default_dedup_content_prefix_sha256(root, run_preset)
         if dedup_content_prefix_sha256:
             print(
@@ -1374,11 +1395,12 @@ def build_hf_disk_prefix_tries(
     rows_skipped_duplicate_conversation = 0
     prefix_survivor_token_lens: list[int] = []
     prefix_survivor_token_lens_resume_incomplete = False
-    expected_dedup_trie = (
-        DEDUP_TRIE_CONTENT_PREFIX_SHA256
-        if dedup_content_prefix_sha256
-        else DEDUP_TRIE_CONVERSATION_KEY
-    )
+    if ingest_all_rows:
+        expected_dedup_trie = DEDUP_TRIE_INGEST_ALL
+    elif dedup_content_prefix_sha256:
+        expected_dedup_trie = DEDUP_TRIE_CONTENT_PREFIX_SHA256
+    else:
+        expected_dedup_trie = DEDUP_TRIE_CONVERSATION_KEY
 
     ckpt_files = sorted(
         f for f in os.listdir(tries_dir) if f.startswith("rows_") and f.endswith(".pkl")
@@ -1469,7 +1491,14 @@ def build_hf_disk_prefix_tries(
 
     conversation_winners: dict[str, int] | None = None
     prefix_ingest_rows: frozenset[int] | None = None
-    if dedup_content_prefix_sha256:
+    if ingest_all_rows:
+        print(
+            "[prefix_trie] Trie dedup: none (ingest every row). "
+            "T sums lengths of all rows; intra-user and cross-user savings are "
+            "directly comparable to build_prefix_trie.py on the same data.",
+            flush=True,
+        )
+    elif dedup_content_prefix_sha256:
         if expected_ch_partition:
             print(
                 f"[prefix_trie] Trie dedup: SHA256(content) per message; maximal prefixes "
@@ -1489,7 +1518,13 @@ def build_hf_disk_prefix_tries(
             message_source=message_source,
             partition_column=expected_ch_partition,
         )
-    if conv_col and dedup_content_prefix_sha256:
+    if conv_col and ingest_all_rows:
+        print(
+            f"[prefix_trie] Per-conversation token totals use max length across all rows "
+            f"for each {conv_col!r} (no winner selection; every row is ingested).",
+            flush=True,
+        )
+    elif conv_col and dedup_content_prefix_sha256:
         print(
             f"[prefix_trie] Per-conversation token totals (pickle/cache) use max length among "
             f"prefix-ingested rows ({conv_col!r}). Printed token *distribution* is one value "
@@ -1580,6 +1615,11 @@ def build_hf_disk_prefix_tries(
                             conv_token_totals.get(ckey, 0),
                             len(token_ids),
                         )
+                elif ingest_all_rows:
+                    conv_token_totals[ckey] = max(
+                        conv_token_totals.get(ckey, 0),
+                        len(token_ids),
+                    )
                 elif conversation_winners is not None and row_index == conversation_winners.get(
                     ckey
                 ):
@@ -1869,13 +1909,14 @@ def prefix_trie(
     extra_candidates: str | None = None,
     user_key_column: str | None = None,
     row_batch_size: int = 512,
-    checkpoint_every_rows: int = 50_000,
+    checkpoint_every_rows: int = 250_000,
     min_sequence_len: int = 1,
     max_rows: int | None = None,
     stats_tag: str | None = None,
     conversation_stats_only: bool = False,
     dedup_content_prefix_sha256: bool = False,
     no_dedup_content_prefix_sha256: bool = False,
+    ingest_all_rows: bool = False,
 ):
     """KV prefix-trie overlap stats for HF ``save_to_disk`` data on ``/lmsys`` or ``/datasets`` mounts.
 
@@ -1890,14 +1931,22 @@ def prefix_trie(
       (path or ``--preset wildchat``). **Default off** for LMSYS. Pass
       ``--dedup-content-prefix-sha256`` to force on; ``--no-dedup-content-prefix-sha256``
       to force off (e.g. WildChat with legacy per-conversation-key winners).
+    * ``--ingest-all-rows`` — disable **both** the content-hash prefix dedup **and** the
+      per-conversation winner selection; every row is tokenized and inserted. This is
+      the mode to use when you want A/B/C numbers directly comparable to
+      ``build_prefix_trie.py`` (same "no dedup, one sequence per row" semantics; still
+      differs in tokenizer — tiktoken gpt-4o — and in user/group key). Incompatible
+      with ``--dedup-content-prefix-sha256``; implies ``--no-dedup-content-prefix-sha256``.
     """
     if dedup_content_prefix_sha256 and no_dedup_content_prefix_sha256:
         raise ValueError(
             "Use at most one of --dedup-content-prefix-sha256 and --no-dedup-content-prefix-sha256"
         )
+    if ingest_all_rows and dedup_content_prefix_sha256:
+        raise ValueError("--ingest-all-rows cannot be combined with --dedup-content-prefix-sha256")
     if dedup_content_prefix_sha256:
         dedup_opt: bool | None = True
-    elif no_dedup_content_prefix_sha256:
+    elif no_dedup_content_prefix_sha256 or ingest_all_rows:
         dedup_opt = False
     else:
         dedup_opt = None
@@ -1919,4 +1968,5 @@ def prefix_trie(
         stats_tag=stats_tag,
         conversation_stats_only=conversation_stats_only,
         dedup_content_prefix_sha256=dedup_opt,
+        ingest_all_rows=ingest_all_rows,
     )
