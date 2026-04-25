@@ -1,0 +1,2 @@
+hf_dataset: lmsys-chat-1m
+n_conversations: 10000

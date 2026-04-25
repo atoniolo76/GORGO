@@ -134,4 +134,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    rc = main()
+    # Bypass Python finalization: the HF `datasets` streaming iterator keeps
+    # background prefetcher threads alive that race with interpreter shutdown
+    # and abort the process (SIGABRT, "PyGILState_Release: auto-releasing
+    # thread-state, but no thread-state for this thread"). The JSONL is
+    # already on disk at this point, so a hard exit is safe and intentional.
+    os._exit(rc or 0)

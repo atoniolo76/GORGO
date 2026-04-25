@@ -184,7 +184,11 @@ def _content_to_tokens(
         return _mock_tokens(content, tokens_per_char)
     if tokenizer.startswith("tiktoken:"):
         enc = _load_tiktoken_encoding(tokenizer.split(":", 1)[1])
-        ids = tuple(enc.encode(content))
+        # Real lmsys-chat-1m messages occasionally contain literal special-token
+        # strings like "<|endofprompt|>" in user content. tiktoken treats these
+        # as disallowed by default and raises. We're counting tokens for
+        # metrics, not feeding a model, so encode them as ordinary text.
+        ids = tuple(enc.encode(content, disallowed_special=()))
         return ids if ids else (0,)
     raise ValueError(
         f"Unknown tokenizer {tokenizer!r}. Expected 'mock' or "
