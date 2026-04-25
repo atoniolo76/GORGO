@@ -1,9 +1,23 @@
-# Cost-Model Calibration Plan (Phase 1)
+# Cost-Model Calibration Plan
 
-> **Status:** design proposal, awaiting scout approval. Do not run the
-> sweep described here until this document is approved — the budget is
-> small but non-trivial and the fit targets drive published numbers.
-> Tracking bead: go-8cm. Parent gap: research/reports/routing-comparison.md §9 item 2.
+> **Status:** Phase 1 approved. Phase 2 pipeline landed (go-8cm) but
+> sweep rerun is blocked on HF Llama-3 access (tracking: go-26c, see
+> §7). Tracking bead: go-8cm. Parent gap:
+> research/reports/routing-comparison.md §9 item 2.
+>
+> **Execution environment.** All sweeps run on the
+> `arcadia-research` Modal workspace in the `GORGO` environment. The
+> launch invocation is always:
+>
+> ```bash
+> MODAL_PROFILE=arcadia-research modal run --env=GORGO \
+>     scripts/calibrate.py::main [--seed 0 ...]
+> ```
+>
+> Do **not** run `modal profile activate` — concurrency-unsafe.
+> `HF_TOKEN_ROME` is injected by the `hf_token_rome` Modal secret
+> attached to the function and mapped to `HF_TOKEN` inside the
+> container for vLLM / HuggingFace model download.
 
 ## 0. What we are calibrating
 
@@ -46,9 +60,6 @@ Rationale:
   bound vs compute-bound crossover moves) that the fitted `k` would
   not transfer. Explicit non-goal: we are not publishing a
   device-portable `k`.
-- **Fallback** if A100 availability is poor: Llama-3.1-8B-Instruct on
-  a single H100-80GB. The fit procedure is identical; we add one
-  column to the output config and note the GPU type in the YAML.
 
 Alternative considered and rejected: **Llama-3-70B** on 4×A100. Richer
 data, but ~5× the spend for incremental value on coefficients whose
@@ -56,24 +67,35 @@ main use in the harness is *relative* policy comparison.
 
 ## 2. Platform
 
-**Proposal:** **Modal** (`modal.com`), with **Lambda Cloud** as the
-fallback if A100/H100 capacity is unavailable.
+**Decision:** **Modal** only. Scout's Phase 2 approval explicitly
+removed the prior Lambda Cloud fallback.
 
 Rationale:
 
 - **Reproducibility.** Modal functions are script-defined; the entire
   calibration run is a `scripts/calibrate.py` invocation checked into
-  the repo. Re-running on a new model only requires editing the YAML
-  and re-submitting.
-- **Spot / on-demand pricing.** Modal A100-80GB is ~$3.40/hr on-demand
-  (as of Q1 2026); for our ≤4-hour sweep this stays well under budget.
-  Lambda Cloud 1×A100 SXM is ~$1.79/hr but requires manual SSH + vLLM
-  install; worth the cheaper rate only if Modal is capacity-constrained.
+  the repo. Re-running on a new model only requires editing the CLI
+  flags and re-submitting.
+- **Predictable on-demand pricing.** Modal A100-80GB is ~$3.40/hr
+  on-demand (as of Q1 2026); for our ≤4-hour sweep this stays well
+  under budget.
 - **Teardown is automatic on Modal**, removing a whole class of
   "forgot to stop the box" cost-overrun risk.
+- **Workspace pre-configured.** The `arcadia-research` workspace
+  already has the `hf_token_rome` secret attached (exposing
+  `HF_TOKEN_ROME` → `HF_TOKEN` for gated Llama-3 weights), and the
+  `GORGO` env isolates this job from other arcadia research work.
 
-Non-goals: we are not evaluating Modal vs Lambda as platforms. Either
-is acceptable per scout's prior approval.
+Invocation pattern (always, every time):
+
+```bash
+MODAL_PROFILE=arcadia-research modal run --env=GORGO \
+    scripts/calibrate.py [--seed 0] [--function-timeout 14400]
+```
+
+`MODAL_PROFILE` is prefixed per-invocation rather than via
+`modal profile activate` because profile activation is global process
+state and is not safe under concurrent polecat sessions.
 
 ## 3. Sweep design
 
@@ -177,20 +199,22 @@ to 3 seeds only if §3.1 or §3.2 R² misses the acceptance threshold.
 | Optional: 3-seed replication | 9.75 hr | $3.40/hr | +$22 (⚠ over budget) |
 
 Budget target was $5–15. **Single-seed plan lands at ~$11**, within
-budget with headroom. Three-seed replication is over budget and will
-only be run if the single-seed acceptance criteria fail (likely
-requires re-approval).
+budget with headroom. The Modal function is launched with
+`--function-timeout 4h` (14 400 s), so an accidental infinite loop
+cannot spend more than ~$14 regardless.
 
-Lambda Cloud fallback: 1×A100 SXM at $1.79/hr brings total to **~$5.80**,
-but adds ~1 engineer-hour of setup not priced here.
+Three-seed replication is over the $15 envelope and will only be run
+if the single-seed acceptance criteria fail; it requires re-approval
+from scout before launch.
 
-## 5. Outputs (Phase 2 deliverables — not run yet)
+## 5. Outputs (Phase 2 deliverables)
 
-When this plan is approved and Phase 2 runs:
-
-1. `scripts/calibrate.py` — one script that spins up vLLM (Modal function),
-   runs §3.1/§3.2/§3.3, writes raw measurements to `research/data/
-   calibration/<timestamp>/` as JSONL, and emits a fit summary.
+1. `scripts/calibrate.py` — one script that spins up vLLM (Modal
+   function on A100-80GB in the `GORGO` environment), runs
+   §3.1/§3.2/§3.3, writes raw measurements to a Modal Volume at
+   `/vol/calibration/<timestamp>/` as JSONL, downloads them back to
+   `research/data/calibration/<timestamp>/`, and emits a fit summary
+   JSON alongside.
 2. `configs/calibrated_a100.yaml` — a full RunConfig-compatible file
    (same shape as `configs/example_run.yaml`) with the fitted
    `compute:` block replacing the illustrative values. Network /
@@ -222,8 +246,22 @@ When this plan is approved and Phase 2 runs:
 
 ## 7. Risks and mitigations
 
-- **GPU capacity stall** (Modal A100 queue). *Mitigation:* Lambda Cloud
-  fallback pre-approved above.
+- **GPU capacity stall** (Modal A100 queue). *Mitigation:* rely on
+  Modal's on-demand queue; if capacity is unavailable for >1 h the
+  polecat escalates to scout rather than silently falling back to a
+  different platform. The Lambda Cloud fallback that existed in the
+  original plan was explicitly removed in Phase 2 approval.
+- **HF gated-model access not provisioned on the Modal secret.**
+  `meta-llama/Meta-Llama-3-8B-Instruct` is a gated repo; the HF
+  account behind `hf_token_rome` must be in its authorized list. The
+  first Phase 2 launch (2026-04-25, modal app
+  `ap-AEy6ze2fgYW8fr6Yptrl0H`) failed with `403 Forbidden` on the
+  model config fetch. Tracking the rerun as go-26c. *Mitigation /
+  resolution:* the account holder visits the model card and clicks
+  "Request access" (usually auto-approved), or rotates
+  `hf_token_rome` to a pre-authorized token. The pipeline
+  (`scripts/calibrate.py`) fails loud on 403 without wasting GPU time
+  beyond vLLM's initial model-config fetch (~30 s).
 - **vLLM version drift between plan-time and run-time.** *Mitigation:*
   pin vLLM to a specific release tag in `scripts/calibrate.py`.
 - **Chunked prefill / prefix caching interferes with prefill sweep.**
