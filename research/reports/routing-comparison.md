@@ -301,9 +301,93 @@ achieves the lowest skew (0.047) but at the cost of zero cache reuse.
 
 ### 6.4 PD gains
 
-> `{{figure_pd_vs_colocated}}` — awaiting PD-topology sweep. PD
-> policy operates on colocated topology in the current sweep;
-> dedicated PD topology sweep planned (see `example_pd_sweep.yaml`).
+Dedicated PD-topology sweep (`configs/example_pd_potent_sweep.yaml`)
+paired with a matched colocated re-run
+(`configs/example_colocated_potent_sweep.yaml`) over the potent
+synthetic workload (256 families × 1024-token shared heads, 2000
+requests/run). Both topologies hold 4 GPUs total: the colocated
+cluster has 4 × 1-GPU pods at `role=both` (4 × 4 GiB KV); the PD
+cluster has 2 × 1-GPU prefill pods (8 GiB KV each, for staging) and
+2 × 1-GPU decode pods (4 GiB each). Aggregate prefill slot count
+matches at 16 (4 pods × 4 colocated, 2 pods × 8 prefill on PD).
+Five-policy slate × 4 QPS × 3 Zipf × 3 seeds = 180 runs/topology;
+medians fold across Zipf and seed.
+
+**Note on comparability with §6.1.** §6.1 was filled from an earlier
+sweep iteration, before the M/M/1 queueing replacement (§9.1, go-4lp)
+and the KV-pull/prefill-overlap fix (§9.1, go-npl) landed. The fresh
+colocated numbers in the table below are not directly comparable to
+§6.1's; they share the workload but not the cost model. A full §6
+refresh against the current code is filed as a follow-up (see go-bdy
+discovery).
+
+**Table — median p95 (ms) by topology × policy × qps:**
+
+| Topology   | Policy                  | qps=4 | qps=8  | qps=16 | qps=32 | hit_rate | skew |
+|------------|-------------------------|-------|--------|--------|--------|----------|------|
+| PD         | `pd`                    |   949 |  8,225 | 14,777 | 14,785 |   0.763  | 0.23 |
+| PD         | `pd-preble`             |   953 |  1,046 | 14,761 | 14,777 |   0.749  | 0.01 |
+| PD         | `prefix-cache`          |   949 |  8,225 | 14,777 | 14,777 |   0.763  | 0.23 |
+| PD         | `prefix-cache-preble`   |   953 |  1,041 | 14,761 | 14,761 |   0.753  | 0.01 |
+| PD         | `random`                |   970 | 14,241 | 14,793 | 14,817 |   0.746  | 0.00 |
+| colocated  | `pd` (fallback)         |   942 |  1,033 | 15,369 | 15,369 |   0.694  | 0.56 |
+| colocated  | `pd-preble` (fallback)  |   944 |  1,038 | 15,553 | 15,401 |   0.678  | 0.14 |
+| colocated  | `prefix-cache`          |   950 | 13,809 | 14,777 | 14,761 |   0.762  | 0.69 |
+| colocated  | `prefix-cache-preble`   |   938 |  1,007 | 14,761 | 14,785 |   0.736  | 0.12 |
+| colocated  | `random`                | 1,001 | 14,793 | 14,969 | 14,969 |   0.730  | 0.05 |
+
+**Three-way head-to-head — colocated baseline vs PD-plain vs PD+Preble:**
+
+| QPS | colocated `prefix-cache-preble` | PD `pd` | PD `pd-preble` | best PD vs colocated |
+|-----|---------------------------------|---------|----------------|----------------------|
+|   4 |   938                           |   949   |   953          | colocated by 11 ms (noise) |
+|   8 | 1,007                           | 8,225   | 1,046          | colocated by 39 ms (Preble required for PD parity) |
+|  16 | 14,761                          | 14,777  | 14,761         | tied (saturation) |
+|  32 | 14,785                          | 14,785  | 14,777         | tied (saturation) |
+
+Three observations:
+
+1. **At matched 4-GPU count, PD topology does not win.** Across the
+   QPS range — including at low load where PD's phase isolation should
+   help most — the best PD configuration matches colocated to within
+   single-digit-percent p95. The under-load regime (qps=4) is a tie:
+   prefill rarely queues on either topology, so the dedicated prefill
+   pool gains nothing. The saturated regime (qps≥16) is also a tie
+   because the prefill bottleneck is the same in both topologies (16
+   prefill slots aggregate). The transitional regime (qps=8) is where
+   `pd-preble` earns its keep — without the Preble gate on the
+   prefill pool, plain `pd` drops 8× to 8,225 ms.
+
+2. **Plain `pd` cache-locks on the prefill pool exactly as
+   prefix-cache mono-homes on colocated.** At qps=8 the three seeds
+   span (1,047, 9,297, 12,609) ms p95 for `pd` — the same cache-lock
+   pathology F25 fixed for the colocated cache-affinity policies,
+   but the failure mode lives one level deeper. Once the first
+   identical-prompt request lands on `pf0`, prefix-match wins every
+   tie-break against `pf1`, and the warmer pod accumulates queue
+   depth without the load-aware deflection that `pd-preble` adds.
+   `pd-preble` flattens these three seeds to (1,041, 1,046, 1,060) ms
+   — same range as colocated `prefix-cache-preble`. Skew confirms the
+   mechanism: 0.23 (pd) → 0.01 (pd-preble).
+
+3. **PD lifts hit_rate slightly but does not convert it into latency.**
+   Pooling cache across two prefill pods (vs four colocated pods)
+   raises the median hit_rate from 0.736 (colocated
+   `prefix-cache-preble`) to 0.749–0.763 (PD policies). The win is
+   real but the latency does not move with it: at qps=8, PD
+   `prefix-cache-preble` p95 = 1,041 ms vs colocated 1,007 ms despite
+   the higher hit_rate. The reuse-vs-latency frontier is dominated by
+   queueing variance at this regime, not by cache savings.
+
+**Recommendation.** PD topology, on this workload at this scale, is
+not justified by routing-layer wins alone — the colocated baseline
+plus a Preble gate captures the same operating point with fewer pod
+roles. PD's plausible advantages (independently scaled prefill /
+decode pools, batched decode pipelines per §9.1 `decode_batch_k`,
+asymmetric accelerators per phase) live outside the matched-GPU,
+analytic-cost-model regime this sweep evaluates. The recommendation
+to the GORGO-fit conclusion in §7.4 is unchanged: `prefix-cache-preble`
+on the existing colocated topology remains the strongest candidate.
 
 ### 6.5 Fairness under contention
 

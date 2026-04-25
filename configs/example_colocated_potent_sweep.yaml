@@ -1,0 +1,29 @@
+# Colocated-topology counterpart to `example_pd_potent_sweep.yaml`.
+# Same potent synthetic workload (256 families × 1024-token shared
+# heads), same policy slate, same QPS / Zipf grid. Pairing the two
+# sweeps gives apples-to-apples numbers for §6.4 of routing-
+# comparison.md at matched GPU count (4 GPUs total in both
+# topologies).
+#
+# Note: pd / pd-preble run via the colocated fallback (single-pod
+# execution under the Preble gate, F24/go-997). Including them here
+# documents that fallback isn't worse than prefix-cache(-preble) on
+# colocated hardware.
+name: "colocated-potent-sweep"
+base: "example_run.yaml"
+grid:
+  "policy.policy_id":
+    - "pd"
+    - "pd-preble"
+    - "prefix-cache"
+    - "prefix-cache-preble"
+    - "random"
+  "workload.params.arrival_rate_qps":
+    - 4.0
+    - 8.0
+    - 16.0
+    - 32.0
+  "workload.params.zipf_s":
+    - 0.7
+    - 1.1
+    - 1.5
