@@ -152,7 +152,7 @@ Two independent problems:
 `active_prefill + active_decode + queued` is therefore identical to
 `active_prefill + active_decode`. Six other policies read `queued` too
 (`least_request.py:35`, `least_busy_time.py:36`, `session_affinity.py:48`,
-`vtc_basic.py:70`, `pd.py:62`, `prefix_cache.py:64`), so the dead-state bug
+`per_tenant_load_balance.py:70`, `pd.py:62`, `prefix_cache.py:64`), so the dead-state bug
 is load-bearing beyond Preble — but only Preble uses it for a *threshold*
 decision rather than an ordering.
 
@@ -265,7 +265,7 @@ to queue drain time is policy-by-policy.
 
 **Implication for `queued`.** Leave it alone. With a time-domain load, the
 dead counter is irrelevant to Preble. Fixing `queued` in the simulator is a
-separate bead (it also affects `least_request`, `vtc_basic`, `pd`,
+separate bead (it also affects `least_request`, `per_tenant_load_balance`, `pd`,
 `least_busy_time`, `session_affinity`, `prefix_cache`; each of those has its
 own remediation story). File separately if scout wants the counter lit up
 system-wide; do not bundle here.

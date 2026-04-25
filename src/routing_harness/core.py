@@ -43,7 +43,7 @@ class Request:
         prefix_key: Optional precomputed prefix hash (for datasets where
             we don't have real tokens). If None, policies may hash
             prompt_tokens themselves.
-        priority: Lower is more urgent. Used by VTC and fairness policies.
+        priority: Lower is more urgent. Used by fairness policies.
         metadata: Free-form; policies may read, must not mutate.
     """
 

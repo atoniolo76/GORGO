@@ -78,7 +78,7 @@ GRD scaffold lives in [`research/`](research/):
 | `least-kv-cache`       | max free KV bytes |
 | `least-latency`        | min EWMA latency |
 | `prefix-cache-preble`  | match − load, with hotspot-threshold deflection |
-| `vtc-basic`            | fairness-aware tenant counter + LBT |
+| `per-tenant-load-balance` | per-pod × per-tenant token-debt steering + LBT |
 | `pd`                   | disaggregated: prefix-match for prefill, LBT for decode |
 | `pd-preble`            | `pd` + Preble exploit/explore gate on prefill pool |
 | `session-affinity`     | sticky by session_id with TTL |

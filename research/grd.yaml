@@ -11,8 +11,9 @@ project:
     We systematize the fragmented space of LLM inference routing strategies
     through a unified experiment harness. Eleven policies — spanning
     cache-oblivious load balancers, KV-cache-aware routers, Preble-style
-    hotspot-aware routing, PD-disaggregated dispatchers, VTC fairness, and
-    session affinity — are evaluated against a common workload, cluster,
+    hotspot-aware routing, PD-disaggregated dispatchers, per-tenant load
+    balancing, and session affinity — are evaluated against a common
+    workload, cluster,
     and cost model. We characterize the tradeoff between maximizing KV
     reuse and minimizing end-to-end latency, accounting for second-order
     costs: KV transport bandwidth, scheduling overhead, queueing, and

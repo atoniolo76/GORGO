@@ -72,9 +72,9 @@ This phrasing is deliberate on three counts:
   from "carries private state across requests" (a memory axis) — a
   distinction the existing literature collapses.
 - **A harness** with 11 pluggable policies (SGLang-ish, Mooncake-ish,
-  Preble-ish, PD, VTC, session-affinity, five cache-oblivious
-  baselines), a prefix-level KV model, and a deterministic discrete-
-  event simulator (Section 4).
+  Preble-ish, PD, per-tenant load balance, session-affinity, five
+  cache-oblivious baselines), a prefix-level KV model, and a
+  deterministic discrete-event simulator (Section 4).
 - **A comparison protocol** with explicit cost model, metrics, and
   reproducibility guarantees (Section 5). Policies are evaluated
   against the same workload/topology/cost assumptions; the random
@@ -98,7 +98,7 @@ This phrasing is deliberate on three counts:
 | Ant Group AI Gateway | Heterogeneous dispatch under SLA. | Cost model hooks |
 | AIBrix | Cluster-level LLM serving orchestration. | Topology abstraction |
 | Preble | Prefix-locality + load balancing. | `prefix-cache-preble` |
-| VTC | Virtual token counter for fairness. | `vtc-basic` |
+| (none — VTC paper not implemented) | Sheng et al. OSDI'24 schedule admission order to bound max-min fairness. We do not implement this. | — |
 
 We do **not** claim parity with any of these systems; policies are
 baselines inspired by their published designs with documented
@@ -171,7 +171,7 @@ below retires those conflations.
 | `prefix-cache-preble`   | `composite`     | `stateless`   | `best-effort`     | `any`      | `none`            |
 | `pd`                    | `composite`     | `stateless`   | `best-effort`     | `pd-aware` | `none`            |
 | `session-affinity`      | `identity`      | `per-session` | `session-sticky`  | `any`      | `rebind-on-fail`  |
-| `vtc-basic`             | `fairness-debt` | `per-tenant`  | `tenant-weighted` | `any`      | `none`            |
+| `per-tenant-load-balance` | `fairness-debt` | `per-tenant` | `tenant-weighted` | `any`      | `none`            |
 
 Orthogonality notes:
 

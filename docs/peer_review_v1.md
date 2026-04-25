@@ -15,11 +15,11 @@ issues; the severity scale below collapses all three.
 
 ## Must-fix (correctness — break the simulation's claims)
 
-1. **`vtc-basic` does not enforce fairness.** Picks pod by
-   least-busy-time; counter is written to `Decision.score` but never
+1. **`per-tenant-load-balance` (formerly `vtc-basic`) does not enforce fairness.**
+   Picks pod by least-busy-time; counter is written to `Decision.score` but never
    consulted, and `observe_completion` is never called by the engine.
    It is a silent alias for `least-busy-time`. *Action:* wire an
-   optional `on_complete` hook in the engine; update VTC to use the
+   optional `on_complete` hook in the engine; update the policy to use the
    counter as a pod-selection priority; add a test.
 2. **`pd` does not model prefill-decode disaggregation.** The engine
    routes only to `decision.prefill_pod_id`; the prefill→decode KV
@@ -34,7 +34,7 @@ issues; the severity scale below collapses all three.
    *Action:* `install` the pulled blocks on the destination pod with
    the pulled byte count.
 4. **`active_prefill` / `active_decode` never increment during a run.**
-   All policies that use load as a signal (Preble, LBT, VTC) route
+   All policies that use load as a signal (Preble, LBT, per-tenant-load-balance) route
    against a frozen snapshot. Comparative advantage of load-aware
    policies is structurally suppressed. *Action:* increment on
    `decide`, decrement on a modeled completion; since the engine is

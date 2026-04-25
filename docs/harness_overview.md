@@ -47,7 +47,7 @@ src/routing_harness/
   policies/
     random.py, least_request.py, throughput.py, prefix_cache.py,
     least_busy_time.py, least_kv_cache.py, least_latency.py,
-    prefix_cache_preble.py, vtc_basic.py, pd.py, session_affinity.py
+    prefix_cache_preble.py, per_tenant_load_balance.py, pd.py, session_affinity.py
   config/
     schema.py       Dataclass-backed config loaders + validation
     sweep.py        Cartesian sweep expansion

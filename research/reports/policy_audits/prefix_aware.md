@@ -55,7 +55,7 @@ pods in steady state. The ordering of the fallback is unchanged (the tie-break
 collapses to pure `active_prefill`), so *ranking is preserved*, but the
 absolute value is 2× what the variable name implies. This leaks into
 six other policies that also read `queued` (`least_request`, `least_busy_time`,
-`pd`, `session_affinity`, `vtc_basic`, and Preble's historical score). Filed
+`pd`, `session_affinity`, `per_tenant_load_balance`, and Preble's historical score). Filed
 as a discovered bead for systematic cleanup — not Preble-local.
 
 **F2 (tracking): prefix_cache has no deviation from SGLang-router-style longest
