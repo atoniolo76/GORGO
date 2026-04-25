@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Iterator
 
@@ -175,4 +175,8 @@ def build_trace(
             )
         )
         idx += 1
-    return InMemoryTrace(requests=reqs, source=source)
+    return InMemoryTrace(
+        requests=reqs,
+        source=source,
+        params={"cfg": asdict(cfg), "trace": asdict(params)},
+    )

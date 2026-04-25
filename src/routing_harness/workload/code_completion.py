@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Iterator
 
@@ -163,4 +163,8 @@ def build_trace(
         idx += 1
         if cfg.max_tasks is not None and idx >= cfg.max_tasks:
             break
-    return InMemoryTrace(requests=reqs, source=source)
+    return InMemoryTrace(
+        requests=reqs,
+        source=source,
+        params={"cfg": asdict(cfg), "trace": asdict(params)},
+    )

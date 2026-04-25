@@ -32,7 +32,7 @@ import functools
 import hashlib
 import json
 import random
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Iterator
 
@@ -239,4 +239,8 @@ def build_trace(
         idx += 1
         if cfg.max_conversations is not None and idx >= cfg.max_conversations * cfg.max_turns:
             break
-    return InMemoryTrace(requests=reqs, source=source)
+    return InMemoryTrace(
+        requests=reqs,
+        source=source,
+        params={"cfg": asdict(cfg), "trace": asdict(params)},
+    )

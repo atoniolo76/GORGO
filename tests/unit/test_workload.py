@@ -41,6 +41,25 @@ def test_synthetic_describe():
     assert d["t_start"] >= 0.0
 
 
+def test_synthetic_describe_includes_generator_params():
+    """describe() must surface generator inputs so the runner's
+    content-addressed run_id discriminates on workload-axis sweeps
+    (zipf_s, n_prefix_families, prompt_len_*, shared_prefix_tokens).
+    Without this, sweeps over those axes collide on run_id and overwrite
+    each other's results/<id>/ dir.
+    """
+    from dataclasses import replace
+
+    base = _params(1)
+    a = generate(base).describe()
+    b = generate(replace(base, zipf_s=base.zipf_s + 0.5)).describe()
+    c = generate(replace(base, n_prefix_families=base.n_prefix_families + 1)).describe()
+    d = generate(replace(base, shared_prefix_tokens=8)).describe()
+    # All four describe() outputs must differ — that is what feeds run_id.
+    assert len({repr(x) for x in (a, b, c, d)}) == 4
+    assert a["params"]["zipf_s"] == base.zipf_s
+
+
 def test_synthetic_shared_head_produces_matching_token_prefixes():
     """Shared-head mode: requests from the same family share a real
     token-level prefix, and prefix_key is cleared so the engine will
