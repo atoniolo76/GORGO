@@ -5,15 +5,15 @@ adapter (``src/routing_harness/workload/lmsys.py``) expects this exact
 format: one JSON object per line with at least ``conversation_id``,
 ``language``, and ``conversation`` (a list of ``{role, content}``).
 
-Source preference (the script picks the first one that works):
+Source: ``lmsys/lmsys-chat-1m`` — the canonical dataset. Gated on Hugging
+Face; requires ``HF_TOKEN`` to be set to a token that has accepted the
+dataset's license. There is intentionally NO fallback dataset: silently
+substituting a different corpus would invalidate the metrics. If access
+fails, the script exits non-zero.
 
-1. ``lmsys/lmsys-chat-1m`` — the canonical dataset. Gated on Hugging Face;
-   requires ``HF_TOKEN`` environment variable. Set it and re-run to use
-   the real lmsys data.
-2. ``allenai/WildChat-1M`` — ungated, structurally identical schema
-   (Allen AI's release of the WildChat conversations). Used as a
-   fallback so the metrics pipeline isn't blocked on dataset access.
-   This is what most environments will get.
+To run on Modal (the supported path on devices without HF_TOKEN locally),
+use ``scripts/fetch_lmsys_modal.py`` which reads ``HF_TOKEN_ROME`` from
+the Modal secret and maps it to ``HF_TOKEN`` inside the container.
 
 The actual source is recorded in ``data/lmsys/SOURCE.txt`` so the
 metrics report can label it accurately.
@@ -26,7 +26,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -34,40 +33,11 @@ OUT_DIR = REPO_ROOT / "data" / "lmsys"
 OUT_PATH = OUT_DIR / "lmsys-chat.jsonl"
 SOURCE_PATH = OUT_DIR / "SOURCE.txt"
 
-# WildChat reports language as the full English name; the lmsys adapter
-# filters on ISO 639-1 codes by default. Map the most common ones; pass
-# unknowns through unchanged so the user sees them in the metrics report.
-_LANG_TO_ISO = {
-    "English": "en",
-    "Chinese": "zh",
-    "Spanish": "es",
-    "Russian": "ru",
-    "French": "fr",
-    "German": "de",
-    "Portuguese": "pt",
-    "Japanese": "ja",
-    "Korean": "ko",
-    "Italian": "it",
-    "Vietnamese": "vi",
-    "Polish": "pl",
-    "Indonesian": "id",
-    "Turkish": "tr",
-    "Arabic": "ar",
-    "Dutch": "nl",
-    "Ukrainian": "uk",
-    "Thai": "th",
-    "Hindi": "hi",
-    "Czech": "cs",
-}
+HF_DATASET = "lmsys/lmsys-chat-1m"
+SOURCE_LABEL = "lmsys-chat-1m"
 
 
-def _normalize_lang(s: str | None) -> str:
-    if not s:
-        return "und"
-    return _LANG_TO_ISO.get(s, s if len(s) <= 5 else s[:5])
-
-
-def _normalize_record(rec: dict, source: str) -> dict | None:
+def _normalize_record(rec: dict) -> dict | None:
     """Coerce a HF record into the lmsys adapter's JSONL schema.
 
     Returns None if the record is missing the conversation field — those
@@ -76,15 +46,8 @@ def _normalize_record(rec: dict, source: str) -> dict | None:
     convo = rec.get("conversation")
     if not convo:
         return None
-    if source == "lmsys-chat-1m":
-        cid = str(rec.get("conversation_id", ""))
-        lang = rec.get("language", "en")
-    else:  # wildchat
-        cid = str(rec.get("conversation_hash", rec.get("conversation_id", "")))
-        lang = _normalize_lang(rec.get("language"))
-    # Trim each turn down to the two fields the adapter actually reads
-    # — otherwise WildChat's per-turn moderation payload bloats the
-    # file by 5-10x with data we never look at.
+    cid = str(rec.get("conversation_id", ""))
+    lang = rec.get("language", "en")
     trimmed = [
         {"role": t.get("role"), "content": t.get("content", "")}
         for t in convo
@@ -99,24 +62,15 @@ def _normalize_record(rec: dict, source: str) -> dict | None:
     }
 
 
-def _stream_dataset(name: str, *, use_token: bool):
+def _stream_dataset():
     from datasets import load_dataset
 
-    kwargs: dict = {"split": "train", "streaming": True}
-    if use_token and os.environ.get("HF_TOKEN"):
-        kwargs["token"] = os.environ["HF_TOKEN"]
-    return load_dataset(name, **kwargs)
-
-
-def _try_source(name: str, label: str, *, use_token: bool):
-    try:
-        ds = _stream_dataset(name, use_token=use_token)
-        # Pull one record to confirm access before we commit to it.
-        first = next(iter(ds))
-        return ds, first, label
-    except Exception as e:
-        print(f"  unavailable ({label}): {type(e).__name__}: {str(e)[:140]}", file=sys.stderr)
-        return None
+    return load_dataset(
+        HF_DATASET,
+        split="train",
+        streaming=True,
+        token=os.environ["HF_TOKEN"],
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -129,39 +83,44 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
+    if not os.environ.get("HF_TOKEN"):
+        raise SystemExit(
+            "HF_TOKEN is not set. lmsys/lmsys-chat-1m is gated; export a "
+            "token that has accepted the dataset license, or run via "
+            "scripts/fetch_lmsys_modal.py on the arcadia-research Modal "
+            "workspace (HF_TOKEN_ROME secret). Refusing to substitute a "
+            "different dataset — that would invalidate the metrics."
+        )
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     print(f"materializing lmsys-shaped JSONL into {OUT_PATH}")
+    print(f"source: {HF_DATASET} (canonical, gated)")
 
-    chosen = None
-    for name, label in (
-        ("lmsys/lmsys-chat-1m", "lmsys-chat-1m"),
-        ("allenai/WildChat-1M", "wildchat-1m"),
-    ):
-        print(f"trying source: {name}")
-        chosen = _try_source(name, label, use_token=True)
-        if chosen is not None:
-            break
-
-    if chosen is None:
-        print(
-            "ERROR: no source available. Either set HF_TOKEN with access to "
-            "lmsys/lmsys-chat-1m, or check network access to huggingface.co.",
-            file=sys.stderr,
-        )
-        return 1
-
-    ds, first, source_label = chosen
-    print(f"  using: {source_label}")
+    try:
+        ds = _stream_dataset()
+        # Probe one record to surface auth/license errors before we open
+        # the output file.
+        probe_iter = iter(ds)
+        first = next(probe_iter)
+    except Exception as e:
+        raise SystemExit(
+            f"FATAL: could not access {HF_DATASET}: "
+            f"{type(e).__name__}: {str(e)[:300]}\n"
+            "Check that HF_TOKEN belongs to an account that has accepted "
+            "the lmsys/lmsys-chat-1m license at "
+            "https://huggingface.co/datasets/lmsys/lmsys-chat-1m"
+        ) from e
 
     n_written = 0
     with OUT_PATH.open("w", encoding="utf-8") as out:
-        # `first` was already consumed by the probe; re-stream from the start
-        # so the cap counts records consistently regardless of which source.
-        for rec in _stream_dataset(
-            "lmsys/lmsys-chat-1m" if source_label == "lmsys-chat-1m" else "allenai/WildChat-1M",
-            use_token=True,
-        ):
-            norm = _normalize_record(rec, source_label)
+        # `first` was consumed by the probe — write it before re-streaming
+        # the rest so we don't lose a record.
+        norm = _normalize_record(first)
+        if norm is not None:
+            out.write(json.dumps(norm, ensure_ascii=False) + "\n")
+            n_written += 1
+        for rec in probe_iter:
+            norm = _normalize_record(rec)
             if norm is None:
                 continue
             out.write(json.dumps(norm, ensure_ascii=False) + "\n")
@@ -169,8 +128,8 @@ def main(argv: list[str] | None = None) -> int:
             if n_written >= args.max_conversations:
                 break
 
-    SOURCE_PATH.write_text(f"hf_dataset: {source_label}\nn_conversations: {n_written}\n")
-    print(f"wrote {OUT_PATH} ({n_written:,} conversations) — source={source_label}")
+    SOURCE_PATH.write_text(f"hf_dataset: {SOURCE_LABEL}\nn_conversations: {n_written}\n")
+    print(f"wrote {OUT_PATH} ({n_written:,} conversations) — source={SOURCE_LABEL}")
     return 0
 
 

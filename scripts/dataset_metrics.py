@@ -201,10 +201,10 @@ def load_lmsys(
 
     The lmsys workload adapter (``workload.lmsys``) consumes JSONL with
     one conversation per line. Run ``scripts/fetch_lmsys_data.py``
-    first; it prefers the canonical ``lmsys/lmsys-chat-1m`` (gated,
-    needs ``HF_TOKEN``) and falls back to ``allenai/WildChat-1M``
-    (ungated, identical schema). The actual source is recorded in
-    ``data/lmsys/SOURCE.txt`` and surfaced in the report.
+    first (HF_TOKEN required; lmsys/lmsys-chat-1m is gated). On devices
+    without a local token, run ``scripts/fetch_lmsys_modal.py`` to
+    execute the fetch + metrics pipeline on Modal. The actual source is
+    recorded in ``data/lmsys/SOURCE.txt`` and surfaced in the report.
 
     Tokenizer is ``cl100k_base`` (same as code_completion) so prompt
     lengths are comparable across datasets without the mock-tokenizer
@@ -239,8 +239,8 @@ def load_lmsys(
         path_for_info = rel.as_posix()
     except ValueError:
         path_for_info = abs_path
-    # Surface what fetch_lmsys_data.py actually pulled — distinguishes a
-    # WildChat-1M fallback from real lmsys-chat-1m.
+    # Surface what fetch_lmsys_data.py actually pulled — should always
+    # be lmsys-chat-1m now that the WildChat-1M fallback has been removed.
     source_label = None
     src_file = REPO_ROOT / "data" / "lmsys" / "SOURCE.txt"
     if src_file.exists():
@@ -267,8 +267,7 @@ def load_lmsys(
         },
         "data_acquisition": [
             "# Fetch chat data into data/lmsys/ (gitignored).",
-            "# Set HF_TOKEN to access the gated lmsys/lmsys-chat-1m;",
-            "# otherwise falls back to allenai/WildChat-1M.",
+            "# HF_TOKEN required (lmsys/lmsys-chat-1m is gated; no fallback).",
             "python scripts/fetch_lmsys_data.py --max-conversations 10000",
         ],
     }
@@ -850,15 +849,6 @@ def render_report(
         hf = loader_info["hf_source"]
         if hf == "lmsys-chat-1m":
             lines.append("- **HF dataset**: `lmsys/lmsys-chat-1m` (canonical, gated)")
-        elif hf == "wildchat-1m":
-            lines.append(
-                "- **HF dataset**: `allenai/WildChat-1M` "
-                "— **substituted** because `lmsys/lmsys-chat-1m` is gated and no "
-                "`HF_TOKEN` was available. The two datasets share the same "
-                "JSONL conversation schema, so the lmsys workload adapter "
-                "consumes them identically. Re-run with `HF_TOKEN` exported "
-                "to profile the canonical dataset."
-            )
         else:
             lines.append(f"- **HF dataset**: `{hf}`")
     if "config" in loader_info:
@@ -1084,11 +1074,7 @@ def distinctive_summary(dataset: str, metrics: dict, loader_info: dict | None = 
         lm = metrics.get("language_mix") or {}
         top_lang = lm.get("top10", [{}])[0] if lm else {}
         hf = (loader_info or {}).get("hf_source", "unknown")
-        substrate = (
-            "WildChat-1M (lmsys-chat-1m gated; ungated stand-in via the lmsys adapter)"
-            if hf == "wildchat-1m"
-            else f"lmsys-chat-1m ({hf})"
-        )
+        substrate = f"lmsys/lmsys-chat-1m ({hf})"
         return (
             f"lmsys is the multi-turn, real-text chat dataset (substrate: {substrate}). "
             f"n_requests={v['n_requests']:,} across n_sessions={v['n_sessions']:,} "
