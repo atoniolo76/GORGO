@@ -517,11 +517,13 @@ proxy.
    `tests/unit/test_calibrated_coefficients.py` enforce the §6
    acceptance gates (R² thresholds, residual-SE bounds,
    `k ∈ [0.1, 2.0]`, monotonic amortization) and skip cleanly when
-   the calibrated config is absent. **Rerun-blocked on HF access**:
-   the HF account behind the `hf_token_rome` Modal secret is not
-   authorized for `meta-llama/Meta-Llama-3-8B-Instruct` (gated repo,
-   403 Forbidden on model config fetch, 2026-04-25). Until the rerun
-   lands (tracked as go-26c), the `AnalyticCostModel` coefficients
+   the calibrated config is absent. **Rerun-gated on scout
+   approval**: target switched to `meta-llama/Llama-3.1-8B-Instruct`
+   on 2026-04-25 (go-27g) after the HF account behind
+   `hf_token_rome` was approved for the Llama family; the original
+   2026-04-25 launch on `meta-llama/Meta-Llama-3-8B-Instruct` failed
+   with 403 Forbidden on model config fetch. Until the rerun lands
+   (tracked as go-26c), the `AnalyticCostModel` coefficients
    shipped in `configs/example_run.yaml` remain illustrative and the
    quantitative claims in §6–§7 are conditional on the
    pre-calibration relative ordering being preserved (which §9.1
