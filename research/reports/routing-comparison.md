@@ -393,11 +393,28 @@ proxy.
 
 1. **Absolute numbers.** Every quantitative claim in Sections 6–7 is
    conjectural until the sweep has been executed.
-2. **Cost model calibration.** `AnalyticCostModel` coefficients are
-   illustrative. Real prefill/decode ms/token must be measured on a
-   given model × GPU before any quantitative claim is made. The
-   `InstrumentedCostModel` scaffolding supports overriding analytic
-   values with observations.
+2. **Cost model calibration.** Phase 1 design + Phase 2 execution
+   pipeline landed (bead go-8cm). `scripts/calibrate.py` runs a vLLM
+   microbenchmark sweep on Modal A100-80GB (three sub-sweeps per
+   `docs/calibration_plan.md` §3: prefill / decode@batch=1 /
+   decode-batch) and fits the five `ComputeParams` coefficients
+   locally, emitting `configs/calibrated_a100.yaml` +
+   `research/data/calibration/<ts>/fit_summary.json`; unit tests in
+   `tests/unit/test_calibrated_coefficients.py` enforce the §6
+   acceptance gates (R² thresholds, residual-SE bounds,
+   `k ∈ [0.1, 2.0]`, monotonic amortization) and skip cleanly when
+   the calibrated config is absent. **Rerun-blocked on HF access**:
+   the HF account behind the `hf_token_rome` Modal secret is not
+   authorized for `meta-llama/Meta-Llama-3-8B-Instruct` (gated repo,
+   403 Forbidden on model config fetch, 2026-04-25). Until the rerun
+   lands (tracked as go-26c), the `AnalyticCostModel` coefficients
+   shipped in `configs/example_run.yaml` remain illustrative and the
+   quantitative claims in §6–§7 are conditional on the
+   pre-calibration relative ordering being preserved (which §9.1
+   argues for, on the axes where the approximations are symmetric).
+   The `InstrumentedCostModel` scaffolding supports overriding
+   analytic values with observations per-pod once a calibrated
+   config ships.
 3. **Tokenizer fidelity.** The lmsys adapter ships two tokenizers: a
    content-hashed block-structured *mock* (default, zero deps) and a
    real `tiktoken:<encoding>` path behind the `tokenizers` optional
