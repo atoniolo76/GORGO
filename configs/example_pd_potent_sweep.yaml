@@ -1,0 +1,34 @@
+# Dedicated PD-topology sweep over the potent synthetic workload
+# (256 families × 1024-token shared heads). Pairs with the colocated
+# sweep in `example_sweep.yaml` so §6.4 of routing-comparison.md can
+# show PD-vs-colocated at matched GPU count.
+#
+# Policy slate is intentionally narrower than the full 11-policy
+# colocated sweep — only those that meaningfully test the PD-vs-
+# colocated story land here:
+#   - pd, pd-preble: PD-aware policies (the headline comparison)
+#   - prefix-cache, prefix-cache-preble: cache-aware policies that
+#     ignore role splits, evaluated on PD topology to see if naive
+#     prefix routing already captures most of the PD benefit
+#   - random: no-op baseline shared with the colocated sweep
+#
+# Sequential execution: the runner is a single Python loop, no
+# parallel workers (laptop is compute-throttled, see go-bdy notes).
+name: "pd-potent-sweep"
+base: "example_pd_potent_run.yaml"
+grid:
+  "policy.policy_id":
+    - "pd"
+    - "pd-preble"
+    - "prefix-cache"
+    - "prefix-cache-preble"
+    - "random"
+  "workload.params.arrival_rate_qps":
+    - 4.0
+    - 8.0
+    - 16.0
+    - 32.0
+  "workload.params.zipf_s":
+    - 0.7
+    - 1.1
+    - 1.5
