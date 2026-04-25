@@ -1,11 +1,18 @@
-"""VTC-basic: Virtual Token Counter fairness policy.
+"""Per-tenant load balance: route by lowest per-pod × per-tenant token debt.
 
-Tracks per-tenant (or per-session) token consumption and penalizes pods
-that are currently serving heavy tenants. Each pod has a per-tenant
-"debt" implicit in its in-flight mix; VTC routes the request to the pod
-whose aggregate debt for the request's tenant is lowest, breaking ties
-by least-busy-time. The engine's `observe_completion` hook updates
-counters when requests finish.
+Tracks per-tenant (or per-session) token consumption and steers a tenant's
+requests toward the pod that has served the least of *that tenant's* tokens
+so far. Each pod has a per-tenant "debt" implicit in its in-flight mix; the
+policy routes the request to the pod whose aggregate debt for the request's
+tenant is lowest, breaking ties by least-busy-time. The engine's
+`observe_completion` hook updates counters when requests finish.
+
+This is **not** the VTC policy from Sheng et al. (OSDI'24). That paper
+schedules *admission order among queued requests* to bound max-min fairness
+|U_i - U_j| <= U; this policy has no admission queue, no fairness bound, and
+no starvation protection. It is a per-pod tenant-aware load balancer, useful
+for spreading a heavy tenant across pods, but it does not provide the
+guarantees of paper VTC. (See go-362.)
 
 Taxonomy (see `research/reports/routing-comparison.md` §3):
     selection=fairness-debt (per-pod × per-tenant token counter),
@@ -13,10 +20,9 @@ Taxonomy (see `research/reports/routing-comparison.md` §3):
     fairness=tenant-weighted, topology=any, migration=none.
 
 Windowing (F16): when `window_s` is set, consumption aged out beyond
-that window stops counting, matching the paper's sliding-window W
-(Sheng et al. OSDI'24, §5.2, default W=60s). When `window_s` is None,
-counters are monotonic (paper-infidel; kept for backward compatibility
-with short-trace sweeps where no visible difference occurs).
+that window stops counting. When `window_s` is None, counters are
+monotonic (kept for backward compatibility with short-trace sweeps where
+no visible difference occurs).
 """
 
 from __future__ import annotations
@@ -30,9 +36,9 @@ from ..kv_cache import KVCacheState
 from ..policy import register_policy
 
 
-@register_policy("vtc-basic")
+@register_policy("per-tenant-load-balance")
 @dataclass
-class VTCBasicPolicy:
+class PerTenantLoadBalancePolicy:
     fairness_key: str = "session_id"  # or "tenant" if set in metadata
     window_s: float | None = None  # None → monotonic; float → sliding window in seconds
     counters: dict[str, float] = field(default_factory=lambda: defaultdict(float))
@@ -124,7 +130,7 @@ class VTCBasicPolicy:
             return Decision("__none__", "__none__", "no-prefill-capable-pod")
         self._evict_expired(request.arrival_ts)
         k = self._key(request)
-        vtc_score = self.counters.get(k, 0.0)
+        tenant_score = self.counters.get(k, 0.0)
 
         def busy(p):
             return p.ewma_latency_ms * (p.active_prefill + p.active_decode)
@@ -136,6 +142,6 @@ class VTCBasicPolicy:
         return Decision(
             pick.spec.pod_id,
             pick.spec.pod_id,
-            rationale=f"vtc k={k} tokens={vtc_score:.0f} debt={tenant_debt(pick):.0f}",
-            score=-vtc_score,
+            rationale=f"ptlb k={k} tokens={tenant_score:.0f} debt={tenant_debt(pick):.0f}",
+            score=-tenant_score,
         )

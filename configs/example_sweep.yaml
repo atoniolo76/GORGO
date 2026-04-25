@@ -13,7 +13,7 @@ grid:
     - "least-kv-cache"
     - "least-latency"
     - "prefix-cache-preble"
-    - "vtc-basic"
+    - "per-tenant-load-balance"
     - "pd"
     - "session-affinity"
   "workload.params.arrival_rate_qps":

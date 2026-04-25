@@ -2,7 +2,7 @@
 
 Covers edge cases not exercised by `test_policies_individual.py`:
 session binding persistence and eviction, pod add/remove mid-run,
-TTL boundaries, vtc cold start and tenant_debt evolution, monotonic
+TTL boundaries, per-tenant-load-balance cold start and tenant_debt evolution, monotonic
 counters, fairness signal lag, and an end-to-end integration pin
 through the SimulationEngine.
 
@@ -248,20 +248,20 @@ def test_session_affinity_purge_disabled_when_interval_zero_F13(pod_specs):
 
 
 # =============================================================================
-# vtc-basic
+# per-tenant-load-balance
 # =============================================================================
 
 
-def test_vtc_cold_start_picks_lowest_pod_id(pod_specs):
+def test_ptlb_cold_start_picks_lowest_pod_id(pod_specs):
     cluster, kv = _fresh_3_pod_cluster(pod_specs)
-    p = get_policy("vtc-basic")
+    p = get_policy("per-tenant-load-balance")
     d = p.decide(_make_req("r", "s_cold", 0.0), cluster, kv)
     assert d.prefill_pod_id == "p0"
 
 
-def test_vtc_observe_completion_updates_both_counters(pod_specs):
+def test_ptlb_observe_completion_updates_both_counters(pod_specs):
     cluster, kv = _fresh_3_pod_cluster(pod_specs)
-    p = get_policy("vtc-basic")
+    p = get_policy("per-tenant-load-balance")
     req = _make_req("r", "sA", 0.0)
     d = p.decide(req, cluster, kv)
     p.observe_completion(req, d, tokens_consumed=500.0)
@@ -273,7 +273,7 @@ def test_vtc_observe_completion_updates_both_counters(pod_specs):
             assert p.pod_tenant_tokens[pid]["sA"] == 0.0
 
 
-def test_vtc_heavy_tenant_burst_without_completions_pins_F17(pod_specs):
+def test_ptlb_heavy_tenant_burst_without_completions_pins_F17(pod_specs):
     """F17: during a burst, tenant_debt stays zero; only `busy()` differentiates.
 
     Pod-level load (active_prefill) is simulated in-test: we load pod p0 so
@@ -283,18 +283,18 @@ def test_vtc_heavy_tenant_burst_without_completions_pins_F17(pod_specs):
     for pid in ("p0", "p1", "p2"):
         cluster.pods[pid].ewma_latency_ms = 10.0  # nonzero so busy() is meaningful
     cluster.pods["p0"].active_prefill = 5  # p0 is the heavy pod
-    p = get_policy("vtc-basic")
+    p = get_policy("per-tenant-load-balance")
     decisions = [p.decide(_make_req(f"r{i}", "sHeavy", float(i)), cluster, kv) for i in range(4)]
     # All tenant_debts are 0 (no completions) → tie-break falls to (busy, pod_id).
     # busy for p0 is 10.0 * 5 = 50; p1/p2 are 0 → all decisions avoid p0.
     assert all(d.prefill_pod_id != "p0" for d in decisions)
 
 
-def test_vtc_heavy_tenant_steered_away_after_completion(pod_specs):
+def test_ptlb_heavy_tenant_steered_away_after_completion(pod_specs):
     """After a completion records tokens against a pod, future requests from that
     tenant prefer any pod with smaller tenant_debt (i.e. any other pod)."""
     cluster, kv = _fresh_3_pod_cluster(pod_specs)
-    p = get_policy("vtc-basic")
+    p = get_policy("per-tenant-load-balance")
     r1 = _make_req("r1", "sHeavy", 0.0)
     d1 = p.decide(r1, cluster, kv)
     p.observe_completion(r1, d1, tokens_consumed=1_000_000.0)
@@ -304,11 +304,11 @@ def test_vtc_heavy_tenant_steered_away_after_completion(pod_specs):
     assert d2.prefill_pod_id != d1.prefill_pod_id
 
 
-def test_vtc_light_tenant_indifferent_when_all_zero(pod_specs):
+def test_ptlb_light_tenant_indifferent_when_all_zero(pod_specs):
     """A light tenant with no history picks on (busy, pod_id) only."""
     cluster, kv = _fresh_3_pod_cluster(pod_specs)
     # Poison another tenant's history; this should not affect the light tenant.
-    p = get_policy("vtc-basic")
+    p = get_policy("per-tenant-load-balance")
     r_heavy = _make_req("rH", "sHeavy", 0.0)
     d_heavy = p.decide(r_heavy, cluster, kv)
     p.observe_completion(r_heavy, d_heavy, tokens_consumed=1_000_000.0)
@@ -318,9 +318,9 @@ def test_vtc_light_tenant_indifferent_when_all_zero(pod_specs):
     assert d_light.prefill_pod_id == "p0"
 
 
-def test_vtc_metadata_fairness_key_used_when_present(pod_specs):
+def test_ptlb_metadata_fairness_key_used_when_present(pod_specs):
     cluster, kv = _fresh_3_pod_cluster(pod_specs)
-    p = get_policy("vtc-basic", fairness_key="tenant")
+    p = get_policy("per-tenant-load-balance", fairness_key="tenant")
     req = _make_req("r", "sIgnored", 0.0, metadata={"tenant": "T1"})
     d = p.decide(req, cluster, kv)
     p.observe_completion(req, d, tokens_consumed=100.0)
@@ -328,22 +328,22 @@ def test_vtc_metadata_fairness_key_used_when_present(pod_specs):
     assert p.counters.get("sIgnored", 0.0) == 0.0
 
 
-def test_vtc_metadata_fairness_key_falls_back_to_session_id(pod_specs):
+def test_ptlb_metadata_fairness_key_falls_back_to_session_id(pod_specs):
     """Missing metadata key → _key returns str(session_id)."""
     cluster, kv = _fresh_3_pod_cluster(pod_specs)
-    p = get_policy("vtc-basic", fairness_key="tenant")
+    p = get_policy("per-tenant-load-balance", fairness_key="tenant")
     req = _make_req("r", "sFallback", 0.0, metadata={})  # no `tenant` key
     d = p.decide(req, cluster, kv)
     p.observe_completion(req, d, tokens_consumed=50.0)
     assert p.counters["sFallback"] == 50.0
 
 
-def test_vtc_is_deterministic_under_same_input(pod_specs):
+def test_ptlb_is_deterministic_under_same_input(pod_specs):
     """Two independent instances, same input sequence → same decisions."""
     cluster1, kv1 = _fresh_3_pod_cluster(pod_specs)
     cluster2, kv2 = _fresh_3_pod_cluster(pod_specs)
-    p1 = get_policy("vtc-basic")
-    p2 = get_policy("vtc-basic")
+    p1 = get_policy("per-tenant-load-balance")
+    p2 = get_policy("per-tenant-load-balance")
     reqs = [_make_req(f"r{i}", f"s{i % 3}", float(i)) for i in range(15)]
     decisions1 = []
     decisions2 = []
@@ -357,10 +357,10 @@ def test_vtc_is_deterministic_under_same_input(pod_specs):
     assert decisions1 == decisions2
 
 
-def test_vtc_counters_monotonic_when_window_unset_F16(pod_specs):
+def test_ptlb_counters_monotonic_when_window_unset_F16(pod_specs):
     """F16: default (window_s=None) keeps monotonic behavior for backward-compat."""
     cluster, kv = _fresh_3_pod_cluster(pod_specs)
-    p = get_policy("vtc-basic")
+    p = get_policy("per-tenant-load-balance")
     assert p.window_s is None
     req = _make_req("r", "sMono", 0.0)
     d = p.decide(req, cluster, kv)
@@ -372,10 +372,10 @@ def test_vtc_counters_monotonic_when_window_unset_F16(pod_specs):
     assert p.counters["sMono"] == pytest.approx(1000.0)
 
 
-def test_vtc_sliding_window_ages_out_consumption_F16(pod_specs):
+def test_ptlb_sliding_window_ages_out_consumption_F16(pod_specs):
     """F16: with window_s set, consumption beyond the window stops counting."""
     cluster, kv = _fresh_3_pod_cluster(pod_specs)
-    p = get_policy("vtc-basic", window_s=60.0)
+    p = get_policy("per-tenant-load-balance", window_s=60.0)
     # Heavy burst at t=0..2
     for i in range(5):
         r = _make_req(f"r{i}", "sHeavy", float(i))
@@ -391,11 +391,11 @@ def test_vtc_sliding_window_ages_out_consumption_F16(pod_specs):
         assert p.pod_tenant_tokens[pid].get("sHeavy", 0.0) == pytest.approx(0.0)
 
 
-def test_vtc_sliding_window_unpins_heavy_tenant_F16(pod_specs):
+def test_ptlb_sliding_window_unpins_heavy_tenant_F16(pod_specs):
     """F16: after the window elapses, a previously-heavy tenant is no longer
     steered away from its earlier warmed pod."""
     cluster, kv = _fresh_3_pod_cluster(pod_specs)
-    p = get_policy("vtc-basic", window_s=60.0)
+    p = get_policy("per-tenant-load-balance", window_s=60.0)
     r1 = _make_req("r1", "sH", 0.0)
     d1 = p.decide(r1, cluster, kv)
     p.observe_completion(r1, d1, tokens_consumed=1_000_000.0)
@@ -407,10 +407,10 @@ def test_vtc_sliding_window_unpins_heavy_tenant_F16(pod_specs):
     assert d_late.prefill_pod_id == "p0"
 
 
-def test_vtc_reset_clears_all_state_F16(pod_specs):
+def test_ptlb_reset_clears_all_state_F16(pod_specs):
     """F16: reset() exposed for experiment isolation."""
     cluster, kv = _fresh_3_pod_cluster(pod_specs)
-    p = get_policy("vtc-basic")
+    p = get_policy("per-tenant-load-balance")
     r = _make_req("r", "sX", 0.0)
     d = p.decide(r, cluster, kv)
     p.observe_completion(r, d, tokens_consumed=500.0)
@@ -420,19 +420,19 @@ def test_vtc_reset_clears_all_state_F16(pod_specs):
     assert p.pod_tenant_tokens == {}
 
 
-def test_vtc_empty_cluster_returns_none_sentinel(pod_specs):
+def test_ptlb_empty_cluster_returns_none_sentinel(pod_specs):
     empty = ClusterState.from_specs([])
     kv = KVCacheState.from_specs({})
-    p = get_policy("vtc-basic")
+    p = get_policy("per-tenant-load-balance")
     d = p.decide(_make_req("r", "s", 0.0), empty, kv)
     assert d.prefill_pod_id == "__none__"
 
 
-def test_vtc_single_pod_cluster(pod_specs):
+def test_ptlb_single_pod_cluster(pod_specs):
     one = [pod_specs[0]]
     cluster = ClusterState.from_specs(one)
     kv = KVCacheState.from_specs({one[0].pod_id: one[0].kv_cache_bytes})
-    p = get_policy("vtc-basic")
+    p = get_policy("per-tenant-load-balance")
     # Heavy tenant with history; still must pick the only pod.
     r1 = _make_req("r1", "sA", 0.0)
     d1 = p.decide(r1, cluster, kv)
@@ -442,14 +442,14 @@ def test_vtc_single_pod_cluster(pod_specs):
 
 
 # =============================================================================
-# Integration: vtc-basic end-to-end through the engine spreads a heavy tenant
+# Integration: per-tenant-load-balance end-to-end through the engine spreads a heavy tenant
 # =============================================================================
 
 
-def test_vtc_spreads_heavy_tenant_across_pods_under_engine(
+def test_ptlb_spreads_heavy_tenant_across_pods_under_engine(
     pod_specs, compute_params, network_params, scheduler_params
 ):
-    """On a heavy-user+light-user trace, vtc-basic must spread the heavy
+    """On a heavy-user+light-user trace, per-tenant-load-balance must spread the heavy
     tenant's requests across pods. Exact counts are engine-dependent, but
     the heavy tenant must not be pinned to a single pod."""
     from routing_harness.cost_model import AnalyticCostModel
@@ -458,7 +458,7 @@ def test_vtc_spreads_heavy_tenant_across_pods_under_engine(
 
     cluster = ClusterState.from_specs(pod_specs)
     kv = KVCacheState.from_specs({s.pod_id: s.kv_cache_bytes for s in pod_specs})
-    policy = get_policy("vtc-basic")
+    policy = get_policy("per-tenant-load-balance")
     cost_model = AnalyticCostModel(
         compute=compute_params, network=network_params, scheduler=scheduler_params
     )
@@ -503,7 +503,7 @@ def test_vtc_spreads_heavy_tenant_across_pods_under_engine(
     # Require the heavy tenant to touch at least 2 of the 3 pods.
     touched = sum(1 for c in heavy_pod_counts.values() if c > 0)
     assert touched >= 2, (
-        f"vtc-basic failed to spread heavy tenant: {heavy_pod_counts}"
+        f"per-tenant-load-balance failed to spread heavy tenant: {heavy_pod_counts}"
     )
     # And the max-single-pod share must be under 90% (spread, not pinned).
     total_heavy = sum(heavy_pod_counts.values())

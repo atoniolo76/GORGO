@@ -2,7 +2,8 @@
 
 > **Bead:** go-sz5 (child of epic go-czi).
 > **Policies:** `session-affinity` (`src/routing_harness/policies/session_affinity.py`),
-> `vtc-basic` (`src/routing_harness/policies/vtc_basic.py`).
+> `per-tenant-load-balance` (`src/routing_harness/policies/per_tenant_load_balance.py`,
+> formerly `vtc-basic`; renamed under go-362 to drop the misleading VTC paper claim).
 > **Baseline commit:** `5ff7886` (post–F3/F7a merges; tip of `main` before this audit).
 > **Companion audits (continue finding-ID numbering):** go-5m8 (prefix-aware, F1–F6),
 > go-651 (load-balancing, F7–F11). New findings in this audit start at **F12**.
@@ -10,24 +11,23 @@
 ## 0. TL;DR
 
 Both policies are correct in their narrow scope — `session-affinity` delivers
-deterministic stickiness, and `vtc-basic` deterministically steers a tenant's
-next request toward the pod that has historically served them the least.
-Neither has a latent bug that changes dispatch outcomes for the workloads in
-`research/reports/routing-comparison.md` §6.
+deterministic stickiness, and `per-tenant-load-balance` deterministically steers
+a tenant's next request toward the pod that has historically served them the
+least. Neither has a latent bug that changes dispatch outcomes for the workloads
+in `research/reports/routing-comparison.md` §6.
 
-**However, `vtc-basic` is materially different from the VTC paper** (Sheng et
-al., "Fairness in Serving Large Language Models," OSDI 2024). The paper
-schedules *which queued request to admit next* to enforce a bounded max-min
-fairness gap `U`; our implementation picks *which pod to route to* and has no
-scheduling or admission control. As a result it cannot provide the paper's
-starvation bound. This is a paper-fidelity gap, not a correctness bug — but it
-must be flagged so nobody cites the policy name as shorthand for the paper's
-guarantees.
+The policy formerly called `vtc-basic` was renamed to `per-tenant-load-balance`
+under go-362, dropping the misleading paper-fidelity implication. The OSDI'24
+VTC paper (Sheng et al.) schedules admission order among queued requests to
+bound max-min fairness; this policy picks a pod and has no admission queue,
+fairness bound, or starvation protection. The rename eliminates that confusion.
+We do not claim paper VTC anywhere in the harness.
 
-Six findings (F12–F17) filed; none are release-blocking. The most important
-are **F15** (VTC is not paper-faithful) and **F16** (no decay/window on the
-token counter). F17 (in-flight work is invisible to the fairness signal) is
-mitigated by the `busy()` tie-breaker but worth documenting.
+Six findings (F12–F17) filed; none are release-blocking. **F15** (the VTC
+paper-fidelity gap) is **resolved** by the go-362 rename. F16 (decay/window on
+the token counter) was implemented in go-e9r. F17 (in-flight work invisible to
+the fairness signal) is mitigated by the `busy()` tie-breaker but worth
+documenting.
 
 ## 1. Method
 
@@ -40,11 +40,13 @@ policy's binding is a direct `dict[session_id] -> pod_id`, not a hash — so
 empirical tests focused on the observable: pod addition, pod removal, and TTL
 behavior.
 
-For `vtc-basic` the implementation was compared section-by-section against
-Sheng et al. (§3 definition of VTC, §4.2 max-min fairness guarantee, §5
-admission control). Behavior under a heavy-user-plus-light-user mix was
-exercised through the full simulator engine on a short synthetic trace (see
-test `test_vtc_spreads_heavy_tenant_across_pods_under_engine`).
+For `per-tenant-load-balance` the implementation was originally compared
+section-by-section against Sheng et al. (§3 definition of VTC, §4.2 max-min
+fairness guarantee, §5 admission control); that comparison surfaced F15 (the
+paper-fidelity gap) and motivated the go-362 rename. Behavior under a
+heavy-user-plus-light-user mix was exercised through the full simulator engine
+on a short synthetic trace (see
+test `test_ptlb_spreads_heavy_tenant_across_pods_under_engine`).
 
 ## 2. `session_affinity.py`
 
@@ -116,7 +118,7 @@ sticky-session implementations (Envoy/Istio, SGLang-router). The docstring
 correctly notes this is not a fairness-balancing design — it's a cache
 warm-up mechanism.
 
-## 3. `vtc_basic.py`
+## 3. `per_tenant_load_balance.py` (formerly `vtc_basic.py`)
 
 ### 3.1 What it does
 
@@ -129,7 +131,7 @@ Both advance in `observe_completion` by `tokens_consumed` (engine passes
 `len(prompt_tokens) + max_output_tokens`). `decide` picks the pod minimizing
 `(tenant_debt(pod, k), busy(pod), pod_id)` where `busy = ewma_latency_ms *
 (active_prefill + active_decode + queued)`. The returned `Decision.score` is
-`-vtc_score` (negative of the global counter) — for observability only; it
+`-tenant_score` (negative of the global counter) — for observability only; it
 does not affect ranking.
 
 ### 3.2 Correctness (within stated semantics)
@@ -143,42 +145,35 @@ does not affect ranking.
 | Fairness-key plumbing (session_id vs. metadata) | ✓ | `_key` at line 36–39; falls back to `str(session_id)` if metadata key missing. |
 | `observe_completion` updates both counters symmetrically | ✓ | Lines 53–55. |
 | No cluster/KV mutation | ✓ | Contract test. |
-| Score is global counter (diagnostic only) | ✓ | `score=-vtc_score` line 80. |
+| Score is global counter (diagnostic only) | ✓ | `score=-tenant_score` line 80. |
 
 ### 3.3 Findings
 
-**F15 (medium, paper-fidelity): `vtc-basic` is not VTC as defined in the
-paper.** The OSDI 2024 VTC paper schedules *admission order among queued
-requests* with a continuous-time virtual counter, providing a bounded max-
-min fairness guarantee `|U_i - U_j| ≤ U` between any two active clients. Our
-implementation:
+**F15 (RESOLVED, go-362): `vtc-basic` is not VTC as defined in the paper.**
+The OSDI 2024 VTC paper schedules *admission order among queued requests* with
+a continuous-time virtual counter, providing a bounded max-min fairness
+guarantee `|U_i - U_j| ≤ U` between any two active clients. The original
+`vtc-basic` policy:
 
-- **Has no admission queue.** Requests are dispatched in arrival order; the
+- **Had no admission queue.** Requests are dispatched in arrival order; the
   policy only chooses a pod.
-- **Provides no fairness bound.** A heavy tenant is *spread* across pods but
+- **Provided no fairness bound.** A heavy tenant is *spread* across pods but
   never *deferred*. Two tenants with wildly different arrival rates get
   whatever they submit.
-- **Operates over pods, not over clients.** The paper assumes a single
-  serving engine. Our adaptation (per-pod × per-tenant token count) is a
-  reasonable first approximation for multi-replica deployments but is not
-  validated against the paper's proofs.
+- **Operated over pods, not over clients.** The paper assumes a single
+  serving engine; the per-pod × per-tenant token count is a reasonable first
+  approximation for multi-replica deployments but is not validated against
+  the paper's proofs.
 
-The policy *docstring* is factually accurate ("Tracks per-tenant token
-consumption and penalizes pods that are currently serving heavy tenants"),
-but the policy *id* `vtc-basic` invites confusion. Recommended remediation
-paths:
+**Resolution (go-362, option (a)):** the policy was renamed to
+`per-tenant-load-balance`. The VTC paper claim has been dropped from the
+docstring, configs, README, and this audit. Implementing paper-true
+admission-order scheduling as a separate `vtc-admission` policy was deferred
+(option (b) not pursued).
 
-1. Rename to `per-tenant-load-balance` (or similar) and document that the VTC
-   name is not claimed.
-2. Add an `order=` parameter and implement paper-true admission-order
-   scheduling for a new `vtc-admission` policy.
-
-Either is fine. Filed as discovered bead (medium priority).
-
-**F16 (FIXED in go-e9r): sliding window + reset for paper-fidelity.** The
-VTC paper uses a sliding window `W` (default 60s in §5.2) beyond which token
-consumption ages out. The original `counters` and `pod_tenant_tokens` were
-append-only `defaultdict(float)`, with the consequences:
+**F16 (FIXED in go-e9r): sliding window + reset.** The original
+`counters` and `pod_tenant_tokens` were append-only `defaultdict(float)`,
+with the consequences:
 
 - A tenant who was heavy early in the trace was steered away from
   early-warmed pods forever, even if they'd since gone idle.
@@ -193,10 +188,10 @@ Fix (go-e9r): added `window_s: float | None = None` parameter. When set,
 `None` (the default), behavior is unchanged — kept for backward compatibility
 with short-trace sweeps (sweep-v4, ≤30s) where windowing has no observable
 impact. A `reset()` method was also added for experiment isolation. Tests
-pin both modes (`test_vtc_counters_monotonic_when_window_unset_F16`,
-`test_vtc_sliding_window_ages_out_consumption_F16`,
-`test_vtc_sliding_window_unpins_heavy_tenant_F16`,
-`test_vtc_reset_clears_all_state_F16`).
+pin both modes (`test_ptlb_counters_monotonic_when_window_unset_F16`,
+`test_ptlb_sliding_window_ages_out_consumption_F16`,
+`test_ptlb_sliding_window_unpins_heavy_tenant_F16`,
+`test_ptlb_reset_clears_all_state_F16`).
 
 **F17 (low, fairness signal freshness): in-flight requests do not contribute
 to `tenant_debt`.** `pod_tenant_tokens[pod][k]` only advances in
@@ -215,23 +210,27 @@ benefit). Filed for awareness.
 
 ### 3.4 Paper-fidelity summary
 
-| Dimension | VTC paper (Sheng et al., OSDI'24) | Our impl | Status |
-|---|---|---|---|
-| Scheduling axis | Admission order (which queued request to serve next) | Pod selection (which replica to dispatch to) | **Mismatch** |
-| Fairness metric | Continuous-time virtual counter per client | Windowed token counter per `(pod, tenant)` when `window_s` set; monotonic otherwise | **Closer** (window available; still per-pod) |
-| Guarantee | Bounded `|U_i − U_j| ≤ U` for active clients in window | None | **Missing** |
-| Starvation bound | Yes (via admission deferral) | No | **Missing** |
-| Window / decay | Sliding window `W` | Sliding window `window_s` (opt-in; default off) | **Available** (go-e9r) |
-| Per-client vs. per-pod | Per-client (single engine) | Per-pod × per-tenant | **Different design** |
+The policy is named `per-tenant-load-balance` and does **not** claim fidelity
+to the OSDI'24 VTC paper. The historical comparison (preserved here as
+context for why the rename happened) is:
+
+| Dimension | VTC paper (Sheng et al., OSDI'24) | `per-tenant-load-balance` |
+|---|---|---|
+| Scheduling axis | Admission order (which queued request to serve next) | Pod selection (which replica to dispatch to) |
+| Fairness metric | Continuous-time virtual counter per client | Windowed token counter per `(pod, tenant)` when `window_s` set; monotonic otherwise |
+| Guarantee | Bounded `|U_i − U_j| ≤ U` for active clients in window | None |
+| Starvation bound | Yes (via admission deferral) | No |
+| Window / decay | Sliding window `W` | Sliding window `window_s` (opt-in; default off) |
+| Per-client vs. per-pod | Per-client (single engine) | Per-pod × per-tenant |
 
 ## 4. Test coverage assessment
 
 ### 4.1 Already covered (before this audit)
 
 - `test_session_affinity_sticks`: same session on two requests → same pod.
-- `test_vtc_fairness_annotation`: heavy tenant's `score` goes below light
-  tenant's; heavy tenant's second decision differs from their first (unless
-  1-pod cluster).
+- `test_per_tenant_load_balance_fairness_annotation`: heavy tenant's `score`
+  goes below light tenant's; heavy tenant's second decision differs from
+  their first (unless 1-pod cluster).
 - Contract tests: registered, decides on nonempty cluster, empty cluster,
   no mutation.
 
@@ -251,7 +250,7 @@ New file `tests/unit/test_fairness_session_audit.py`:
 - Different `stickiness_ttl_s` values observe correct boundary
   (= TTL → sticky; > TTL → rebind).
 
-**vtc-basic:**
+**per-tenant-load-balance:**
 - Cold-start routes to lowest pod_id on all-zero state.
 - Observed completion raises global counter *and* `pod_tenant_tokens`.
 - Heavy tenant's burst (no completions) spreads only via `busy()`, not via
@@ -277,7 +276,7 @@ light-user mix designed to surface fairness dynamics:
 - 8 sessions: 2 heavy (80% of tokens), 6 light (20% split).
 - 3 colocated pods, generous KV (no cache pressure).
 - 150 requests @ 5 QPS → ~30s wall clock.
-- Three runs back-to-back: `random` (floor), `session-affinity`, `vtc-basic`.
+- Three runs back-to-back: `random` (floor), `session-affinity`, `per-tenant-load-balance`.
 - Budget ≤ $1 Modal spend.
 
 **Expected signatures:**
@@ -285,10 +284,10 @@ light-user mix designed to surface fairness dynamics:
 - `session-affinity`: heavy tenants monopolize their bound pods; per-pod
   request-count σ should be noticeably *higher* than `random`. (Stickiness
   does not balance.)
-- `vtc-basic`: heavy tenants' request counts should spread across pods
-  more evenly than `session-affinity` — σ comparable to or lower than
-  `random` for per-tenant-per-pod distribution.
-- **If `vtc-basic` shows per-tenant skew worse than `random`**, escalate: it
+- `per-tenant-load-balance`: heavy tenants' request counts should spread
+  across pods more evenly than `session-affinity` — σ comparable to or
+  lower than `random` for per-tenant-per-pod distribution.
+- **If `per-tenant-load-balance` shows per-tenant skew worse than `random`**, escalate: it
   would indicate the `tenant_debt` signal is being overpowered by
   `busy()` (possible if `ewma_latency_ms` saturates) and the policy is
   effectively reducing to least-busy-time.
@@ -304,23 +303,25 @@ Config is marked `# HUMAN-GATED` per epic protocol; execution tracked under
   purge for long-running deployments.
 - **F14**: session-affinity is binding-based, not hash-based — documented;
   informational, no code change proposed.
-- **F15**: `vtc-basic` is not VTC as defined in Sheng et al. (OSDI'24) —
-  rename or implement admission-order variant.
-- **F16** (FIXED, go-e9r): `vtc-basic` now supports an opt-in sliding
-  window `window_s` and a `reset()` method; default remains monotonic.
-- **F17**: `vtc-basic` in-flight requests not reflected in `tenant_debt` —
-  one-round-trip lag in fairness signal; informational.
+- **F15** (RESOLVED, go-362): `vtc-basic` was not VTC as defined in Sheng
+  et al. (OSDI'24); resolved by renaming to `per-tenant-load-balance` and
+  dropping paper-fidelity claims.
+- **F16** (FIXED, go-e9r): `per-tenant-load-balance` now supports an opt-in
+  sliding window `window_s` and a `reset()` method; default remains monotonic.
+- **F17**: `per-tenant-load-balance` in-flight requests not reflected in
+  `tenant_debt` — one-round-trip lag in fairness signal; informational.
 
 ## 7. Verdict
 
 - `session-affinity`: **pass.** Correct within stated (non-balancing, cache-
   warm-up) semantics. F12 is a docs bug; F13 is a long-run memory item; F14
   is informational.
-- `vtc-basic`: **pass-with-caveats.** Correct within its implemented
-  semantics (per-pod × per-tenant steering). Diverges from the VTC paper on
-  the two core axes (scheduling vs. routing; bounded vs. unbounded
-  fairness gap). F15/F16 must be addressed before the name can be cited as
-  paper-accurate.
+- `per-tenant-load-balance`: **pass.** Correct within its implemented
+  semantics (per-pod × per-tenant steering). Originally named `vtc-basic`,
+  which invited confusion with the OSDI'24 VTC paper; renamed under go-362
+  (F15 resolved). Sliding-window decay added under go-e9r (F16 fixed). The
+  policy is now described and named for what it actually does — per-pod
+  tenant-aware load balancing — with no paper-fidelity claim.
 
 Ready for Modal smoke (via `configs/smoke_fairness_session_modal.yaml`,
 gated on human approval under `go-3j8`).

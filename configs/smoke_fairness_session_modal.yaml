@@ -6,12 +6,12 @@
 # budget.
 #
 # Purpose: exercise the fairness/session group in a heavy-user + light-user
-# mix where session-affinity's stickiness and vtc-basic's tenant-debt
+# mix where session-affinity's stickiness and per-tenant-load-balance's tenant-debt
 # steering behave distinctly from the random floor. Three runs back-to-back
 # on the same topology and workload:
 #   - random (floor)
 #   - session-affinity (caching, not balancing)
-#   - vtc-basic (per-pod × per-tenant steering — NOT paper VTC; see F15)
+#   - per-tenant-load-balance (per-pod × per-tenant steering)
 #
 # Design choices (calibrated against sweep-v4 regimes):
 #   - Generous KV budget — we want fairness dynamics, not cache pressure.
@@ -24,9 +24,9 @@
 name: "smoke-fairness-session"
 
 policy:
-  # Base run uses vtc-basic (the more interesting of the two). Companion
+  # Base run uses per-tenant-load-balance (the more interesting of the two). Companion
   # stanzas below run all three back-to-back.
-  policy_id: "vtc-basic"
+  policy_id: "per-tenant-load-balance"
   params:
     fairness_key: "session_id"
 
@@ -111,7 +111,7 @@ output_dir: "results/smoke-fairness-session-modal"
 # policy per invocation, dispatch three jobs with overrides:
 #   modal run ... --policy random
 #   modal run ... --policy session-affinity
-#   modal run ... --policy vtc-basic
+#   modal run ... --policy per-tenant-load-balance
 companion_runs:
   - name: "floor-random"
     policy_id: "random"
@@ -121,8 +121,8 @@ companion_runs:
     policy_id: "session-affinity"
     params:
       stickiness_ttl_s: 3600.0
-  - name: "treatment-vtc-basic"
-    policy_id: "vtc-basic"
+  - name: "treatment-per-tenant-load-balance"
+    policy_id: "per-tenant-load-balance"
     params:
       fairness_key: "session_id"
 
@@ -135,24 +135,24 @@ companion_runs:
 #      - random:           cv ≤ 0.15  (law of large numbers on N=200)
 #      - session-affinity: cv ≤ 0.35  (stickiness concentrates, but 8 sessions
 #                                      split across 3 pods keeps it moderate)
-#      - vtc-basic:        cv ≤ 0.25  (spreads heavy tenants; busy() handles
+#      - per-tenant-load-balance:        cv ≤ 0.25  (spreads heavy tenants; busy() handles
 #                                      in-flight skew — see F17)
 #
 # 3. Per-TENANT pod-spread for heavy sessions s0 and s1 (number of distinct
 #    pods a heavy session touches, out of 3):
 #      - random:           3 (uniform random → ~always 3)
 #      - session-affinity: 1 (sticky binding → exactly one pod per session)
-#      - vtc-basic:        ≥ 2 (must spread; ideally 3)
+#      - per-tenant-load-balance:        ≥ 2 (must spread; ideally 3)
 #    If session-affinity spread is > 1 for a heavy session, there was a
 #    rebind (TTL breach or pod failure) — flag in report but not a failure.
-#    If vtc-basic spread is 1 for ANY heavy session, ESCALATE: indicates
+#    If per-tenant-load-balance spread is 1 for ANY heavy session, ESCALATE: indicates
 #    the tenant_debt signal is being overwhelmed by busy() and the policy
 #    has effectively reduced to least-busy-time.
 #
 # 4. p50/p95 end-to-end latency recorded per policy. Expectations:
 #      - session-affinity is likely worst on heavy-session p95 (pinning
 #        amplifies queueing). Report but do not block on this.
-#      - vtc-basic and random should be in a similar band (±20% on p50).
+#      - per-tenant-load-balance and random should be in a similar band (±20% on p50).
 #
 # 5. Total Modal spend ≤ $1 (enforced by per-run container ceiling).
 #
@@ -161,5 +161,5 @@ companion_runs:
 #   - Per-session pod-count distribution (sessions 0..7 × pods 0..2)
 #   - cv across pods, per policy
 #   - p50/p95/p99 end-to-end latency, overall and by heavy/light cohort
-#   - vtc-basic: final pod_tenant_tokens snapshot (to verify F16 monotonic
+#   - per-tenant-load-balance: final pod_tenant_tokens snapshot (to verify F16 monotonic
 #     growth matches the simulator's prediction)

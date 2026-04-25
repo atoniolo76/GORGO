@@ -40,7 +40,7 @@ hypothesis that `PodRuntime.queued` is dead state. Files examined:
 $ rg '\bqueued\b' scout/src/routing_harness/
 core.py:88:    queued: int = 0
 policies/session_affinity.py:48:    key=lambda p: (p.active_prefill + p.active_decode + p.queued, p.spec.pod_id),
-policies/vtc_basic.py:70:        return p.ewma_latency_ms * (p.active_prefill + p.active_decode + p.queued)
+policies/per_tenant_load_balance.py:70:        return p.ewma_latency_ms * (p.active_prefill + p.active_decode + p.queued)
 policies/least_busy_time.py:3 (docstring)
 policies/least_busy_time.py:36: return p.ewma_latency_ms * (p.active_prefill + p.active_decode + p.queued)
 policies/prefix_cache_preble.py:10 (docstring)
@@ -61,7 +61,7 @@ There is no admission-queue stage between arrival and dispatch in the
 engine, so there is no natural writer for `queued`.
 
 **Policies that read `queued`** (count matches scout's list): `session_affinity`,
-`vtc_basic`, `least_busy_time`, `prefix_cache_preble`, `least_request`, `pd`,
+`per_tenant_load_balance`, `least_busy_time`, `prefix_cache_preble`, `least_request`, `pd`,
 `prefix_cache`. Seven policies treat a permanently-zero field as part of
 their load signal.
 
@@ -272,7 +272,7 @@ with fix (a)).
 
 ## 5. Cross-policy benefit of each fix
 
-| Fix | preble | prefix_cache | least_request | session_affinity | least_busy_time | vtc_basic | pd |
+| Fix | preble | prefix_cache | least_request | session_affinity | least_busy_time | per_tenant_load_balance | pd |
 |---|---|---|---|---|---|---|---|
 | (a) write `queued` | negligible (blocked by match-gate) | mild — tie-break disambiguation on hot pod | mild — same | mild | moderate — `ewma_latency * (active + queued)` becomes sensitive to admission pressure if (a) is paired with an admission queue | moderate (same reason) | moderate |
 | (b) expose queueing estimate | moderate — hotspot threshold becomes latency-calibrated | low | low | low | **high** — its core signal is busy-time, which is `latency * active`; a projected queueing term makes the signal predictive instead of retrospective | **high** — fairness-weighted cost is latency-shaped | **high** — splits load across prefill/decode legs |
@@ -293,7 +293,7 @@ Notes:
   visible. `pd` is probably the cleanest case where (b)/(c) give the
   biggest win: predicting queueing on the decode leg separately is the
   whole point of PD.
-- **`least_busy_time` and `vtc_basic`** multiply `ewma_latency_ms * (active
+- **`least_busy_time` and `per_tenant_load_balance`** multiply `ewma_latency_ms * (active
   + queued)`. Without admission enforcement, `active` grows without
   bound and `ewma_latency` rises with it, so the product is already
   hot-pod-avoidant in practice. Fixes (b)/(c) make the signal *predictive*

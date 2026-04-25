@@ -13,11 +13,11 @@ from . import (
     least_request,
     pd,
     pd_preble,
+    per_tenant_load_balance,
     prefix_cache,
     prefix_cache_preble,
     session_affinity,
     throughput,
-    vtc_basic,
 )
 from . import (
     random as random_policy,  # avoid shadowing stdlib
@@ -37,11 +37,11 @@ __all__ = [
     "least_request",
     "pd",
     "pd_preble",
+    "per_tenant_load_balance",
     "prefix_cache",
     "prefix_cache_preble",
     "random_policy",
     "session_affinity",
     "throughput",
-    "vtc_basic",
     "all_policy_ids",
 ]

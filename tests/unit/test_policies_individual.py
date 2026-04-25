@@ -109,8 +109,8 @@ def test_pd_separates_roles(pd_specs, kv_cache):
     assert cluster.pods[d.decode_pod_id].spec.role == Phase.DECODE
 
 
-def test_vtc_fairness_annotation(cluster, kv_cache):
-    p = get_policy("vtc-basic")
+def test_per_tenant_load_balance_fairness_annotation(cluster, kv_cache):
+    p = get_policy("per-tenant-load-balance")
     # Route a heavy tenant's request first so the engine records their
     # tokens against a specific pod, then observe completion.
     r_heavy = Request("r1", "sA", 0.0, (1, 2), 1)
