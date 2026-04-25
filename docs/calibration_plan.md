@@ -1,8 +1,10 @@
 # Cost-Model Calibration Plan
 
-> **Status:** Phase 1 approved. Phase 2 pipeline landed (go-8cm) but
-> sweep rerun is blocked on HF Llama-3 access (tracking: go-26c, see
-> §7). Tracking bead: go-8cm. Parent gap:
+> **Status:** Phase 1 approved. Phase 2 pipeline landed (go-8cm).
+> Target model switched to Llama-3.1-8B-Instruct on 2026-04-25 (go-27g)
+> after HF access was approved for that page; sweep rerun is gated on
+> scout approval (tracking: go-26c, see §7). Tracking bead: go-8cm.
+> Parent gap:
 > research/reports/routing-comparison.md §9 item 2.
 >
 > **Execution environment.** All sweeps run on the
@@ -44,8 +46,10 @@ Out of scope for this calibration (addressed elsewhere or deliberately deferred)
 
 ## 1. Target model and hardware
 
-**Proposal:** **Llama-3-8B-Instruct** on a single **A100-80GB** running
-vLLM (latest stable, currently `v0.6.x`) in single-replica mode.
+**Proposal:** **Llama-3.1-8B-Instruct** (`meta-llama/Llama-3.1-8B-Instruct`)
+on a single **A100-80GB** running vLLM (latest stable, currently
+`v0.6.x` — `0.6.6` covers Llama-3.1 without further patches) in
+single-replica mode.
 
 Rationale:
 
@@ -61,7 +65,7 @@ Rationale:
   not transfer. Explicit non-goal: we are not publishing a
   device-portable `k`.
 
-Alternative considered and rejected: **Llama-3-70B** on 4×A100. Richer
+Alternative considered and rejected: **Llama-3.1-70B** on 4×A100. Richer
 data, but ~5× the spend for incremental value on coefficients whose
 main use in the harness is *relative* policy comparison.
 
@@ -83,7 +87,7 @@ Rationale:
   "forgot to stop the box" cost-overrun risk.
 - **Workspace pre-configured.** The `arcadia-research` workspace
   already has the `hf_token_rome` secret attached (exposing
-  `HF_TOKEN_ROME` → `HF_TOKEN` for gated Llama-3 weights), and the
+  `HF_TOKEN_ROME` → `HF_TOKEN` for gated Llama-3.1 weights), and the
   `GORGO` env isolates this job from other arcadia research work.
 
 Invocation pattern (always, every time):
@@ -252,16 +256,20 @@ from scout before launch.
   different platform. The Lambda Cloud fallback that existed in the
   original plan was explicitly removed in Phase 2 approval.
 - **HF gated-model access not provisioned on the Modal secret.**
-  `meta-llama/Meta-Llama-3-8B-Instruct` is a gated repo; the HF
-  account behind `hf_token_rome` must be in its authorized list. The
-  first Phase 2 launch (2026-04-25, modal app
-  `ap-AEy6ze2fgYW8fr6Yptrl0H`) failed with `403 Forbidden` on the
-  model config fetch. Tracking the rerun as go-26c. *Mitigation /
-  resolution:* the account holder visits the model card and clicks
-  "Request access" (usually auto-approved), or rotates
-  `hf_token_rome` to a pre-authorized token. The pipeline
-  (`scripts/calibrate.py`) fails loud on 403 without wasting GPU time
-  beyond vLLM's initial model-config fetch (~30 s).
+  `meta-llama/Llama-3.1-8B-Instruct` is a gated repo; the HF account
+  behind `hf_token_rome` must be in its authorized list. The first
+  Phase 2 launch (2026-04-25, modal app `ap-AEy6ze2fgYW8fr6Yptrl0H`,
+  on the original Llama-3.0 target) failed with `403 Forbidden` on
+  the model config fetch; the account has since been approved for
+  the Llama family and the target was switched to Llama-3.1 (go-27g).
+  Verify access at
+  https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct before the
+  rerun. Tracking the rerun as go-26c. *Mitigation / resolution:* the
+  account holder visits the model card and clicks "Request access"
+  (usually auto-approved), or rotates `hf_token_rome` to a
+  pre-authorized token. The pipeline (`scripts/calibrate.py`) fails
+  loud on 403 without wasting GPU time beyond vLLM's initial
+  model-config fetch (~30 s).
 - **vLLM version drift between plan-time and run-time.** *Mitigation:*
   pin vLLM to a specific release tag in `scripts/calibrate.py`.
 - **Chunked prefill / prefix caching interferes with prefill sweep.**

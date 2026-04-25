@@ -1,7 +1,7 @@
 """Cost-model calibration sweep on Modal (A100-80GB, GORGO env).
 
 Implements Phase 2 of docs/calibration_plan.md (bead go-8cm). Launches
-vLLM with Llama-3-8B-Instruct on a single A100-80GB in the
+vLLM with Llama-3.1-8B-Instruct on a single A100-80GB in the
 ``arcadia-research`` / ``GORGO`` Modal environment, runs three
 micro-benchmarks from §3.1 / §3.2 / §3.3 of the plan, and writes raw
 per-request measurements as JSONL to a Modal Volume. The local
@@ -22,7 +22,7 @@ state and is not safe under concurrent polecat sessions.
 The ``hf_token_rome`` Modal secret is attached to the GPU function and
 exposes ``HF_TOKEN_ROME`` inside the container; we map that to
 ``HF_TOKEN`` / ``HUGGING_FACE_HUB_TOKEN`` so vLLM can pull gated
-Llama-3 weights.
+Llama-3.1 weights.
 
 The function hard-caps at 4h (14 400 s) per plan §7, bounding worst-case
 spend at ~$14 even if the sweep hangs.
@@ -45,7 +45,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # --- Sweep parameters (mirror docs/calibration_plan.md §3) ------------------
 
-DEFAULT_MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
+DEFAULT_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 DEFAULT_GPU = "A100-80GB"
 DEFAULT_MAX_MODEL_LEN = 4096
 VLLM_VERSION = "0.6.6"
@@ -66,7 +66,7 @@ BATCH_SIZES = [1, 2, 4, 8, 16, 32, 64, 128]
 BATCH_REPEATS = 5
 
 # vLLM startup may take several minutes to download weights (~16 GiB for
-# Llama-3-8B). Cap the wait so we fail loud rather than burning budget.
+# Llama-3.1-8B). Cap the wait so we fail loud rather than burning budget.
 VLLM_READY_TIMEOUT_S = 900
 
 
@@ -244,7 +244,7 @@ def _wait_for_vllm_ready(base_url: str, timeout_s: int) -> None:
 def _random_prompt_ids(rng: random.Random, n_tokens: int) -> list[int]:
     """Random token IDs in a safe mid-vocab range.
 
-    Llama-3 tokenizer has ~128k vocab; IDs in [1000, 100000) avoid
+    Llama-3.1 tokenizer has ~128k vocab; IDs in [1000, 100000) avoid
     special / reserved tokens and stay well away from the top of the
     table. We pass this list as the ``prompt`` field of
     ``/v1/completions`` — vLLM accepts a list of ints as a pre-
@@ -635,7 +635,7 @@ def _emit_yaml_config(out_path: Path, summary: dict, metadata: dict) -> None:
 
     cp = summary["compute_params"]
     config = {
-        "name": "calibrated-a100-llama3-8b",
+        "name": "calibrated-a100-llama-3.1-8b",
         "policy": {"policy_id": "prefix-cache", "params": {"block_size": 16}},
         "topology": {
             "pods": [
@@ -688,7 +688,7 @@ def _emit_yaml_config(out_path: Path, summary: dict, metadata: dict) -> None:
             },
         },
         "seeds": [0, 1, 2],
-        "output_dir": "results/calibrated-a100-llama3-8b",
+        "output_dir": "results/calibrated-a100-llama-3.1-8b",
     }
     header = (
         "# Calibrated RunConfig: {model} on {gpu} (vLLM {vllm}), "
