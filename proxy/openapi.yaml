@@ -28,6 +28,8 @@ tags:
     description: Read-only introspection of proxy state
   - name: proxy
     description: Passthrough to upstream replicas
+  - name: debug
+    description: Diagnostic endpoints intended for development / inspection
 
 paths:
   /policy:
@@ -46,7 +48,10 @@ paths:
       description: |
         Switches the policy used by `POST /v1/chat/completions` for all
         subsequent requests. `policy` and `name` are accepted as synonyms in
-        the request body.
+        the request body. Names are normalized: leading/trailing whitespace
+        is stripped, underscores are converted to hyphens, and the result is
+        lowercased before lookup (e.g. `power_of_two` -> `power-of-two`,
+        `Least_Request` -> `least-request`).
       requestBody:
         required: true
         content:
@@ -57,12 +62,14 @@ paths:
                 value: { policy: gorgo }
               power_of_two:
                 value: { name: power_of_two }
+              least_request:
+                value: { policy: least-request }
       responses:
         '200':
-          description: Policy updated.
+          description: Policy updated. Returns the new policy and the current hyperparameters.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PolicyState' }
+              schema: { $ref: '#/components/schemas/PolicyUpdateResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
@@ -174,6 +181,22 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /trie:
+    get:
+      tags: [observability, debug]
+      summary: Summary stats for the proxy's prompt-prefix radix trie
+      description: |
+        Returns aggregate counters for the in-memory radix trie that tracks
+        which replica was last seen serving each token-prefix. The full trie
+        is not serialized; only summary numbers and a per-replica
+        `replica_coverage` count of tagged nodes.
+      responses:
+        '200':
+          description: Trie summary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrieSummary' }
+
   /replica_metrics:
     get:
       tags: [observability]
@@ -263,19 +286,70 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '503':
+          description: |
+            The shared upstream HTTP client has not been initialized yet
+            (request raced lifespan startup). Retry once the proxy is fully
+            up.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
 components:
   schemas:
     Policy:
       type: string
-      enum: [random, power_of_two, gorgo]
       description: |
+        Routing policy id. The set of accepted values comes from
+        `utils.lb_aibrix.ROUTING_POLICIES`; names are kebab-case after the
+        proxy normalizes the request body (underscores -> hyphens, lowercased,
+        trimmed).
+
+        Highlights:
         - `random`: uniform random selection.
-        - `power_of_two`: sample two replicas, route to the one with fewer
+        - `power-of-two`: sample two replicas, route to the one with fewer
           used + queued tokens.
         - `gorgo`: multi-objective score
           `latency + t_prefill * request_tokens + queued_tokens_weight * (queue + used)`,
           minimized across all replicas.
+        - `least-request`, `least-load`, `least-kv-cache`,
+          `least-gpu-cache`, `least-latency`, `least-utilization`,
+          `least-busy-time`, `throughput`, `pack-load`, `prefix-cache`,
+          `queue-router`, `vtc`, `vtc-basic`, `slo`, `slo-pack-load`,
+          `slo-least-load`, `slo-least-load-pulling`, `fallback`: Aibrix
+          gateway/algorithms aliases (see `utils/lb_aibrix.py`).
+        - `simple-session-affinity`: hash-based; reads the radix trie and
+          queue counters but not `/metrics`.
+        - `pd`, `pd-disaggregation`: accepted for API compatibility but not
+          implemented in this standalone proxy; treated as random.
+
+        Use `GET /policy` to discover the exact set supported by the running
+        proxy.
+      enum:
+        - random
+        - gorgo
+        - power-of-two
+        - least-request
+        - least-load
+        - least-kv-cache
+        - least-gpu-cache
+        - least-latency
+        - least-utilization
+        - least-busy-time
+        - throughput
+        - pack-load
+        - prefix-cache
+        - queue-router
+        - simple-session-affinity
+        - vtc
+        - vtc-basic
+        - slo
+        - slo-pack-load
+        - slo-least-load
+        - slo-least-load-pulling
+        - fallback
+        - pd-disaggregation
+        - pd
 
     PolicyRequest:
       type: object
@@ -292,7 +366,16 @@ components:
         policy: { $ref: '#/components/schemas/Policy' }
         supported:
           type: array
+          description: Sorted list of all policy ids accepted by this proxy.
           items: { $ref: '#/components/schemas/Policy' }
+        hyperparameters: { $ref: '#/components/schemas/Hyperparameters' }
+
+    PolicyUpdateResponse:
+      type: object
+      required: [policy, hyperparameters]
+      description: Response body from `POST /policy`. Does not include `supported`.
+      properties:
+        policy: { $ref: '#/components/schemas/Policy' }
         hyperparameters: { $ref: '#/components/schemas/Hyperparameters' }
 
     Hyperparameters:
@@ -374,7 +457,13 @@ components:
 
     ReplicaLiveMetrics:
       type: object
-      required: [num_running_reqs, num_queue_reqs, num_used_tokens, latency_seconds]
+      required:
+        - num_running_reqs
+        - num_queue_reqs
+        - num_used_tokens
+        - latency_seconds
+        - gen_throughput
+        - utilization
       properties:
         num_running_reqs:
           type: integer
@@ -388,6 +477,12 @@ components:
         latency_seconds:
           type: number
           description: Wall-clock time of the last `/metrics` scrape for this replica.
+        gen_throughput:
+          type: number
+          description: SGLang `sglang:gen_throughput` (generation tokens/sec).
+        utilization:
+          type: number
+          description: SGLang `sglang:utilization` (0-1 server utilization estimate).
 
     ReplicaMetricsSnapshot:
       type: object
@@ -411,6 +506,39 @@ components:
           type: object
           additionalProperties: { type: integer }
           description: Estimated in-flight prompt tokens per replica (increments on dispatch, decrements on response).
+
+    TrieSummary:
+      type: object
+      required:
+        - num_sequences
+        - total_tokens_inserted
+        - unique_token_count
+        - node_count
+        - tagged_node_count
+        - replica_coverage
+      properties:
+        num_sequences:
+          type: integer
+          description: Total number of prompts inserted into the trie since the last flush.
+        total_tokens_inserted:
+          type: integer
+          description: Sum of token-ids inserted across all prompts (counts repeats).
+        unique_token_count:
+          type: integer
+          description: Number of unique token-ids stored across all trie edges.
+        node_count:
+          type: integer
+          description: Total trie node count, including the root.
+        tagged_node_count:
+          type: integer
+          description: Number of nodes tagged with at least one replica endpoint.
+        replica_coverage:
+          type: object
+          description: |
+            For each currently registered replica URL, the count of trie nodes
+            tagged with that endpoint. Useful as a sanity check on how routing
+            distributed prefix sharing across the replica set.
+          additionalProperties: { type: integer }
 
     FlushResponse:
       type: object
