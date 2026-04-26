@@ -1,0 +1,94 @@
+{
+  "policy_id": "gorgo",
+  "policy_kwargs": {
+    "block_size": 16,
+    "t_prefill": 0.05,
+    "queued_tokens_weight": 0.001
+  },
+  "topology": [
+    {
+      "pod_id": "p0",
+      "role": "both",
+      "gpu_count": 1,
+      "kv_cache_bytes": 4294967296,
+      "max_concurrent_prefill": 4,
+      "max_concurrent_decode": 16,
+      "peer_ids": []
+    },
+    {
+      "pod_id": "p1",
+      "role": "both",
+      "gpu_count": 1,
+      "kv_cache_bytes": 4294967296,
+      "max_concurrent_prefill": 4,
+      "max_concurrent_decode": 16,
+      "peer_ids": []
+    },
+    {
+      "pod_id": "p2",
+      "role": "both",
+      "gpu_count": 1,
+      "kv_cache_bytes": 4294967296,
+      "max_concurrent_prefill": 4,
+      "max_concurrent_decode": 16,
+      "peer_ids": []
+    },
+    {
+      "pod_id": "p3",
+      "role": "both",
+      "gpu_count": 1,
+      "kv_cache_bytes": 4294967296,
+      "max_concurrent_prefill": 4,
+      "max_concurrent_decode": 16,
+      "peer_ids": []
+    }
+  ],
+  "compute": {
+    "prefill_ms_per_token": 0.08,
+    "decode_ms_per_token": 6.0,
+    "prefill_overhead_ms": 5.0,
+    "decode_overhead_ms": 2.0,
+    "decode_batch_k": 0.0
+  },
+  "network": {
+    "client_rtt_ms": 5.0,
+    "inter_pod_rtt_ms": 0.2,
+    "inter_pod_bandwidth_gbps": 100.0,
+    "kv_bytes_per_token": 131072,
+    "serialization_overhead_ms": 0.5
+  },
+  "scheduler": {
+    "base_routing_ms": 0.2,
+    "per_pod_consideration_us": 5.0
+  },
+  "engine": {
+    "kv_ewma_alpha": 0.2,
+    "block_size": 16,
+    "initial_warm_latency_ms": 5.0,
+    "initial_warm_tokens_per_req": 100.0
+  },
+  "trace": {
+    "source": "synthetic(seed=0)",
+    "n": 2000,
+    "t_start": 0.05814397222078823,
+    "t_end": 61.12019638851546,
+    "unique_sessions": 200,
+    "params": {
+      "n_requests": 2000,
+      "arrival_rate_qps": 32.0,
+      "n_prefix_families": 256,
+      "zipf_s": 0.7,
+      "prompt_len_min": 256,
+      "prompt_len_max": 2048,
+      "max_output_tokens": 128,
+      "n_sessions": 200,
+      "seed": 0,
+      "shared_prefix_tokens": 1024
+    }
+  },
+  "meta": {
+    "name": "gorgo-comparison-synthetic-base",
+    "seed": 0
+  },
+  "observations": {}
+}

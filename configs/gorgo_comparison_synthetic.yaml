@@ -1,0 +1,26 @@
+# Synthetic-potent sweep: gorgo vs the report's current top performers.
+# Pairs with `gorgo_comparison_sharegpt.yaml` (same policy slate, real-
+# text workload) for the side-by-side in research/reports/
+# gorgo_comparison.md.
+#
+# Workload: example_run.yaml's potent synthetic config (256 families ×
+# 1024-token shared heads). QPS axis matches the §6 colocated sweep
+# {4, 8, 16, 32}; single seed (compute-throttle, see bead go-4jm); three
+# zipfs (skew sensitivity).
+name: "gorgo-comparison-synthetic"
+base: "gorgo_run_synthetic.yaml"
+grid:
+  "policy.policy_id":
+    - "gorgo"
+    - "prefix-cache-preble"
+    - "pd-preble"
+    - "least-kv-cache"
+  "workload.params.arrival_rate_qps":
+    - 4.0
+    - 8.0
+    - 16.0
+    - 32.0
+  "workload.params.zipf_s":
+    - 0.7
+    - 1.1
+    - 1.5

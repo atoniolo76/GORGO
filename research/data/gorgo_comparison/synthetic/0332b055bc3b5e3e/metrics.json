@@ -1,0 +1,42 @@
+{
+  "n": 2000,
+  "latency_ms": {
+    "p50": 830.16,
+    "p95": 943.88,
+    "p99": 997.52,
+    "mean": 841.93758403072
+  },
+  "ttft_ms": {
+    "p50": 60.16,
+    "p95": 173.88,
+    "p99": 227.51999999999998,
+    "mean": 71.93758403072
+  },
+  "decomposition_ms_mean": {
+    "routing": 0.22,
+    "queueing": 7.17896,
+    "compute_prefill": 53.19976,
+    "compute_decode": 770.0,
+    "network": 10.5,
+    "kv_transport": 11.05237710336
+  },
+  "kv": {
+    "transport_bytes_total": 257381892096,
+    "reuse_available_blocks": 69635,
+    "reuse_captured_blocks": 69241,
+    "capture_rate_micro": 0.9943419257557263,
+    "capture_rate_macro": 0.991178728297573,
+    "capture_rate": 0.9943419257557263,
+    "hit_rate": 0.665
+  },
+  "load": {
+    "per_pod_busy_ms": {
+      "p0": 413787.4000000001,
+      "p1": 376131.39999999973,
+      "p2": 437313.48,
+      "p3": 419167.2399999997
+    },
+    "skew": 0.14864455256886921
+  },
+  "migrations": 1576
+}

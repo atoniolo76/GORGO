@@ -52,7 +52,7 @@ class SimulationEngine:
     network: NetworkParams
     config: EngineConfig
     metrics: MetricsCollector
-    _pending: list[tuple[float, int, str, str, Request, "object", float]] = field(
+    _pending: list[tuple[float, int, str, str, Request, "object", float, int]] = field(
         default_factory=list
     )
     _fabric_inflight: list[tuple[float, int, int]] = field(
@@ -96,12 +96,24 @@ class SimulationEngine:
         """
         hook = getattr(self.policy, "observe_completion", None)
         while self._pending and self._pending[0][0] <= now_s:
-            _, _, prefill_id, decode_id, req, decision, service_ms = heappop(self._pending)
+            (
+                _,
+                _,
+                prefill_id,
+                decode_id,
+                req,
+                decision,
+                service_ms,
+                prompt_tokens,
+            ) = heappop(self._pending)
             pod_p = self.cluster.pods.get(prefill_id)
             if pod_p is not None and pod_p.active_prefill > 0:
                 pod_p.active_prefill -= 1
             if pod_p is not None:
                 pod_p.pending_work_ms = max(0.0, pod_p.pending_work_ms - service_ms)
+                pod_p.queued_prompt_tokens = max(
+                    0, pod_p.queued_prompt_tokens - prompt_tokens
+                )
             pod_d = self.cluster.pods.get(decode_id)
             if pod_d is not None and pod_d.active_decode > 0:
                 pod_d.active_decode -= 1
@@ -266,6 +278,12 @@ class SimulationEngine:
         # subsequent decisions. Retirement subtracts the same service_ms.
         pod.active_prefill += 1
         pod.pending_work_ms += observed_service_ms
+        # queued_prompt_tokens is the gorgo policy's queue signal: Σ
+        # prompt-token lengths of in-flight prefills on this pod. Adding
+        # on dispatch and subtracting on retire keeps it symmetric with
+        # active_prefill / pending_work_ms.
+        prompt_tok_len = len(req.prompt_tokens)
+        pod.queued_prompt_tokens += prompt_tok_len
         decode_pod.active_decode += 1
         # Schedule retirement at now + observed latency (ms → s).
         self._seq += 1
@@ -279,6 +297,7 @@ class SimulationEngine:
                 req,
                 decision,
                 observed_service_ms,
+                prompt_tok_len,
             ),
         )
 

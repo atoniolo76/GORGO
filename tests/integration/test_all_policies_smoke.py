@@ -48,6 +48,7 @@ _POLICY_KWARGS: dict[str, dict] = {
     "prefix-cache-preble": {"block_size": 16},
     "pd": {"block_size": 16},
     "pd-preble": {"block_size": 16},
+    "gorgo": {"block_size": 16},
 }
 
 
@@ -208,6 +209,7 @@ def test_smoke_covers_every_registered_policy():
         "per-tenant-load-balance",
         "pd",
         "pd-preble",
+        "gorgo",
     }
     assert registered == expected, (
         f"policy registry drifted from smoke baseline: "

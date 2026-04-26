@@ -7,6 +7,7 @@ import side-effect of `get_all_policies()` to populate the registry.
 from __future__ import annotations
 
 from . import (
+    gorgo,
     least_busy_time,
     least_kv_cache,
     least_latency,
@@ -31,6 +32,7 @@ def all_policy_ids() -> list[str]:
 
 
 __all__ = [
+    "gorgo",
     "least_busy_time",
     "least_kv_cache",
     "least_latency",
