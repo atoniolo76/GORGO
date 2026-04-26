@@ -257,6 +257,7 @@ def proxy():
         except Exception as e:
             return base_url, {"ok": False, "error": repr(e)}
 
+    # TODO(atoniolo76): the actual poll metrics functionality is nested two functions deep here. can we combine it into one?
     async def _metrics_refresh_loop() -> None:
         try:
             while True:
@@ -270,6 +271,7 @@ def proxy():
         except asyncio.CancelledError:
             pass
 
+    # TODO(atoniolo76): this as well is too broken up from the call site. can we combine them into one?
     async def _read_body(receive) -> bytes:
         chunks: list[bytes] = []
         while True:
@@ -281,6 +283,7 @@ def proxy():
                 break
         return b"".join(chunks)
 
+    # TODO(atoniolo76): this is too broken up from the call site. can we combine them into one?
     async def _send_json(send, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode()
         await send(
@@ -294,6 +297,7 @@ def proxy():
 
     def _select_endpoint(token_ids: list[int]) -> str:
         """Pick upstream URL using ``utils.lb_aibrix`` (Aibrix-compatible names)."""
+        # TODO (atoniolo76): let's keep a dict of policy names to the respective functions while still keeping them in lb_aibrix.py
         policy = normalize_policy(state["policy"])
         request_tokens = len(token_ids)
         if not replica_urls:
@@ -301,6 +305,7 @@ def proxy():
         if len(replica_urls) == 1:
             return replica_urls[0]
 
+        # TODO (atoniolo76): refactor below so that this information is encdoed in a dataclass instead of determnistic logic here
         # Policies that do not read /metrics (stubs or hash-only).
         if policy == "random":
             return random.choice(replica_urls)
@@ -318,6 +323,7 @@ def proxy():
                 state["hyperparameters"],
             )
 
+        # TODO (atoniolo76): do we really need to snapshot this? we want the most up to date metrics via the background task
         # Snapshot live_metrics so mid-request refreshes can't mutate our view.
         metrics_snapshot = {url: live_metrics[url] for url in replica_urls if url in live_metrics}
         if len(metrics_snapshot) < len(replica_urls):
@@ -339,6 +345,7 @@ def proxy():
             state["hyperparameters"],
         )
 
+    # TODO(atoniolo76): this is the main ASGI app that will be used to handle requests. can we move it out to a separate file?
     async def asgi_app(scope, receive, send):
         if scope["type"] == "lifespan":
             while True:
@@ -807,7 +814,9 @@ def proxy():
 async def fetch_replica_metrics(endpoints: list[str]) -> dict[str, ReplicaSnapshot]:
     import time
 
+    # TODO(atoniolo76): is this a bad metric for latency since we are hitting metrics which may be expensive depending on grafana
     async def _fetch(client: httpx.AsyncClient, endpoint: str) -> tuple[str, ReplicaSnapshot]:
+        # TODO(atoniolo76): can we ping the route here instead of having to hit metrics to record latency sepecifically?
         t0 = time.monotonic()
         resp = await client.get(f"{endpoint}/metrics")
         latency = time.monotonic() - t0

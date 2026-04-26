@@ -1,0 +1,704 @@
+"""Online tuner for the GORGO policy hyperparameters.
+
+Sits one layer above ``proxy/workload.py``: this module is the
+*orchestrator*, the ``Tuner`` classes are the algorithms. The
+orchestrator runs the same workload that ``proxy/workload.py`` runs,
+hands the resulting stats dict to the tuner, asks the tuner for the
+next candidate hyperparameters, POSTs them to the proxy, and repeats.
+
+Each tuning iteration::
+
+    POST /flush                  -> reset radix trie + replica caches
+    POST /hyperparameters        -> stage candidate {t_prefill, queued_tokens_weight}
+    workload.replay.remote(...)  -> run the workload, get stats dict
+    score = score_fn(stats)      -> reduce to a scalar to maximize
+    tuner.report(candidate, score)
+    candidate = tuner.propose()  -> next candidate (or None when done)
+
+Because ``proxy/workload.py`` replays the same chronological slice of
+GLM 5.1 traffic on every call (deterministic sampling), repeated runs
+with the same hyperparameters land at the same score modulo small
+SGLang non-determinism. That's the property both tuners rely on; it
+means a 0.5% relative-tolerance threshold is enough to filter noise
+from real improvement.
+
+Algorithms (selected via ``--algorithm``):
+
+* ``hill-climb`` (``HillClimbTuner``): coordinate hill-climb with
+  shrinking multiplicative step. For each axis, try ``v*(1+step)`` and
+  ``v*(1-step)``; accept the candidate that improves the incumbent by
+  more than ``tol``. When a full sweep finds nothing better, halve
+  ``step``. Deterministic. ``2*d`` evals per sweep.
+
+* ``gaussian-es`` (``GaussianESTuner``): (1+1)-Evolution Strategy in
+  log-space with Rechenberg's 1/5 success rule. Samples one candidate
+  per ``propose()`` from an isotropic log-Gaussian centered on the
+  incumbent; adapts ``sigma`` so the long-run accept rate stays near
+  1/5. Eval-efficient (1 eval/step), handles diagonal interactions,
+  reproducible via ``--seed``.
+
+Usage::
+
+    modal run proxy/tuning.py --proxy-url https://... \\
+        --start-time 2026-04-01T12:00:00 \\
+        --num-requests 200 \\
+        --concurrency 32 \\
+        --metric output_throughput \\
+        --algorithm gaussian-es \\
+        --max-steps 16 \\
+        --seed 0
+
+The workload-shaped flags (``--start-time``/``--end-time``/``--offset``/
+``--num-requests``/``--concurrency``/``--model``/``--stream``/
+``--max-tokens``) mirror ``proxy/workload.py`` exactly: pick a small,
+fast slice (a few hundred requests is typical) so each tuning trial
+takes seconds, not minutes.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import random
+import time
+from datetime import datetime, timezone
+from typing import Callable
+
+import modal
+
+from app import app, bench_results_volume, completions_volume
+from proxy.workload import DEFAULT_MODEL, replay
+
+REGION = os.getenv("REGION", "us-east")
+
+image = (
+    modal.Image.debian_slim()
+    .pip_install("httpx[http2]", "pyarrow")
+    .add_local_python_source("app", "proxy", "utils")
+)
+
+
+# Search ranges per hyperparameter. Mirrors
+# ``proxy/modal_proxy.py``::ALLOWED_HYPERPARAM_KEYS, so a typo here
+# would surface as a 400 from the proxy on first POST. Multiplicative
+# step search means the range only needs to be order-of-magnitude
+# correct.
+# TODO(atoniolo76): adjust upper range to be OOM within calibrate.py results
+HYPERPARAM_RANGES: dict[str, tuple[float, float]] = {
+    "t_prefill": (1e-5, 10.0),
+    "queued_tokens_weight": (1e-5, 100.0),
+}
+
+# Each entry maps a CLI ``--metric`` value to a function that pulls a
+# scalar to *maximize* out of a workload stats dict. Negate latencies
+# so the optimization direction stays uniform across metrics.
+SCORE_FUNCTIONS: dict[str, Callable[[dict], float]] = {
+    "output_throughput": lambda s: float(s["output_token_throughput"]),
+    "total_throughput": lambda s: float(s["total_token_throughput"]),
+    "request_throughput": lambda s: float(s["request_throughput_rps"]),
+    "neg_p95_ttft": lambda s: -float(s["ttft_seconds"]["p95"]),
+    "neg_p99_ttft": lambda s: -float(s["ttft_seconds"]["p99"]),
+    "neg_p95_e2e": lambda s: -float(s["request_e2e_seconds"]["p95"]),
+    "neg_avg_itl": lambda s: -float(s["itl_ms"]["avg"]),
+}
+
+
+def _now_iso_z() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+# Tuner protocol (duck-typed; both tuners below implement it):
+#   propose()        -> dict | None    # next candidate, or None when done
+#   report(c, s)     -> bool           # was c the new incumbent? updates state
+#   state            -> dict           # internal scalars worth logging per trial
+#   best_params      -> dict
+#   best_score       -> float | None
+#
+# First propose() always returns the bootstrap params unchanged so the
+# orchestrator gets a baseline measurement before any search step.
+
+
+class HillClimbTuner:
+    """Coordinate hill-climb with shrinking multiplicative step.
+
+    State machine driven by ``propose() -> report() -> propose() ...``:
+    the orchestrator never has to know about sweeps or steps. ``propose``
+    returns ``None`` exactly once the tuner is done.
+    """
+
+    name = "coordinate-hill-climb-shrink"
+
+    def __init__(
+        self,
+        initial_params: dict[str, float],
+        ranges: dict[str, tuple[float, float]],
+        *,
+        initial_step: float = 0.5,
+        min_step: float = 0.05,
+        tol: float = 0.005,
+        max_steps: int = 16,
+    ) -> None:
+        self.ranges = ranges
+        self.best_params: dict[str, float] = {
+            k: self._clamp(k, float(initial_params.get(k, sum(ranges[k]) / 2))) for k in ranges
+        }
+        self.best_score: float | None = None
+        self.step = float(initial_step)
+        self.min_step = float(min_step)
+        self.tol = float(tol)
+        self.max_steps = int(max_steps)
+        self.evaluated_after_baseline = 0
+        self._sweep: list[tuple[str, int]] = []
+        self._sweep_improved = False
+        self._build_sweep()
+
+    def _clamp(self, key: str, v: float) -> float:
+        lo, hi = self.ranges[key]
+        return max(lo, min(hi, v))
+
+    def _build_sweep(self) -> None:
+        # One full sweep = one direction along each axis. Fixed order keeps
+        # the saved history easy to skim by eye.
+        self._sweep = [(key, sign) for key in self.ranges for sign in (+1, -1)]
+        self._sweep_improved = False
+
+    @property
+    def state(self) -> dict:
+        return {"step": self.step, "sweep_improved": self._sweep_improved}
+
+    def propose(self) -> dict[str, float] | None:
+        """Next candidate to evaluate, or ``None`` if tuning is done."""
+        if self.best_score is None:
+            return dict(self.best_params)
+        if self.evaluated_after_baseline >= self.max_steps:
+            return None
+        while True:
+            while self._sweep:
+                key, sign = self._sweep.pop(0)
+                factor = 1.0 + sign * self.step
+                candidate_val = self._clamp(key, self.best_params[key] * factor)
+                if abs(candidate_val - self.best_params[key]) < 1e-12:
+                    continue
+                cand = dict(self.best_params)
+                cand[key] = candidate_val
+                return cand
+            if not self._sweep_improved:
+                self.step *= 0.5
+                if self.step < self.min_step:
+                    return None
+            self._build_sweep()
+
+    def report(self, candidate: dict[str, float], score: float) -> bool:
+        """Tell the tuner the score for the last proposed candidate.
+
+        Returns ``True`` iff the candidate is the new incumbent.
+        """
+        if self.best_score is None:
+            self.best_score = score
+            self.best_params = dict(candidate)
+            return True
+        self.evaluated_after_baseline += 1
+        if score > self.best_score * (1.0 + self.tol):
+            self.best_score = score
+            self.best_params = dict(candidate)
+            self._sweep_improved = True
+            return True
+        return False
+
+
+class GaussianESTuner:
+    """(1+1)-Evolution Strategy with Rechenberg's 1/5 success rule.
+
+    Samples an isotropic Gaussian perturbation in *log-space* on top of
+    the current incumbent::
+
+        log(theta') = log(theta) + sigma * z,   z ~ N(0, I)
+        theta'      = exp(log(theta'))          (then clipped to range)
+
+    Log-space sampling means a single isotropic ``sigma`` works across
+    hyperparameters whose natural ranges span orders of magnitude
+    (which is exactly the case for ``t_prefill`` and
+    ``queued_tokens_weight``).
+
+    Rechenberg's 1/5 rule (Rechenberg 1973): track the acceptance rate
+    over a sliding window; if it's above ``target_rate``, grow ``sigma``;
+    if it's below, shrink. The optimal acceptance rate on the sphere
+    function is ~1/5, and this empirically generalizes.
+
+    1 evaluation per ``propose()``, vs ``2 * d`` per sweep for
+    ``HillClimbTuner``. Stops when ``max_steps`` trials have been used
+    or when ``sigma < sigma_min``.
+    """
+
+    name = "gaussian-es-1plus1-1over5"
+
+    def __init__(
+        self,
+        initial_params: dict[str, float],
+        ranges: dict[str, tuple[float, float]],
+        *,
+        sigma: float = 0.5,
+        sigma_min: float = 0.02,
+        sigma_decay: float = 0.817,  # Schwefel ~= 1/1.224
+        success_window: int = 8,
+        target_rate: float = 0.2,
+        tol: float = 0.005,
+        max_steps: int = 16,
+        seed: int | None = None,
+    ) -> None:
+        self.ranges = ranges
+        self.keys = list(ranges.keys())
+        self.best_params: dict[str, float] = {
+            k: self._clamp(k, float(initial_params.get(k, sum(ranges[k]) / 2))) for k in ranges
+        }
+        self.best_score: float | None = None
+        self.sigma = float(sigma)
+        self.sigma_min = float(sigma_min)
+        self.sigma_decay = float(sigma_decay)
+        self.success_window = int(success_window)
+        self.target_rate = float(target_rate)
+        self.tol = float(tol)
+        self.max_steps = int(max_steps)
+        self.evaluated_after_baseline = 0
+        self._recent: list[bool] = []
+        self._rng = random.Random(seed)
+        self.seed = seed
+
+    def _clamp(self, key: str, v: float) -> float:
+        lo, hi = self.ranges[key]
+        return max(lo, min(hi, v))
+
+    def propose(self) -> dict[str, float] | None:
+        """Next candidate to evaluate, or ``None`` when done."""
+        if self.best_score is None:
+            return dict(self.best_params)
+        if self.evaluated_after_baseline >= self.max_steps:
+            return None
+        if self.sigma < self.sigma_min:
+            return None
+        cand: dict[str, float] = {}
+        for key in self.keys:
+            v = self.best_params[key]
+            # Range floors are positive (``lo > 0``) so log() is safe; the
+            # _clamp() on the way out keeps proposals strictly inside.
+            log_new = math.log(max(v, 1e-300)) + self.sigma * self._rng.gauss(0.0, 1.0)
+            cand[key] = self._clamp(key, math.exp(log_new))
+        return cand
+
+    def report(self, candidate: dict[str, float], score: float) -> bool:
+        if self.best_score is None:
+            self.best_score = score
+            self.best_params = dict(candidate)
+            return True
+        self.evaluated_after_baseline += 1
+        accepted = score > self.best_score * (1.0 + self.tol)
+        if accepted:
+            self.best_score = score
+            self.best_params = dict(candidate)
+        # 1/5 rule: only adapt once we have a representative window so we
+        # don't oscillate sigma based on the first 2-3 trials.
+        self._recent.append(accepted)
+        if len(self._recent) > self.success_window:
+            self._recent.pop(0)
+        if len(self._recent) >= self.success_window:
+            rate = sum(self._recent) / len(self._recent)
+            if rate > self.target_rate:
+                # Too many accepts -> we're being timid, take bigger steps.
+                self.sigma /= self.sigma_decay
+            elif rate < self.target_rate:
+                self.sigma *= self.sigma_decay
+        return accepted
+
+    @property
+    def state(self) -> dict:
+        recent_rate = sum(self._recent) / len(self._recent) if self._recent else None
+        return {
+            "sigma": self.sigma,
+            "recent_success_rate": recent_rate,
+            "recent_window_filled": len(self._recent),
+        }
+
+
+# Tuner instances are interchangeable under the protocol above; the
+# orchestrator picks one by name.
+TunerLike = HillClimbTuner | GaussianESTuner
+
+
+def _build_tuner(
+    algorithm: str,
+    *,
+    initial_params: dict[str, float],
+    ranges: dict[str, tuple[float, float]],
+    max_steps: int,
+    relative_tolerance: float,
+    initial_step: float,
+    min_step: float,
+    sigma: float,
+    sigma_min: float,
+    seed: int | None,
+) -> TunerLike:
+    if algorithm == "hill-climb":
+        return HillClimbTuner(
+            initial_params=initial_params,
+            ranges=ranges,
+            initial_step=initial_step,
+            min_step=min_step,
+            tol=relative_tolerance,
+            max_steps=max_steps,
+        )
+    if algorithm == "gaussian-es":
+        return GaussianESTuner(
+            initial_params=initial_params,
+            ranges=ranges,
+            sigma=sigma,
+            sigma_min=sigma_min,
+            tol=relative_tolerance,
+            max_steps=max_steps,
+            seed=seed,
+        )
+    raise SystemExit(f"unknown --algorithm {algorithm!r}; choices: 'hill-climb', 'gaussian-es'")
+
+
+@app.function(
+    image=image,
+    region=REGION,
+    timeout=24 * 60 * 60,
+    volumes={
+        "/data": completions_volume,
+        "/results": bench_results_volume,
+    },
+)
+def tune(
+    proxy_url: str,
+    *,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    offset: int = 0,
+    num_requests: int | None = None,
+    concurrency: int = 16,
+    model: str | None = DEFAULT_MODEL,
+    stream: bool | None = None,
+    max_tokens: int | None = None,
+    metric: str = "output_throughput",
+    algorithm: str = "hill-climb",
+    max_steps: int = 16,
+    initial_step: float = 0.5,
+    min_step: float = 0.05,
+    sigma: float = 0.5,
+    sigma_min: float = 0.02,
+    seed: int | None = None,
+    relative_tolerance: float = 0.005,
+    output_dir: str | None = None,
+) -> dict:
+    """Tune ``t_prefill`` / ``queued_tokens_weight`` on the proxy online.
+
+    Args:
+        proxy_url: Base URL of the proxy (the ``modal.forward`` tunnel).
+        start_time/end_time/offset/num_requests/concurrency/model/
+        stream/max_tokens: Forwarded verbatim to ``replay``. Pick a
+            short slice (e.g. ``--num-requests 200``) so each tuning
+            trial completes quickly.
+        metric: Key into :data:`SCORE_FUNCTIONS`; the metric to maximize.
+        algorithm: ``"hill-climb"`` (coordinate hill-climb with
+            shrinking step; deterministic) or ``"gaussian-es"`` ((1+1)-ES
+            with Rechenberg's 1/5 rule in log-space; 1 eval/step).
+        max_steps: Maximum number of trials *after* the baseline. The
+            orchestrator may stop early if the algorithm signals
+            convergence (step or sigma below its floor).
+        initial_step / min_step: ``hill-climb`` only -- multiplicative
+            step bounds (``0.5`` = first trials probe ±50%).
+        sigma / sigma_min: ``gaussian-es`` only -- log-space Gaussian
+            std-dev bounds. ``sigma=0.5`` means initial perturbations
+            scale params by roughly ``exp(±0.5)`` (~0.6x..1.65x).
+        seed: ``gaussian-es`` only -- RNG seed for reproducibility;
+            ``None`` -> nondeterministic.
+        relative_tolerance: Treat improvements smaller than this as
+            noise. ``0.005`` = 0.5%.
+        output_dir: Where to write the per-tune-run artifact folder
+            (relative paths are rooted at ``/results``). ``None`` ->
+            ``/results/tune_<UTC-timestamp>``.
+
+    Returns:
+        Summary dict including ``best_params``, ``best_score``,
+        ``baseline_score``, the full per-trial ``history``, and the
+        resolved ``output_path`` of the saved JSON artifacts.
+    """
+    import httpx
+
+    if metric not in SCORE_FUNCTIONS:
+        raise SystemExit(f"unknown metric {metric!r}; choices: {sorted(SCORE_FUNCTIONS)}")
+    score_fn = SCORE_FUNCTIONS[metric]
+
+    proxy_url = proxy_url.rstrip("/")
+    workload_kwargs = dict(
+        start_time=start_time,
+        end_time=end_time,
+        offset=offset,
+        num_requests=num_requests,
+        concurrency=concurrency,
+        model=model,
+        stream=stream,
+        max_tokens=max_tokens,
+        save_per_request=False,
+    )
+
+    # Each tuning run gets a dedicated folder so per-trial replay JSONs
+    # don't collide and are trivially groupable for later analysis.
+    run_started_at = datetime.now(timezone.utc)
+    if output_dir is None:
+        out_dir = f"/results/tune_{run_started_at.strftime('%Y%m%d_%H%M%S')}"
+    else:
+        out_dir = output_dir if os.path.isabs(output_dir) else os.path.join("/results", output_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    summary_path = os.path.join(out_dir, "summary.json")
+
+    # Flush takes up to FLUSH_UPSTREAM_TIMEOUT_SECONDS=120s on a hot
+    # cache; pad to 180 so we don't trip the client read timeout.
+    http = httpx.Client(base_url=proxy_url, timeout=httpx.Timeout(180.0))
+    try:
+        r = http.get("/policy")
+        r.raise_for_status()
+        policy_doc = r.json()
+        current_hp = dict(policy_doc.get("hyperparameters") or {})
+        active_policy = policy_doc.get("policy")
+
+        tuner: TunerLike = _build_tuner(
+            algorithm,
+            initial_params=current_hp,
+            ranges=HYPERPARAM_RANGES,
+            max_steps=max_steps,
+            relative_tolerance=relative_tolerance,
+            initial_step=initial_step,
+            min_step=min_step,
+            sigma=sigma,
+            sigma_min=sigma_min,
+            seed=seed,
+        )
+
+        history: list[dict] = []
+        baseline_score: float | None = None
+
+        print(
+            f"[tune] algorithm={tuner.name} policy={active_policy!r} "
+            f"starting hyperparameters={current_hp} "
+            f"metric={metric} max_steps={max_steps}"
+        )
+
+        def evaluate(params: dict[str, float], trial_idx: int) -> tuple[float, dict]:
+            """Flush, set hyperparameters, run workload, return (score, stats)."""
+            print(f"[tune] trial {trial_idx}: evaluating {params}")
+            t0 = time.perf_counter()
+
+            http.post("/flush").raise_for_status()
+            http.post("/hyperparameters", json=params).raise_for_status()
+
+            trial_output = os.path.join(out_dir, f"replay_trial_{trial_idx:03d}.json")
+            stats = replay.remote(
+                proxy_url=proxy_url,
+                output_path=trial_output,
+                **workload_kwargs,
+            )
+            score = score_fn(stats)
+            elapsed = time.perf_counter() - t0
+            print(f"[tune]   trial {trial_idx} score={score:.4f} ({metric}) elapsed={elapsed:.1f}s")
+            return score, stats
+
+        trial_idx = 0
+        while True:
+            candidate = tuner.propose()
+            if candidate is None:
+                break
+
+            is_baseline = tuner.best_score is None
+            score, stats = evaluate(candidate, trial_idx)
+            accepted = tuner.report(candidate, score)
+
+            tuner_state = dict(tuner.state)
+            if is_baseline:
+                baseline_score = score
+                print(f"[tune]   baseline score={score:.4f}")
+            else:
+                tag = "ACCEPTED" if accepted else "rejected"
+                state_str = " ".join(
+                    f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
+                    for k, v in tuner_state.items()
+                )
+                print(f"[tune]   {tag}: incumbent score={tuner.best_score:.4f} {state_str}")
+
+            history.append(
+                {
+                    "trial": trial_idx,
+                    "kind": "baseline" if is_baseline else "trial",
+                    "params": candidate,
+                    "score": score,
+                    "incumbent_score": tuner.best_score,
+                    "incumbent_params": dict(tuner.best_params),
+                    "tuner_state": tuner_state,
+                    "accepted": accepted,
+                    "metric": metric,
+                    # Embed the workload's aggregate stats so the
+                    # tuning artifact is self-contained even without the
+                    # per-trial replay JSON.
+                    "stats": stats,
+                }
+            )
+
+            # Persist incrementally so a long tune run can be inspected
+            # / resumed-from-history even if the function is interrupted.
+            partial = _build_summary(
+                run_started_at=run_started_at,
+                proxy_url=proxy_url,
+                workload_kwargs=workload_kwargs,
+                metric=metric,
+                tuner=tuner,
+                baseline_score=baseline_score,
+                history=history,
+                active_policy=active_policy,
+                ranges=HYPERPARAM_RANGES,
+                finished_at=None,
+                output_path=summary_path,
+            )
+            with open(summary_path, "w") as f:
+                json.dump(partial, f)
+            bench_results_volume.commit()
+
+            trial_idx += 1
+
+        # Apply the winner so the proxy stays in the best state we found
+        # (the last evaluated candidate may not be the incumbent).
+        print(
+            f"[tune] best_params={tuner.best_params} best_score={tuner.best_score:.4f} "
+            f"(baseline={baseline_score:.4f})"
+        )
+        try:
+            http.post("/hyperparameters", json=tuner.best_params).raise_for_status()
+            http.post("/flush").raise_for_status()
+        except Exception as e:
+            print(f"[tune] final apply failed: {e}")
+    finally:
+        http.close()
+
+    summary = _build_summary(
+        run_started_at=run_started_at,
+        proxy_url=proxy_url,
+        workload_kwargs=workload_kwargs,
+        metric=metric,
+        tuner=tuner,
+        baseline_score=baseline_score,
+        history=history,
+        active_policy=active_policy,
+        ranges=HYPERPARAM_RANGES,
+        finished_at=datetime.now(timezone.utc),
+        output_path=summary_path,
+    )
+    with open(summary_path, "w") as f:
+        json.dump(summary, f)
+    bench_results_volume.commit()
+    print(f"[tune] saved tuning summary to {summary_path}")
+
+    return summary
+
+
+def _build_summary(
+    *,
+    run_started_at: datetime,
+    proxy_url: str,
+    workload_kwargs: dict,
+    metric: str,
+    tuner: TunerLike,
+    baseline_score: float | None,
+    history: list[dict],
+    active_policy: str | None,
+    ranges: dict[str, tuple[float, float]],
+    finished_at: datetime | None,
+    output_path: str,
+) -> dict:
+    return {
+        "started_at": run_started_at.isoformat().replace("+00:00", "Z"),
+        "finished_at": finished_at.isoformat().replace("+00:00", "Z") if finished_at else None,
+        "proxy_url": proxy_url,
+        "active_policy": active_policy,
+        "metric": metric,
+        "workload": workload_kwargs,
+        "tuning": {
+            "algorithm": tuner.name,
+            "ranges": {k: list(v) for k, v in ranges.items()},
+            "max_steps": tuner.max_steps,
+            "relative_tolerance": tuner.tol,
+            "trials_run": len(history),
+            "current_state": dict(tuner.state),
+        },
+        "best_params": dict(tuner.best_params),
+        "best_score": tuner.best_score,
+        "baseline_score": baseline_score,
+        "improvement_over_baseline": (
+            (tuner.best_score - baseline_score) / abs(baseline_score)
+            if baseline_score not in (None, 0)
+            else None
+        ),
+        "history": history,
+        "output_path": output_path,
+    }
+
+
+@app.local_entrypoint()
+def main(
+    proxy_url: str,
+    start_time: str = "",
+    end_time: str = "",
+    offset: int = 0,
+    num_requests: int = 0,
+    concurrency: int = 16,
+    model: str = DEFAULT_MODEL,
+    stream: str = "",
+    max_tokens: int = 0,
+    metric: str = "output_throughput",
+    algorithm: str = "hill-climb",
+    max_steps: int = 16,
+    initial_step: float = 0.5,
+    min_step: float = 0.05,
+    sigma: float = 0.5,
+    sigma_min: float = 0.02,
+    seed: int = -1,
+    relative_tolerance: float = 0.005,
+    output_dir: str = "",
+):
+    """CLI wrapper for ``tune``. Sentinel mapping matches workload.py:
+
+    empty string for start_time/end_time/model/stream/output_dir
+    0 for num_requests/max_tokens
+    seed=-1 -> nondeterministic (only consulted by gaussian-es)
+    """
+    stream_arg: bool | None
+    s = stream.strip().lower()
+    if s == "":
+        stream_arg = None
+    elif s in ("1", "true", "yes"):
+        stream_arg = True
+    elif s in ("0", "false", "no"):
+        stream_arg = False
+    else:
+        raise SystemExit(f"invalid --stream={stream!r}; expected true/false")
+
+    tune.remote(
+        proxy_url=proxy_url,
+        start_time=start_time or None,
+        end_time=end_time or None,
+        offset=offset,
+        num_requests=num_requests or None,
+        concurrency=concurrency,
+        model=model or None,
+        stream=stream_arg,
+        max_tokens=max_tokens or None,
+        metric=metric,
+        algorithm=algorithm,
+        max_steps=max_steps,
+        initial_step=initial_step,
+        min_step=min_step,
+        sigma=sigma,
+        sigma_min=sigma_min,
+        seed=None if seed < 0 else seed,
+        relative_tolerance=relative_tolerance,
+        output_dir=output_dir or None,
+    )
