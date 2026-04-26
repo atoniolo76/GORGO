@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import modal
 import asyncio
@@ -8,6 +9,10 @@ import tiktoken
 from app import app, replicas
 from utils.lb_aibrix import ROUTING_POLICIES, ReplicaSnapshot, normalize_policy, route as lb_route
 from utils.radix_trie import RadixNode, RadixTrie
+
+# Match engine/modal_sglang.py so the proxy lands in the same datacenter as
+# its replicas (and as the workload generator in proxy/workload.py).
+REGION = os.getenv("REGION", "us-east")
 
 
 # Kebab-case names matching Aibrix ``gateway/algorithms``; underscores in POST bodies are normalized.
@@ -112,6 +117,7 @@ def tokenize_input(messages: list[dict]) -> list[int]:
     image=modal.Image.debian_slim()
     .pip_install("httpx[http2]", "uvicorn", "tiktoken")
     .add_local_python_source("app", "utils"),
+    region=REGION,
     timeout=(24 * 60 * 60),
 )
 def proxy():
