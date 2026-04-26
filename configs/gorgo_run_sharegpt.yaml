@@ -1,0 +1,78 @@
+# Base run for the gorgo comparison sweep on ShareGPT (real-text
+# multi-turn workload). Same topology / compute / network as
+# gorgo_run_synthetic.yaml so the two sweeps are directly comparable.
+# Tokenizer is "mock" (char→token via tokens_per_char) — tiktoken is
+# optional and not installed in the polecat sandbox; mock preserves
+# prefix overlap and is what the dataset_metrics report used.
+name: "gorgo-comparison-sharegpt-base"
+
+policy:
+  policy_id: "gorgo"
+  params:
+    block_size: 16
+    t_prefill: 0.05
+    queued_tokens_weight: 0.001
+
+topology:
+  pods:
+    - pod_id: "p0"
+      role: "both"
+      gpu_count: 1
+      kv_cache_bytes: 4294967296
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 16
+    - pod_id: "p1"
+      role: "both"
+      gpu_count: 1
+      kv_cache_bytes: 4294967296
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 16
+    - pod_id: "p2"
+      role: "both"
+      gpu_count: 1
+      kv_cache_bytes: 4294967296
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 16
+    - pod_id: "p3"
+      role: "both"
+      gpu_count: 1
+      kv_cache_bytes: 4294967296
+      max_concurrent_prefill: 4
+      max_concurrent_decode: 16
+
+compute:
+  prefill_ms_per_token: 0.08
+  decode_ms_per_token: 6.0
+  prefill_overhead_ms: 5.0
+  decode_overhead_ms: 2.0
+
+network:
+  client_rtt_ms: 5.0
+  inter_pod_rtt_ms: 0.2
+  inter_pod_bandwidth_gbps: 100.0
+  kv_bytes_per_token: 131072
+  serialization_overhead_ms: 0.5
+
+scheduler:
+  base_routing_ms: 0.2
+  per_pod_consideration_us: 5.0
+
+engine:
+  kv_ewma_alpha: 0.2
+  block_size: 16
+  initial_warm_latency_ms: 5.0
+
+workload:
+  kind: "sharegpt"
+  params:
+    local_path: "data/sharegpt/sharegpt.jsonl"
+    max_conversations: 1000
+    min_turns: 1
+    max_turns: 16
+    arrival_rate_qps: 8.0
+    tokens_per_char: 0.25
+    max_output_tokens: 256
+    tokenizer: "mock"
+
+seeds: [0]
+output_dir: "research/data/gorgo_comparison/sharegpt"

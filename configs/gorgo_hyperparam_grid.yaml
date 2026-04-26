@@ -1,0 +1,15 @@
+# 2D hyperparameter sensitivity grid for gorgo on the synthetic-potent
+# workload. Characterizes how (t_prefill, queued_tokens_weight) trade
+# off prefix-affinity bias vs load avoidance. Single QPS / zipf so the
+# grid stays small (3 × 3 = 9 runs).
+name: "gorgo-hyperparam-grid"
+base: "gorgo_run_synthetic.yaml"
+grid:
+  "policy.params.t_prefill":
+    - 0.01
+    - 0.05
+    - 0.2
+  "policy.params.queued_tokens_weight":
+    - 0.0001
+    - 0.001
+    - 0.01

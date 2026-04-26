@@ -1,0 +1,17 @@
+# ShareGPT sweep: gorgo vs the report's current top performers.
+# Pairs with `gorgo_comparison_synthetic.yaml`. ShareGPT lacks the
+# zipf knob, but we still parametrize zipf_s in the grid for the
+# synthetic counterpart. ShareGPT's grid is QPS-only.
+name: "gorgo-comparison-sharegpt"
+base: "gorgo_run_sharegpt.yaml"
+grid:
+  "policy.policy_id":
+    - "gorgo"
+    - "prefix-cache-preble"
+    - "pd-preble"
+    - "least-kv-cache"
+  "workload.params.arrival_rate_qps":
+    - 4.0
+    - 8.0
+    - 16.0
+    - 32.0
