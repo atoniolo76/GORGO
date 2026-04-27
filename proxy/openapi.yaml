@@ -232,6 +232,75 @@ paths:
               schema: { $ref: '#/components/schemas/FlushResponse' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /samples:
+    get:
+      tags: [observability, debug]
+      summary: Inspect the on-the-fly tuning sample buffer
+      description: |
+        Returns recent per-request samples produced by the SSE tee in the
+        chat-completions handler, plus the bookkeeping `POST /tune` uses
+        for hop-size debouncing. Each sample carries TTFT / total /
+        prompt+completion tokens along with the per-token `prefill_rate` /
+        `decode_rate` decomposition that drives recommendation. The
+        response trims to the last 50 samples to stay small; full history
+        up to `max_buffer_size` is consumed by `/tune`.
+      responses:
+        '200':
+          description: Tuning buffer state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SamplesState' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /tune:
+    post:
+      tags: [control-plane]
+      summary: Recompute gorgo hyperparameters from recent live traffic
+      description: |
+        Slides a window of size `window_size` (default 100) over the
+        most-recent per-request samples and feeds it to the same
+        `recommend_hyperparameters` primitive that `proxy/calibrate.py`
+        uses for one-shot calibration. `hop_size` (default 0) acts as a
+        debounce: callers that poll `/tune` won't actually recompute
+        unless at least `hop_size` new samples have accumulated since the
+        last successful recompute. `apply` defaults to true and merges
+        the recommendation into `state["hyperparameters"]`; set to false
+        for a dry-run preview.
+
+        Currently restricted to `policy: gorgo` because the recommended
+        scalars (`t_prefill`, `queued_tokens_weight`) are only consumed
+        by `route_gorgo`. Other policies receive a 400 carrying the
+        current policy id so the caller can switch first.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TuneRequest' }
+            examples:
+              defaults:
+                value: {}
+              window_only:
+                value: { window_size: 200 }
+              auto_with_hop:
+                value: { window_size: 200, hop_size: 50, apply: true }
+              dry_run:
+                value: { window_size: 200, apply: false }
+      responses:
+        '200':
+          description: |
+            Either a successful recommendation (with `skipped: false`) or a
+            no-op response when the hop-size debounce hasn't elapsed or the
+            buffer is empty (`skipped: true`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TuneResponse' }
+        '400':
+          description: Active policy is not `gorgo`, or invalid request body.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/chat/completions:
     post:
       tags: [proxy]
@@ -554,6 +623,135 @@ components:
             either success objects with `ok` and `status_code`, or failure
             objects with `ok` and `error` / `body_preview`.
           additionalProperties: true
+
+    TuneRequest:
+      type: object
+      description: |
+        All fields are optional. The proxy applies sensible defaults
+        (`window_size=100`, `hop_size=0` -> no debounce, `apply=true`).
+      properties:
+        window_size:
+          type: integer
+          minimum: 1
+          description: |
+            Number of trailing samples to feed the recommender. Capped
+            implicitly at `max_buffer_size` from `/samples`.
+        hop_size:
+          type: integer
+          minimum: 0
+          description: |
+            Minimum number of new samples that must accumulate since the
+            last successful tune before this call recomputes. `0`
+            disables the debounce.
+        apply:
+          type: boolean
+          description: |
+            When true (default), merges the recommendation into the
+            active hyperparameter map. When false, returns the
+            recommendation without mutating proxy state.
+      additionalProperties: false
+
+    TuneSample:
+      type: object
+      description: |
+        Per-request observation. `ping_seconds` is the most-recent
+        proxy<->replica metrics-scrape latency at the time the sample
+        was recorded, used as a stand-in for the irreducible RTT that
+        gets subtracted from TTFT to estimate prefill time.
+      properties:
+        ping_seconds: { type: number }
+        ttft_seconds: { type: number }
+        total_seconds: { type: number }
+        prefill_seconds: { type: number }
+        decode_seconds: { type: number }
+        prompt_tokens: { type: integer }
+        completion_tokens: { type: integer }
+        prefill_rate_seconds_per_token: { type: number }
+        decode_rate_seconds_per_token: { type: number }
+        target: { type: string, format: uri }
+        recorded_at_monotonic:
+          type: number
+          description: time.monotonic() at the moment the sample was appended.
+
+    StatsBlock:
+      type: object
+      description: Common-shape summary used across the tuning endpoints.
+      properties:
+        n: { type: integer }
+        mean: { type: number }
+        median: { type: number }
+        min: { type: number }
+        max: { type: number }
+        p50: { type: number }
+        p95: { type: number }
+        p99: { type: number }
+
+    OLSFit:
+      type: object
+      properties:
+        a: { type: number, description: intercept }
+        b: { type: number, description: slope }
+        r2: { type: number }
+        n: { type: integer }
+
+    SamplesState:
+      type: object
+      required: [buffered_samples, max_buffer_size, total_samples_appended]
+      properties:
+        buffered_samples: { type: integer }
+        max_buffer_size: { type: integer }
+        total_samples_appended:
+          type: integer
+          description: |
+            Monotonically increasing across the proxy lifetime. Unlike
+            `buffered_samples`, this does not saturate at `max_buffer_size`,
+            so it can be diffed across `/tune` calls to determine new arrivals.
+        samples_since_last_tune: { type: integer }
+        last_tune_at_monotonic:
+          type: [number, "null"]
+          description: time.monotonic() of the last successful /tune call, or null.
+        last_recommendation:
+          oneOf:
+            - { $ref: '#/components/schemas/Hyperparameters' }
+            - { type: "null" }
+        recent:
+          type: array
+          description: Last 50 samples appended (newest at the end).
+          items: { $ref: '#/components/schemas/TuneSample' }
+
+    TuneResponse:
+      type: object
+      required: [skipped]
+      description: |
+        Discriminated by `skipped`. When `skipped: true` only the no-op
+        fields are populated; when `skipped: false` the full
+        recommendation + stats block is included.
+      properties:
+        skipped: { type: boolean }
+        reason:
+          type: string
+          description: "Present when `skipped: true`."
+        recommendation:
+          $ref: '#/components/schemas/Hyperparameters'
+        applied:
+          type: boolean
+          description: True iff the recommendation was merged into proxy state.
+        current_hyperparameters:
+          $ref: '#/components/schemas/Hyperparameters'
+        hyperparameters:
+          $ref: '#/components/schemas/Hyperparameters'
+        window_size_requested: { type: integer }
+        window_size_used: { type: integer }
+        buffered_samples: { type: integer }
+        samples_since_last_tune: { type: integer }
+        stats:
+          type: object
+          properties:
+            prefill_rate_seconds_per_token: { $ref: '#/components/schemas/StatsBlock' }
+            decode_rate_seconds_per_token: { $ref: '#/components/schemas/StatsBlock' }
+            ping_seconds: { $ref: '#/components/schemas/StatsBlock' }
+            prefill_ols_fit: { $ref: '#/components/schemas/OLSFit' }
+            decode_ols_fit: { $ref: '#/components/schemas/OLSFit' }
 
     ChatCompletionsRequest:
       type: object

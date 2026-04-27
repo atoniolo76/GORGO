@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import random
 import statistics
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
@@ -21,40 +22,6 @@ if TYPE_CHECKING:
 
 def normalize_policy(name: str) -> str:
     return name.strip().replace("_", "-").lower()
-
-
-# All policy ids after normalization (kebab-case).
-ROUTING_POLICIES: frozenset[str] = frozenset(
-    {
-        # Core / legacy GORGO
-        "random",
-        "gorgo",
-        "power-of-two",
-        # Aibrix gateway/algorithms (implemented or aliased below)
-        "least-request",
-        "least-load",
-        "least-kv-cache",
-        "least-gpu-cache",
-        "least-latency",
-        "least-utilization",
-        "least-busy-time",
-        "throughput",
-        "pack-load",
-        "prefix-cache",
-        "queue-router",
-        "simple-session-affinity",
-        "vtc",
-        "vtc-basic",
-        "slo",
-        "slo-pack-load",
-        "slo-least-load",
-        "slo-least-load-pulling",
-        "fallback",
-        # Explicitly not supported without PD split / Redis tracker
-        "pd-disaggregation",
-        "pd",
-    }
-)
 
 
 class ReplicaSnapshot:
@@ -385,6 +352,168 @@ def route_pd_stub(replica_urls: list[str]) -> str:
     return random.choice(replica_urls)
 
 
+@dataclass(frozen=True, slots=True)
+class RouteContext:
+    """Uniform per-request inputs every routing policy can read.
+
+    Policies use whichever fields they need; absent metrics are represented
+    by an empty ``metrics`` dict (the proxy filters missing replicas before
+    invoking the policy).
+    """
+
+    replica_urls: list[str]
+    metrics: dict[str, ReplicaSnapshot]
+    endpoints_queued_tokens: dict[str, int]
+    radix_trie: RadixTrie
+    token_ids: list[int]
+    request_tokens: int
+    hyperparameters: dict[str, float]
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyDef:
+    """Routing-policy descriptor.
+
+    ``needs_metrics`` lets the proxy decide whether to scrape (and snapshot)
+    ``/metrics`` before invoking ``fn``; policies that only need
+    ``replica_urls`` / ``token_ids`` (e.g. ``random``, ``simple-session-
+    affinity``) can route even when no live metrics are available yet.
+    """
+
+    name: str
+    needs_metrics: bool
+    fn: Callable[[RouteContext], str]
+
+
+# Single source of truth: maps normalized (kebab-case) policy id to its
+# descriptor. Adapter lambdas keep the underlying ``route_*`` functions'
+# signatures intact so they remain easy to call directly from tests.
+POLICY_REGISTRY: dict[str, PolicyDef] = {
+    pdef.name: pdef
+    for pdef in [
+        # Core / legacy GORGO
+        PolicyDef("random", False, lambda c: route_random(c.replica_urls)),
+        PolicyDef(
+            "gorgo",
+            True,
+            lambda c: route_gorgo(
+                c.replica_urls,
+                c.metrics,
+                c.endpoints_queued_tokens,
+                c.radix_trie,
+                c.token_ids,
+                c.request_tokens,
+                c.hyperparameters,
+            ),
+        ),
+        PolicyDef(
+            "power-of-two",
+            True,
+            lambda c: route_power_of_two(c.replica_urls, c.metrics, c.endpoints_queued_tokens),
+        ),
+        # Aibrix gateway/algorithms
+        PolicyDef("least-request", True, lambda c: route_least_request(c.replica_urls, c.metrics)),
+        PolicyDef(
+            "least-load",
+            True,
+            lambda c: route_least_load(c.replica_urls, c.metrics, c.endpoints_queued_tokens),
+        ),
+        PolicyDef(
+            "least-kv-cache", True, lambda c: route_least_kv_cache(c.replica_urls, c.metrics)
+        ),
+        PolicyDef(
+            "least-gpu-cache", True, lambda c: route_least_gpu_cache(c.replica_urls, c.metrics)
+        ),
+        PolicyDef("least-latency", True, lambda c: route_least_latency(c.replica_urls, c.metrics)),
+        PolicyDef(
+            "least-utilization",
+            True,
+            lambda c: route_least_utilization(c.replica_urls, c.metrics),
+        ),
+        PolicyDef(
+            "least-busy-time", True, lambda c: route_least_busy_time(c.replica_urls, c.metrics)
+        ),
+        PolicyDef("throughput", True, lambda c: route_throughput(c.replica_urls, c.metrics)),
+        PolicyDef(
+            "pack-load",
+            True,
+            lambda c: route_pack_load(c.replica_urls, c.metrics, c.endpoints_queued_tokens),
+        ),
+        PolicyDef(
+            "prefix-cache",
+            True,
+            lambda c: route_prefix_cache(
+                c.replica_urls,
+                c.metrics,
+                c.endpoints_queued_tokens,
+                c.radix_trie,
+                c.token_ids,
+            ),
+        ),
+        PolicyDef("queue-router", True, lambda c: route_queue_router(c.replica_urls, c.metrics)),
+        PolicyDef(
+            "simple-session-affinity",
+            False,
+            lambda c: route_simple_session_affinity(c.replica_urls, c.token_ids),
+        ),
+        PolicyDef(
+            "vtc",
+            True,
+            lambda c: route_vtc_basic(c.replica_urls, c.metrics, c.endpoints_queued_tokens),
+        ),
+        PolicyDef(
+            "vtc-basic",
+            True,
+            lambda c: route_vtc_basic(c.replica_urls, c.metrics, c.endpoints_queued_tokens),
+        ),
+        PolicyDef(
+            "slo",
+            True,
+            lambda c: route_slo_family(c.replica_urls, c.metrics, c.endpoints_queued_tokens, "slo"),
+        ),
+        PolicyDef(
+            "slo-pack-load",
+            True,
+            lambda c: route_slo_family(
+                c.replica_urls, c.metrics, c.endpoints_queued_tokens, "slo-pack-load"
+            ),
+        ),
+        PolicyDef(
+            "slo-least-load",
+            True,
+            lambda c: route_slo_family(
+                c.replica_urls, c.metrics, c.endpoints_queued_tokens, "slo-least-load"
+            ),
+        ),
+        PolicyDef(
+            "slo-least-load-pulling",
+            True,
+            lambda c: route_slo_family(
+                c.replica_urls, c.metrics, c.endpoints_queued_tokens, "slo-least-load-pulling"
+            ),
+        ),
+        PolicyDef("fallback", True, lambda c: route_fallback(c.replica_urls, c.metrics)),
+        # Explicitly not supported without PD split / Redis tracker -> stubbed to random
+        PolicyDef("pd", False, lambda c: route_pd_stub(c.replica_urls)),
+        PolicyDef("pd-disaggregation", False, lambda c: route_pd_stub(c.replica_urls)),
+    ]
+}
+
+# Frozen view exposed for ``/policy`` validation. Derived from the registry
+# so adding/removing a PolicyDef is the single edit.
+ROUTING_POLICIES: frozenset[str] = frozenset(POLICY_REGISTRY)
+
+
+def get_policy(name: str) -> PolicyDef:
+    """Look up a :class:`PolicyDef` by raw or normalized name. Raises
+    ``ValueError`` for unknown policies (matches the old ``route()`` contract)."""
+    p = normalize_policy(name)
+    pdef = POLICY_REGISTRY.get(p)
+    if pdef is None:
+        raise ValueError(f"unknown routing policy: {name!r}")
+    return pdef
+
+
 def route(
     policy: str,
     replica_urls: list[str],
@@ -395,60 +524,18 @@ def route(
     request_tokens: int,
     hyperparameters: dict[str, float],
 ) -> str:
-    """Dispatch by normalized policy name."""
-    p = normalize_policy(policy)
+    """Dispatch by normalized policy name. Thin wrapper over the registry."""
     if not replica_urls:
         raise ValueError("no replicas")
-
-    if p == "random":
-        return route_random(replica_urls)
-    if p == "power-of-two":
-        return route_power_of_two(replica_urls, metrics, endpoints_queued_tokens)
-    if p == "gorgo":
-        return route_gorgo(
-            replica_urls,
-            metrics,
-            endpoints_queued_tokens,
-            radix_trie,
-            token_ids,
-            request_tokens,
-            hyperparameters,
+    pdef = get_policy(policy)
+    return pdef.fn(
+        RouteContext(
+            replica_urls=replica_urls,
+            metrics=metrics,
+            endpoints_queued_tokens=endpoints_queued_tokens,
+            radix_trie=radix_trie,
+            token_ids=token_ids,
+            request_tokens=request_tokens,
+            hyperparameters=hyperparameters,
         )
-    if p == "least-request":
-        return route_least_request(replica_urls, metrics)
-    if p == "least-load":
-        return route_least_load(replica_urls, metrics, endpoints_queued_tokens)
-    if p in ("least-kv-cache", "least-gpu-cache"):
-        return route_least_kv_cache(replica_urls, metrics)
-    if p == "least-latency":
-        return route_least_latency(replica_urls, metrics)
-    if p == "least-utilization":
-        return route_least_utilization(replica_urls, metrics)
-    if p == "least-busy-time":
-        return route_least_busy_time(replica_urls, metrics)
-    if p == "throughput":
-        return route_throughput(replica_urls, metrics)
-    if p == "pack-load":
-        return route_pack_load(replica_urls, metrics, endpoints_queued_tokens)
-    if p == "prefix-cache":
-        return route_prefix_cache(
-            replica_urls,
-            metrics,
-            endpoints_queued_tokens,
-            radix_trie,
-            token_ids,
-        )
-    if p == "queue-router":
-        return route_queue_router(replica_urls, metrics)
-    if p == "simple-session-affinity":
-        return route_simple_session_affinity(replica_urls, token_ids)
-    if p in ("vtc", "vtc-basic"):
-        return route_vtc_basic(replica_urls, metrics, endpoints_queued_tokens)
-    if p == "fallback":
-        return route_fallback(replica_urls, metrics)
-    if p in ("slo", "slo-pack-load", "slo-least-load", "slo-least-load-pulling"):
-        return route_slo_family(replica_urls, metrics, endpoints_queued_tokens, p)
-    if p in ("pd", "pd-disaggregation"):
-        return route_pd_stub(replica_urls)
-
-    raise ValueError(f"unknown routing policy: {policy!r}")
+    )

@@ -1,22 +1,34 @@
+import asyncio
 import json
 import os
 import random
-import modal
-import asyncio
+from collections import deque
+
 import httpx
+import modal
 import tiktoken
 
 from app import app, replicas
-from utils.lb_aibrix import ROUTING_POLICIES, ReplicaSnapshot, normalize_policy, route as lb_route
-from utils.radix_trie import RadixNode, RadixTrie
+from proxy.measure import (
+    NS_PER_S,
+    consume_sse_stream,
+    recommend_hyperparameters,
+    summarize_samples,
+)
+from utils.lb_aibrix import (
+    POLICY_REGISTRY,
+    ROUTING_POLICIES,
+    PolicyDef,
+    ReplicaSnapshot,
+    RouteContext,
+    normalize_policy,
+)
+from utils.radix_trie import RadixTrie
 
 # Match engine/modal_sglang.py so the proxy lands in the same datacenter as
 # its replicas (and as the workload generator in proxy/workload.py).
 REGION = os.getenv("REGION", "us-east")
 
-
-# Kebab-case names matching Aibrix ``gateway/algorithms``; underscores in POST bodies are normalized.
-SUPPORTED_POLICIES = ROUTING_POLICIES
 DEFAULT_POLICY = "random"
 DEFAULT_GORGO_HYPERPARAMETERS = {"t_prefill": 1.0, "queued_tokens_weight": 1.0}
 ALLOWED_HYPERPARAM_KEYS = set(DEFAULT_GORGO_HYPERPARAMETERS)
@@ -24,6 +36,15 @@ METRICS_REFRESH_INTERVAL_SECONDS = 1.0
 METRICS_FETCH_TIMEOUT_SECONDS = 2.0
 # SGLang may wait until idle; allow a generous read window for POST /flush_cache.
 FLUSH_UPSTREAM_TIMEOUT_SECONDS = 120.0
+
+# On-the-fly tuning. The proxy keeps a bounded ring buffer of per-request
+# samples (TTFT / total / token counts / per-token rates) so ``POST /tune``
+# can recommend ``gorgo`` hyperparameters from recent live traffic via
+# ``proxy.measure.recommend_hyperparameters`` -- the same primitive
+# ``proxy/calibrate.py`` uses for one-shot calibration.
+MAX_REQUEST_SAMPLES = 1000
+DEFAULT_TUNE_WINDOW_SIZE = 100
+DEFAULT_TUNE_HOP_SIZE = 0  # 0 == no debounce; every call recomputes
 
 # Headers that are connection-local and must not be forwarded verbatim when
 # we proxy upstream responses back to the client. Re-emitting these would
@@ -113,25 +134,43 @@ def tokenize_input(messages: list[dict]) -> list[int]:
     return out
 
 
+def _parse_metrics_text(text: str) -> dict[str, float]:
+    """Parse a Prometheus exposition snippet into ``{metric_name: value}``,
+    dropping label suffixes and skipping non-numeric or commented lines."""
+    out: dict[str, float] = {}
+    for line in text.splitlines():
+        if line.startswith("#"):
+            continue
+        parts = line.rsplit(" ", 1)
+        if len(parts) != 2:
+            continue
+        value = parts[1]
+        if (
+            not value.replace(".", "", 1)
+            .replace("e+", "", 1)
+            .replace("e-", "", 1)
+            .lstrip("-")
+            .isdigit()
+        ):
+            continue
+        out[parts[0].split("{")[0]] = float(value)
+    return out
+
+
 @app.function(
     image=modal.Image.debian_slim()
     .pip_install("httpx[http2]", "uvicorn", "tiktoken")
-    .add_local_python_source("app", "utils"),
+    .add_local_python_source("app", "proxy", "utils"),
     region=REGION,
     timeout=(24 * 60 * 60),
 )
 def proxy():
-    import json
     import time
 
     import httpx
     import uvicorn
 
-    local_replicas = {}
-    for k, v in replicas.items():
-        local_replicas[k] = v
-
-    replica_urls = [v for v in local_replicas.values()]
+    replica_urls: list[str] = list(replicas.values())
 
     # Routing state. Kept in a dict so the asgi_app closure can mutate it in
     # place from the /policy handler; uvicorn is single-process / single-loop
@@ -143,12 +182,29 @@ def proxy():
     # connections are reused for every subsequent request, which is a big
     # TTFT win on cold proxies. Created in lifespan.startup so it binds to
     # the right event loop; closed in lifespan.shutdown.
-    state = {
+    state: dict = {
         "policy": DEFAULT_POLICY,
         "hyperparameters": dict(DEFAULT_GORGO_HYPERPARAMETERS),
         "upstream_client": None,
+        "metrics_task": None,
+        # Monotonically-incrementing sample counters used by /tune to
+        # implement hop-size debouncing without depending on deque length
+        # (which saturates at ``maxlen``).
+        "total_samples_appended": 0,
+        "last_tune_appended": 0,
+        # Last successful /tune result -- handy for /samples to surface
+        # what the most recent recommendation looked like.
+        "last_tune_at_monotonic": None,
+        "last_recommendation": None,
     }
     endpoints_queued_tokens: dict[str, int] = {url: 0 for url in replica_urls}
+
+    # Bounded ring buffer of per-request samples produced by the
+    # SSE-tee in ``_handle_chat_completions``. Each entry has the same
+    # shape as ``proxy.measure.measure_chat_completion`` returns, plus
+    # ``target`` (chosen replica) and ``recorded_at_monotonic`` so /tune
+    # consumers can do their own time-windowing if desired.
+    samples: deque[dict] = deque(maxlen=MAX_REQUEST_SAMPLES)
 
     # Live radix trie of every prompt we've forwarded. Each node along a
     # sequence's insertion path is tagged with the replica URL that received
@@ -166,13 +222,56 @@ def proxy():
     # generation that thinks for a while before emitting its first token would
     # otherwise trip the timeout. Metrics calls pass their own shorter
     # override via the per-request ``timeout=`` kwarg.
-    DEFAULT_UPSTREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+    default_upstream_timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
     # Keep enough warm connections around to saturate concurrent load without
     # re-handshaking. ``keepalive_expiry=None`` means "never expire idle
     # connections"; Modal will eventually tear down the container anyway.
-    UPSTREAM_LIMITS = httpx.Limits(
+    upstream_limits = httpx.Limits(
         max_connections=200, max_keepalive_connections=100, keepalive_expiry=None
     )
+
+    # Live mirror of each replica's /metrics output. A background task refreshes
+    # this every ``METRICS_REFRESH_INTERVAL_SECONDS``; policy functions read
+    # snapshots of it per request instead of fetching synchronously.
+    live_metrics: dict[str, ReplicaSnapshot] = {}
+    metrics_meta: dict = {
+        "last_refresh_monotonic": 0.0,
+        "last_refresh_errors": {},  # url -> str
+    }
+
+    # ---------- ASGI helpers ----------
+
+    async def _read_json_body(receive) -> dict | list:
+        """Drain the ASGI request body and parse it as JSON.
+
+        Combines body assembly with JSON decode so handler call sites stay
+        a single ``try / except`` instead of two. Returns ``{}`` for an
+        empty body. Raises ``json.JSONDecodeError`` on malformed input
+        (handlers convert that to a 400).
+        """
+        chunks: list[bytes] = []
+        while True:
+            msg = await receive()
+            if msg["type"] != "http.request":
+                continue
+            chunks.append(msg.get("body", b"") or b"")
+            if not msg.get("more_body"):
+                break
+        body = b"".join(chunks)
+        return json.loads(body.decode()) if body else {}
+
+    async def _send_json(send, status: int, payload: dict) -> None:
+        body = json.dumps(payload).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [(b"content-type", b"application/json")],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+    # ---------- Upstream client + metrics refresh ----------
 
     def _new_upstream_client() -> httpx.AsyncClient:
         # ``http2=True`` negotiates HTTP/2 via ALPN on HTTPS replicas; if the
@@ -180,20 +279,12 @@ def proxy():
         # falls back. Either way we keep the keep-alive pool benefit.
         return httpx.AsyncClient(
             http2=True,
-            timeout=DEFAULT_UPSTREAM_TIMEOUT,
-            limits=UPSTREAM_LIMITS,
+            timeout=default_upstream_timeout,
+            limits=upstream_limits,
         )
 
-    # Live mirror of each replica's /metrics output. A background task refreshes
-    # this every ``METRICS_REFRESH_INTERVAL_SECONDS``; policy functions read
-    # snapshots of it per request instead of fetching synchronously.
-    live_metrics: dict[str, ReplicaSnapshot] = {}
-    metrics_meta = {
-        "last_refresh_monotonic": 0.0,
-        "last_refresh_errors": {},  # url -> str
-    }
-
     async def _refresh_one(client: httpx.AsyncClient, url: str) -> None:
+        """Scrape one replica's /metrics into ``live_metrics[url]``."""
         t0 = time.monotonic()
         try:
             # Override the client's generous default timeout -- if a replica
@@ -205,18 +296,7 @@ def proxy():
             metrics_meta["last_refresh_errors"][url] = repr(e)
             return
         latency = time.monotonic() - t0
-        parsed = {
-            parts[0].split("{")[0]: float(parts[1])
-            for line in resp.text.splitlines()
-            if not line.startswith("#")
-            and len(parts := line.rsplit(" ", 1)) == 2
-            and parts[1]
-            .replace(".", "", 1)
-            .replace("e+", "", 1)
-            .replace("e-", "", 1)
-            .lstrip("-")
-            .isdigit()
-        }
+        parsed = _parse_metrics_text(resp.text)
         live_metrics[url] = ReplicaSnapshot(
             num_running_reqs=int(parsed.get("sglang:num_running_reqs", 0)),
             num_queue_reqs=int(parsed.get("sglang:num_queue_reqs", 0)),
@@ -227,14 +307,29 @@ def proxy():
         )
         metrics_meta["last_refresh_errors"].pop(url, None)
 
-    async def _refresh_metrics_once(client: httpx.AsyncClient) -> None:
-        if not replica_urls:
+    async def _refresh_all(client: httpx.AsyncClient | None) -> None:
+        """One pass: refresh every registered replica in parallel."""
+        if client is None or not replica_urls:
             return
         await asyncio.gather(
             *[_refresh_one(client, url) for url in replica_urls],
             return_exceptions=True,
         )
         metrics_meta["last_refresh_monotonic"] = time.monotonic()
+
+    async def _metrics_refresh_loop() -> None:
+        """Background task: refresh every ``METRICS_REFRESH_INTERVAL_SECONDS``.
+        Cancelled in lifespan.shutdown. Per-iteration exceptions are
+        logged so a single transient failure doesn't kill the loop."""
+        try:
+            while True:
+                try:
+                    await _refresh_all(state["upstream_client"])
+                except Exception as e:
+                    print(f"[proxy] metrics refresh iteration failed: {e}")
+                await asyncio.sleep(METRICS_REFRESH_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            pass
 
     async def _flush_upstream_replica(client: httpx.AsyncClient, base_url: str) -> tuple[str, dict]:
         url = f"{base_url.rstrip('/')}/flush_cache"
@@ -257,543 +352,681 @@ def proxy():
         except Exception as e:
             return base_url, {"ok": False, "error": repr(e)}
 
-    # TODO(atoniolo76): the actual poll metrics functionality is nested two functions deep here. can we combine it into one?
-    async def _metrics_refresh_loop() -> None:
-        try:
-            while True:
-                client = state["upstream_client"]
-                if client is not None:
-                    try:
-                        await _refresh_metrics_once(client)
-                    except Exception as e:
-                        print(f"[proxy] metrics refresh iteration failed: {e}")
-                await asyncio.sleep(METRICS_REFRESH_INTERVAL_SECONDS)
-        except asyncio.CancelledError:
-            pass
-
-    # TODO(atoniolo76): this as well is too broken up from the call site. can we combine them into one?
-    async def _read_body(receive) -> bytes:
-        chunks: list[bytes] = []
-        while True:
-            msg = await receive()
-            if msg["type"] != "http.request":
-                continue
-            chunks.append(msg.get("body", b"") or b"")
-            if not msg.get("more_body"):
-                break
-        return b"".join(chunks)
-
-    # TODO(atoniolo76): this is too broken up from the call site. can we combine them into one?
-    async def _send_json(send, status: int, payload: dict) -> None:
-        body = json.dumps(payload).encode()
-        await send(
-            {
-                "type": "http.response.start",
-                "status": status,
-                "headers": [(b"content-type", b"application/json")],
-            }
-        )
-        await send({"type": "http.response.body", "body": body})
+    # ---------- Routing ----------
 
     def _select_endpoint(token_ids: list[int]) -> str:
-        """Pick upstream URL using ``utils.lb_aibrix`` (Aibrix-compatible names)."""
-        # TODO (atoniolo76): let's keep a dict of policy names to the respective functions while still keeping them in lb_aibrix.py
-        policy = normalize_policy(state["policy"])
-        request_tokens = len(token_ids)
+        """Pick an upstream URL using the policy registry in ``utils.lb_aibrix``.
+
+        For policies that don't need ``/metrics`` data (random, pd*,
+        simple-session-affinity) we skip the snapshot entirely so the proxy
+        can keep routing during a metrics-refresh outage. For metrics-using
+        policies we filter ``live_metrics`` to currently-registered
+        replicas; if any replica has no snapshot yet (cold start, /metrics
+        timeout) we fall back to random rather than passing a partial view
+        to the policy.
+        """
         if not replica_urls:
             raise ValueError("no replicas configured")
         if len(replica_urls) == 1:
             return replica_urls[0]
 
-        # TODO (atoniolo76): refactor below so that this information is encdoed in a dataclass instead of determnistic logic here
-        # Policies that do not read /metrics (stubs or hash-only).
-        if policy == "random":
-            return random.choice(replica_urls)
-        if policy in ("pd", "pd-disaggregation"):
-            return random.choice(replica_urls)
-        if policy == "simple-session-affinity":
-            return lb_route(
-                policy,
-                replica_urls,
-                {},
-                endpoints_queued_tokens,
-                radix_trie,
-                token_ids,
-                request_tokens,
-                state["hyperparameters"],
-            )
+        pdef: PolicyDef = POLICY_REGISTRY[normalize_policy(state["policy"])]
 
-        # TODO (atoniolo76): do we really need to snapshot this? we want the most up to date metrics via the background task
-        # Snapshot live_metrics so mid-request refreshes can't mutate our view.
-        metrics_snapshot = {url: live_metrics[url] for url in replica_urls if url in live_metrics}
-        if len(metrics_snapshot) < len(replica_urls):
-            missing = [u for u in replica_urls if u not in metrics_snapshot]
-            print(
-                f"[proxy] live metrics missing for {len(missing)} replica(s); "
-                f"falling back to random for this request"
-            )
-            return random.choice(replica_urls)
+        if pdef.needs_metrics:
+            # Filter to replicas with a live snapshot. Both this code and the
+            # background refresh run on the same asyncio thread so there's
+            # no race; the dict comprehension just drops missing entries.
+            metrics = {u: live_metrics[u] for u in replica_urls if u in live_metrics}
+            if len(metrics) < len(replica_urls):
+                missing = len(replica_urls) - len(metrics)
+                print(
+                    f"[proxy] live metrics missing for {missing} replica(s); "
+                    f"falling back to random for this request"
+                )
+                return random.choice(replica_urls)
+        else:
+            metrics = {}
 
-        return lb_route(
-            policy,
-            replica_urls,
-            metrics_snapshot,
-            endpoints_queued_tokens,
-            radix_trie,
-            token_ids,
-            request_tokens,
-            state["hyperparameters"],
+        return pdef.fn(
+            RouteContext(
+                replica_urls=replica_urls,
+                metrics=metrics,
+                endpoints_queued_tokens=endpoints_queued_tokens,
+                radix_trie=radix_trie,
+                token_ids=token_ids,
+                request_tokens=len(token_ids),
+                hyperparameters=state["hyperparameters"],
+            )
         )
 
-    # TODO(atoniolo76): this is the main ASGI app that will be used to handle requests. can we move it out to a separate file?
+    # ---------- JSON route handlers ----------
+    #
+    # Each handler returns ``(status, payload)``; the dispatcher reads the
+    # body, calls the handler, and serializes the response. Body parsing
+    # / 400-on-invalid-json is handled by ``_dispatch_json`` so individual
+    # handlers can focus on validation and side effects.
+
+    async def h_get_policy(_data) -> tuple[int, dict]:
+        return 200, {
+            "policy": state["policy"],
+            "supported": sorted(ROUTING_POLICIES),
+            "hyperparameters": state["hyperparameters"],
+        }
+
+    async def h_post_policy(data) -> tuple[int, dict]:
+        raw = (data or {}).get("policy") or (data or {}).get("name")
+        if not isinstance(raw, str):
+            return 400, {"error": "body must include string policy or name"}
+        name = normalize_policy(raw)
+        if name not in ROUTING_POLICIES:
+            return 400, {
+                "error": f"unknown policy {raw!r}",
+                "supported": sorted(ROUTING_POLICIES),
+            }
+        state["policy"] = name
+        print(f"[proxy] routing policy set to {name!r}")
+        return 200, {"policy": state["policy"], "hyperparameters": state["hyperparameters"]}
+
+    async def h_get_replicas(_data) -> tuple[int, dict]:
+        return 200, {"replicas": list(replica_urls), "count": len(replica_urls)}
+
+    async def h_post_replicas(data) -> tuple[int, dict]:
+        if isinstance(data, list):
+            raw = data
+        elif isinstance(data, dict):
+            raw = data.get("replicas") or data.get("endpoints")
+        else:
+            raw = None
+        if not isinstance(raw, list) or not all(isinstance(u, str) for u in raw):
+            return 400, {
+                "error": (
+                    "body must be a JSON array of endpoint URLs "
+                    'or an object like {"replicas": [...]}'
+                )
+            }
+
+        seen: set[str] = set()
+        normalized: list[str] = []
+        invalid: list[str] = []
+        for u in raw:
+            u = u.strip().rstrip("/")
+            if not u:
+                continue
+            if not (u.startswith("http://") or u.startswith("https://")):
+                invalid.append(u)
+                continue
+            if u not in seen:
+                seen.add(u)
+                normalized.append(u)
+        if invalid:
+            return 400, {
+                "error": "all endpoints must start with http:// or https://",
+                "invalid": invalid,
+            }
+
+        old = set(replica_urls)
+        new = set(normalized)
+        added = sorted(new - old)
+        removed = sorted(old - new)
+
+        # Mutate the same list/dict objects so the background refresh
+        # loop and _select_endpoint closure see the update.
+        replica_urls.clear()
+        replica_urls.extend(normalized)
+        for u in added:
+            endpoints_queued_tokens[u] = 0
+        for u in removed:
+            endpoints_queued_tokens.pop(u, None)
+            live_metrics.pop(u, None)
+            metrics_meta["last_refresh_errors"].pop(u, None)
+
+        print(
+            f"[proxy] replicas updated: +{len(added)} -{len(removed)} (total={len(replica_urls)})"
+        )
+        return 200, {
+            "replicas": list(replica_urls),
+            "count": len(replica_urls),
+            "added": added,
+            "removed": removed,
+        }
+
+    async def h_get_trie(_data) -> tuple[int, dict]:
+        # Summary stats only -- the full trie is too large to serialize on
+        # every request. ``coverage`` counts how many nodes are tagged with
+        # each replica URL: a useful sanity check that routing is producing
+        # the prefix-sharing shape we expect.
+        coverage: dict[str, int] = {url: 0 for url in replica_urls}
+        stack = [radix_trie.root]
+        tagged_nodes = 0
+        while stack:
+            node = stack.pop()
+            if node.replica_endpoints:
+                tagged_nodes += 1
+                for url in node.replica_endpoints:
+                    coverage[url] = coverage.get(url, 0) + 1
+            stack.extend(node.children.values())
+        return 200, {
+            "num_sequences": radix_trie.num_sequences,
+            "total_tokens_inserted": radix_trie.total_tokens_inserted,
+            "unique_token_count": radix_trie.unique_token_count(),
+            "node_count": radix_trie.node_count(),
+            "tagged_node_count": tagged_nodes,
+            "replica_coverage": coverage,
+        }
+
+    async def h_get_replica_metrics(_data) -> tuple[int, dict]:
+        now = time.monotonic()
+        last = metrics_meta["last_refresh_monotonic"]
+        return 200, {
+            "refresh_interval_seconds": METRICS_REFRESH_INTERVAL_SECONDS,
+            "last_refresh_age_seconds": (now - last) if last else None,
+            "errors": metrics_meta["last_refresh_errors"],
+            "metrics": {
+                url: {
+                    "num_running_reqs": m.num_running_reqs,
+                    "num_queue_reqs": m.num_queue_reqs,
+                    "num_used_tokens": m.num_used_tokens,
+                    "latency_seconds": m.latency,
+                    "gen_throughput": m.gen_throughput,
+                    "utilization": m.utilization,
+                }
+                for url, m in live_metrics.items()
+            },
+            "endpoints_queued_tokens": endpoints_queued_tokens,
+        }
+
+    async def h_get_hyperparameters(_data) -> tuple[int, dict]:
+        return 200, {
+            "hyperparameters": state["hyperparameters"],
+            "allowed_keys": sorted(ALLOWED_HYPERPARAM_KEYS),
+            "defaults": DEFAULT_GORGO_HYPERPARAMETERS,
+        }
+
+    async def h_write_hyperparameters(data, *, replace: bool) -> tuple[int, dict]:
+        """POST/PATCH merge updates into current state; PUT replaces by
+        re-merging on top of defaults. Both validate keys and coerce to
+        float."""
+        if not isinstance(data, dict):
+            return 400, {"error": "body must be a JSON object of hyperparameters"}
+        unknown = sorted(k for k in data if k not in ALLOWED_HYPERPARAM_KEYS)
+        if unknown:
+            return 400, {
+                "error": f"unknown hyperparameter(s): {unknown}",
+                "allowed_keys": sorted(ALLOWED_HYPERPARAM_KEYS),
+            }
+        try:
+            updates = {k: float(v) for k, v in data.items()}
+        except (TypeError, ValueError):
+            return 400, {"error": "hyperparameter values must be numeric"}
+        if replace:
+            merged = dict(DEFAULT_GORGO_HYPERPARAMETERS)
+            merged.update(updates)
+            state["hyperparameters"] = merged
+        else:
+            state["hyperparameters"].update(updates)
+        print(f"[proxy] hyperparameters updated: {state['hyperparameters']}")
+        return 200, {"hyperparameters": state["hyperparameters"]}
+
+    async def h_post_hyperparameters(data) -> tuple[int, dict]:
+        return await h_write_hyperparameters(data, replace=False)
+
+    async def h_put_hyperparameters(data) -> tuple[int, dict]:
+        return await h_write_hyperparameters(data, replace=True)
+
+    async def h_post_flush(_data) -> tuple[int, dict]:
+        radix_trie.clear()
+        # Drop tuning samples too: post-flush per-token rates will look
+        # different (cold KV cache, fresh queue depths) so mixing them
+        # with pre-flush samples would bias the next /tune call.
+        samples.clear()
+        state["total_samples_appended"] = 0
+        state["last_tune_appended"] = 0
+        client = state["upstream_client"]
+        replica_results: dict[str, dict] = {}
+        if client is None:
+            for u in replica_urls:
+                replica_results[u] = {
+                    "ok": False,
+                    "error": "upstream client not yet initialized",
+                }
+        elif replica_urls:
+            pairs = await asyncio.gather(
+                *[_flush_upstream_replica(client, u) for u in replica_urls],
+            )
+            replica_results = dict(pairs)
+        return 200, {"radix_trie_cleared": True, "replicas": replica_results}
+
+    async def h_get_samples(_data) -> tuple[int, dict]:
+        """Visibility into the tuning sample buffer. Returns the most
+        recent samples (capped to keep the response small) plus
+        bookkeeping that ``/tune`` uses for hop-size debouncing."""
+        recent = list(samples)[-50:]
+        return 200, {
+            "buffered_samples": len(samples),
+            "max_buffer_size": samples.maxlen,
+            "total_samples_appended": state["total_samples_appended"],
+            "samples_since_last_tune": (
+                state["total_samples_appended"] - state["last_tune_appended"]
+            ),
+            "last_tune_at_monotonic": state["last_tune_at_monotonic"],
+            "last_recommendation": state["last_recommendation"],
+            "recent": recent,
+        }
+
+    async def h_post_tune(data) -> tuple[int, dict]:
+        """Recompute ``gorgo`` hyperparameters from recent live traffic.
+
+        Body (all optional):
+          * ``window_size``: int (default ``DEFAULT_TUNE_WINDOW_SIZE``).
+            Number of most-recent samples to feed the recommender.
+          * ``hop_size``:    int (default ``DEFAULT_TUNE_HOP_SIZE``).
+            Minimum number of new samples since the last successful tune
+            before this call actually recomputes. Acts as a debounce so
+            a hot caller polling /tune doesn't churn hyperparameters on
+            every request. ``0`` disables the debounce.
+          * ``apply``:       bool (default ``True``). When false the
+            response carries the recommendation without mutating
+            ``state["hyperparameters"]`` (dry run).
+
+        Currently restricted to ``policy == 'gorgo'`` because the recommended
+        scalars (``t_prefill``, ``queued_tokens_weight``) are only consumed
+        by ``route_gorgo``. Other policies will get a 400 with their current
+        policy id so the caller can decide whether to switch first.
+        """
+        if normalize_policy(state["policy"]) != "gorgo":
+            return 400, {
+                "error": ("on-the-fly tuning is only supported when the active policy is 'gorgo'"),
+                "current_policy": state["policy"],
+            }
+
+        if not isinstance(data, dict):
+            return 400, {"error": "body must be a JSON object"}
+
+        try:
+            window_size = int(data.get("window_size", DEFAULT_TUNE_WINDOW_SIZE))
+            hop_size = int(data.get("hop_size", DEFAULT_TUNE_HOP_SIZE))
+        except (TypeError, ValueError):
+            return 400, {"error": "window_size and hop_size must be integers"}
+        apply = bool(data.get("apply", True))
+
+        if window_size <= 0:
+            return 400, {"error": "window_size must be positive"}
+        if hop_size < 0:
+            return 400, {"error": "hop_size must be >= 0"}
+
+        new_samples = state["total_samples_appended"] - state["last_tune_appended"]
+        if hop_size > 0 and new_samples < hop_size:
+            return 200, {
+                "skipped": True,
+                "reason": (
+                    f"only {new_samples} new sample(s) since last tune (hop_size={hop_size})"
+                ),
+                "samples_since_last_tune": new_samples,
+                "buffered_samples": len(samples),
+                "hyperparameters": state["hyperparameters"],
+            }
+
+        if not samples:
+            return 200, {
+                "skipped": True,
+                "reason": "no samples buffered yet -- send some chat completions first",
+                "buffered_samples": 0,
+                "hyperparameters": state["hyperparameters"],
+            }
+
+        # Sliding window: take the trailing ``window_size`` samples (or
+        # everything we have, if the buffer is shorter than requested).
+        window = list(samples)[-window_size:]
+        recommendation = recommend_hyperparameters(window)
+        summary = summarize_samples(window)
+
+        applied = False
+        if apply:
+            state["hyperparameters"].update(recommendation)
+            applied = True
+            print(
+                f"[proxy] /tune applied window={len(window)} -> {recommendation} "
+                f"(samples_since_last={new_samples})"
+            )
+
+        state["last_tune_appended"] = state["total_samples_appended"]
+        state["last_tune_at_monotonic"] = time.monotonic()
+        state["last_recommendation"] = dict(recommendation)
+
+        return 200, {
+            "skipped": False,
+            "recommendation": recommendation,
+            "applied": applied,
+            "current_hyperparameters": state["hyperparameters"],
+            "window_size_requested": window_size,
+            "window_size_used": len(window),
+            "buffered_samples": len(samples),
+            "samples_since_last_tune": new_samples,
+            "stats": {
+                "prefill_rate_seconds_per_token": summary["prefill_rate_seconds_per_token"],
+                "decode_rate_seconds_per_token": summary["decode_rate_seconds_per_token"],
+                "ping_seconds": summary["ping_seconds"],
+                "prefill_ols_fit": summary["prefill_ols_fit"],
+                "decode_ols_fit": summary["decode_ols_fit"],
+            },
+        }
+
+    # JSON route table. The dispatcher distinguishes 405 (method exists
+    # for path but not this verb) from 404 (path unknown) by membership
+    # checks, so adding a new (method, path) entry here is the only edit
+    # required to expose a new JSON endpoint.
+    json_routes: dict[tuple[str, str], object] = {
+        ("GET", "/policy"): h_get_policy,
+        ("POST", "/policy"): h_post_policy,
+        ("GET", "/replicas"): h_get_replicas,
+        ("POST", "/replicas"): h_post_replicas,
+        ("GET", "/trie"): h_get_trie,
+        ("GET", "/replica_metrics"): h_get_replica_metrics,
+        ("GET", "/hyperparameters"): h_get_hyperparameters,
+        ("POST", "/hyperparameters"): h_post_hyperparameters,
+        ("PATCH", "/hyperparameters"): h_post_hyperparameters,
+        ("PUT", "/hyperparameters"): h_put_hyperparameters,
+        ("POST", "/flush"): h_post_flush,
+        ("GET", "/samples"): h_get_samples,
+        ("POST", "/tune"): h_post_tune,
+    }
+
+    async def _dispatch_json(method: str, path: str, receive, send) -> bool:
+        handler = json_routes.get((method, path))
+        if handler is None:
+            if any(p == path for (_, p) in json_routes):
+                await _send_json(send, 405, {"error": "method not allowed"})
+                return True
+            return False  # let caller emit 404
+
+        # Body-bearing methods may include a JSON payload; GET callers
+        # pass an empty dict so handlers don't have to special-case.
+        if method in ("POST", "PUT", "PATCH"):
+            try:
+                data = await _read_json_body(receive)
+            except json.JSONDecodeError:
+                await _send_json(send, 400, {"error": "invalid JSON body"})
+                return True
+        else:
+            data = {}
+
+        status, payload = await handler(data)
+        await _send_json(send, status, payload)
+        return True
+
+    # ---------- Chat completions (streaming passthrough + tuning tap) ----------
+
+    def _record_request_sample(
+        *,
+        target: str,
+        ttft_ns: int | None,
+        total_ns: int,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+    ) -> None:
+        """Append a per-request sample shaped like
+        :func:`proxy.measure.measure_chat_completion`'s output. Skipped
+        silently when token counts are missing (calibrate-style safeguard
+        against corrupted per-token rates).
+
+        ``ping_seconds`` reuses the most recent /metrics scrape latency
+        for ``target`` as a stand-in for the irreducible RTT subtracted
+        from TTFT -- same role ``ping_once`` plays in
+        ``proxy/calibrate.py``. If no metrics snapshot exists yet
+        (cold start), we record ``ping=0`` so the prefill rate is a
+        slight overestimate rather than negative.
+        """
+        if (
+            ttft_ns is None
+            or prompt_tokens is None
+            or prompt_tokens <= 0
+            or completion_tokens is None
+            or completion_tokens <= 0
+        ):
+            return
+
+        snap = live_metrics.get(target)
+        ping_rtt_s = snap.latency if snap is not None else 0.0
+
+        ttft_s = ttft_ns / NS_PER_S
+        total_s = total_ns / NS_PER_S
+        prefill_s = max(ttft_s - ping_rtt_s, 0.0)
+        decode_s = max(total_s - ttft_s, 0.0)
+
+        samples.append(
+            {
+                "ping_seconds": ping_rtt_s,
+                "ttft_seconds": ttft_s,
+                "total_seconds": total_s,
+                "prefill_seconds": prefill_s,
+                "decode_seconds": decode_s,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "prefill_rate_seconds_per_token": prefill_s / prompt_tokens,
+                "decode_rate_seconds_per_token": decode_s / completion_tokens,
+                "target": target,
+                "recorded_at_monotonic": time.monotonic(),
+            }
+        )
+        state["total_samples_appended"] += 1
+
+    async def _handle_chat_completions(receive, send) -> None:
+        try:
+            data = await _read_json_body(receive)
+        except json.JSONDecodeError:
+            await _send_json(send, 400, {"error": "invalid JSON body"})
+            return
+        if not isinstance(data, dict):
+            await _send_json(send, 400, {"error": "body must be a JSON object"})
+            return
+
+        messages = data.get("messages", [])
+        if not isinstance(messages, list):
+            await _send_json(send, 400, {"error": "'messages' must be a list"})
+            return
+
+        token_ids = tokenize_input(messages)
+        request_tokens = len(token_ids)
+
+        try:
+            target = _select_endpoint(token_ids)
+        except Exception as e:
+            print(f"[proxy] policy {state['policy']!r} failed ({e}); falling back to random")
+            if not replica_urls:
+                await _send_json(send, 503, {"error": "no replicas registered"})
+                return
+            target = random.choice(replica_urls)
+
+        endpoints_queued_tokens[target] = endpoints_queued_tokens.get(target, 0) + request_tokens
+        client = state["upstream_client"]
+        if client is None:
+            # Race between startup and the first inbound request; defensive.
+            await _send_json(send, 503, {"error": "upstream client not yet initialized"})
+            if target in endpoints_queued_tokens:
+                endpoints_queued_tokens[target] = max(
+                    0, endpoints_queued_tokens[target] - request_tokens
+                )
+            return
+
+        # Serialize the original parsed JSON exactly once for the upstream
+        # request. We forward bytes directly instead of letting httpx do
+        # its own json= serialization to avoid a second round-trip through
+        # the encoder. ``accept-encoding: identity`` tells the upstream
+        # not to compress so we don't have to juggle ``content-encoding``
+        # on the way out to the client.
+        upstream_body = json.dumps(data).encode()
+        upstream_headers = {
+            "accept-encoding": "identity",
+            "content-type": "application/json",
+        }
+        headers_sent = False
+        # Captured before client.stream(...) so TTFT measured by the SSE
+        # tee includes request-send + response-headers latency, matching
+        # the contract in proxy/measure.py::consume_sse_stream.
+        request_start_ns = time.perf_counter_ns()
+        try:
+            async with client.stream(
+                "POST",
+                f"{target}/v1/chat/completions",
+                content=upstream_body,
+                headers=upstream_headers,
+            ) as upstream:
+                # At this point the request body has been sent upstream
+                # and the response headers have come back, so the replica
+                # has ingested the prompt and (at minimum) started
+                # prefill. Record the prefix on the trie so concurrent
+                # requests arriving during our streaming phase can see
+                # that ``target`` now caches this prefix.
+                #
+                # Only tag successful dispatches -- a 4xx/5xx likely
+                # means the replica never got far enough to cache
+                # anything meaningful.
+                if token_ids and 200 <= upstream.status_code < 300:
+                    try:
+                        radix_trie.insert(token_ids, endpoint=target)
+                    except Exception as e:
+                        # Trie bookkeeping must never break forwarding.
+                        print(f"[proxy] radix trie insert failed: {e}")
+
+                response_headers = [
+                    (k.lower().encode(), v.encode())
+                    for k, v in upstream.headers.items()
+                    if k.lower() not in _HOP_BY_HOP_HEADERS
+                ]
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": upstream.status_code,
+                        "headers": response_headers,
+                    }
+                )
+                headers_sent = True
+
+                is_sse = upstream.headers.get("content-type", "").startswith("text/event-stream")
+
+                async def _sink(chunk: bytes) -> None:
+                    """Forward an upstream byte chunk to the ASGI client.
+                    Used as the ``chunk_sink`` for ``consume_sse_stream``
+                    so passthrough latency is unaffected by the parse loop."""
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": chunk,
+                            "more_body": True,
+                        }
+                    )
+
+                if is_sse and 200 <= upstream.status_code < 300:
+                    # Tee path: parse SSE for tuning samples while the
+                    # raw bytes flow straight through to the client.
+                    (
+                        ttft_ns,
+                        output_tokens,
+                        prompt_tokens,
+                        completion_tokens,
+                    ) = await consume_sse_stream(
+                        upstream,
+                        request_start_ns=request_start_ns,
+                        chunk_sink=_sink,
+                    )
+                    total_ns = time.perf_counter_ns() - request_start_ns
+                    _record_request_sample(
+                        target=target,
+                        ttft_ns=ttft_ns,
+                        total_ns=total_ns,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=(
+                            completion_tokens if completion_tokens is not None else output_tokens
+                        ),
+                    )
+                else:
+                    # Plain passthrough for non-SSE bodies (e.g. error
+                    # JSON, or a caller that asked for stream=False).
+                    async for chunk in upstream.aiter_raw():
+                        if chunk:
+                            await _sink(chunk)
+                await send({"type": "http.response.body", "body": b"", "more_body": False})
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            if not headers_sent:
+                await _send_json(send, 502, {"error": f"upstream replica unreachable: {e}"})
+        except httpx.HTTPError as e:
+            if headers_sent:
+                # Already committed to a status; best we can do is close
+                # the body cleanly so the client sees a truncated stream.
+                print(f"[proxy] upstream stream error mid-response: {e}")
+                try:
+                    await send({"type": "http.response.body", "body": b"", "more_body": False})
+                except Exception:
+                    pass
+            else:
+                await _send_json(send, 502, {"error": f"upstream stream error: {e}"})
+        finally:
+            # Only decrement if the replica is still registered; if it was
+            # removed mid-request via /replicas POST, don't leak its key
+            # back into the queue-tokens dict.
+            if target in endpoints_queued_tokens:
+                endpoints_queued_tokens[target] = max(
+                    0, endpoints_queued_tokens[target] - request_tokens
+                )
+
+    # ---------- Lifespan ----------
+
+    async def _handle_lifespan(receive, send) -> None:
+        while True:
+            msg = await receive()
+            if msg["type"] == "lifespan.startup":
+                state["upstream_client"] = _new_upstream_client()
+                # Prime synchronously so the first inbound request doesn't
+                # see empty live_metrics and fall back to random.
+                try:
+                    await _refresh_all(state["upstream_client"])
+                except Exception as e:
+                    print(f"[proxy] initial metrics refresh failed: {e}")
+                state["metrics_task"] = asyncio.create_task(_metrics_refresh_loop())
+                print(
+                    f"[proxy] metrics refresh loop started "
+                    f"(interval={METRICS_REFRESH_INTERVAL_SECONDS}s, "
+                    f"{len(replica_urls)} replicas); "
+                    f"upstream client: http2=True, "
+                    f"max_connections={upstream_limits.max_connections}, "
+                    f"max_keepalive_connections={upstream_limits.max_keepalive_connections}"
+                )
+                await send({"type": "lifespan.startup.complete"})
+            elif msg["type"] == "lifespan.shutdown":
+                task = state.get("metrics_task")
+                if task is not None:
+                    task.cancel()
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                client = state.get("upstream_client")
+                if client is not None:
+                    try:
+                        await client.aclose()
+                    except Exception as e:
+                        print(f"[proxy] upstream client close failed: {e}")
+                    state["upstream_client"] = None
+                await send({"type": "lifespan.shutdown.complete"})
+                return
+
+    # ---------- ASGI entry point ----------
+
     async def asgi_app(scope, receive, send):
         if scope["type"] == "lifespan":
-            while True:
-                msg = await receive()
-                if msg["type"] == "lifespan.startup":
-                    state["upstream_client"] = _new_upstream_client()
-                    # Prime with a synchronous first pass so the first request
-                    # that lands while the loop is still running doesn't hit
-                    # empty live_metrics and fall back to random.
-                    try:
-                        await _refresh_metrics_once(state["upstream_client"])
-                    except Exception as e:
-                        print(f"[proxy] initial metrics refresh failed: {e}")
-                    state["_metrics_task"] = asyncio.create_task(_metrics_refresh_loop())
-                    print(
-                        f"[proxy] metrics refresh loop started "
-                        f"(interval={METRICS_REFRESH_INTERVAL_SECONDS}s, "
-                        f"{len(replica_urls)} replicas); "
-                        f"upstream client: http2=True, "
-                        f"max_connections={UPSTREAM_LIMITS.max_connections}, "
-                        f"max_keepalive_connections={UPSTREAM_LIMITS.max_keepalive_connections}"
-                    )
-                    await send({"type": "lifespan.startup.complete"})
-                elif msg["type"] == "lifespan.shutdown":
-                    task = state.get("_metrics_task")
-                    if task is not None:
-                        task.cancel()
-                        try:
-                            await task
-                        except (asyncio.CancelledError, Exception):
-                            pass
-                    client = state.get("upstream_client")
-                    if client is not None:
-                        try:
-                            await client.aclose()
-                        except Exception as e:
-                            print(f"[proxy] upstream client close failed: {e}")
-                        state["upstream_client"] = None
-                    await send({"type": "lifespan.shutdown.complete"})
-                    return
-
+            await _handle_lifespan(receive, send)
+            return
         if scope["type"] != "http":
             return
 
         path = scope["path"]
         method = scope["method"]
 
-        if path == "/policy":
-            if method == "GET":
-                await _send_json(
-                    send,
-                    200,
-                    {
-                        "policy": state["policy"],
-                        "supported": sorted(SUPPORTED_POLICIES),
-                        "hyperparameters": state["hyperparameters"],
-                    },
-                )
-                return
-            if method == "POST":
-                body = await _read_body(receive)
-                try:
-                    data = json.loads(body.decode()) if body else {}
-                except json.JSONDecodeError:
-                    await _send_json(send, 400, {"error": "invalid JSON body"})
-                    return
-                raw = data.get("policy") or data.get("name")
-                if raw is None or not isinstance(raw, str):
-                    await _send_json(
-                        send, 400, {"error": "body must include string policy or name"}
-                    )
-                    return
-                name = normalize_policy(raw)
-                if name not in SUPPORTED_POLICIES:
-                    await _send_json(
-                        send,
-                        400,
-                        {
-                            "error": f"unknown policy {raw!r}",
-                            "supported": sorted(SUPPORTED_POLICIES),
-                        },
-                    )
-                    return
-                state["policy"] = name
-                print(f"[proxy] routing policy set to {name!r}")
-                await _send_json(
-                    send,
-                    200,
-                    {"policy": state["policy"], "hyperparameters": state["hyperparameters"]},
-                )
-                return
-            await _send_json(send, 405, {"error": "method not allowed"})
-            return
-
-        if path == "/replicas":
-            if method == "GET":
-                await _send_json(
-                    send,
-                    200,
-                    {"replicas": list(replica_urls), "count": len(replica_urls)},
-                )
-                return
-            if method == "POST":
-                body = await _read_body(receive)
-                try:
-                    data = json.loads(body.decode()) if body else {}
-                except json.JSONDecodeError:
-                    await _send_json(send, 400, {"error": "invalid JSON body"})
-                    return
-                if isinstance(data, list):
-                    raw = data
-                elif isinstance(data, dict):
-                    raw = data.get("replicas") or data.get("endpoints")
-                else:
-                    raw = None
-                if not isinstance(raw, list) or not all(isinstance(u, str) for u in raw):
-                    await _send_json(
-                        send,
-                        400,
-                        {
-                            "error": (
-                                "body must be a JSON array of endpoint URLs "
-                                'or an object like {"replicas": [...]}'
-                            )
-                        },
-                    )
-                    return
-
-                seen: set[str] = set()
-                normalized: list[str] = []
-                invalid: list[str] = []
-                for u in raw:
-                    u = u.strip().rstrip("/")
-                    if not u:
-                        continue
-                    if not (u.startswith("http://") or u.startswith("https://")):
-                        invalid.append(u)
-                        continue
-                    if u not in seen:
-                        seen.add(u)
-                        normalized.append(u)
-                if invalid:
-                    await _send_json(
-                        send,
-                        400,
-                        {
-                            "error": "all endpoints must start with http:// or https://",
-                            "invalid": invalid,
-                        },
-                    )
-                    return
-
-                old = set(replica_urls)
-                new = set(normalized)
-                added = sorted(new - old)
-                removed = sorted(old - new)
-
-                # Mutate the same list/dict objects so the background refresh
-                # loop and _select_endpoint closure see the update.
-                replica_urls.clear()
-                replica_urls.extend(normalized)
-                for u in added:
-                    endpoints_queued_tokens[u] = 0
-                for u in removed:
-                    endpoints_queued_tokens.pop(u, None)
-                    live_metrics.pop(u, None)
-                    metrics_meta["last_refresh_errors"].pop(u, None)
-
-                print(
-                    f"[proxy] replicas updated: +{len(added)} -{len(removed)} "
-                    f"(total={len(replica_urls)})"
-                )
-                await _send_json(
-                    send,
-                    200,
-                    {
-                        "replicas": list(replica_urls),
-                        "count": len(replica_urls),
-                        "added": added,
-                        "removed": removed,
-                    },
-                )
-                return
-            await _send_json(send, 405, {"error": "method not allowed"})
-            return
-
-        if path == "/trie" and method == "GET":
-            # Summary stats only -- the full trie is too large to serialize
-            # on every request. ``coverage`` counts how many nodes are tagged
-            # with each replica URL, which is a useful sanity check that
-            # routing is producing the shape of prefix-sharing we expect.
-            coverage: dict[str, int] = {url: 0 for url in replica_urls}
-            stack = [radix_trie.root]
-            tagged_nodes = 0
-            while stack:
-                node = stack.pop()
-                if node.replica_endpoints:
-                    tagged_nodes += 1
-                    for url in node.replica_endpoints:
-                        coverage[url] = coverage.get(url, 0) + 1
-                stack.extend(node.children.values())
-            await _send_json(
-                send,
-                200,
-                {
-                    "num_sequences": radix_trie.num_sequences,
-                    "total_tokens_inserted": radix_trie.total_tokens_inserted,
-                    "unique_token_count": radix_trie.unique_token_count(),
-                    "node_count": radix_trie.node_count(),
-                    "tagged_node_count": tagged_nodes,
-                    "replica_coverage": coverage,
-                },
-            )
-            return
-
-        if path == "/replica_metrics" and method == "GET":
-            now = time.monotonic()
-            last = metrics_meta["last_refresh_monotonic"]
-            await _send_json(
-                send,
-                200,
-                {
-                    "refresh_interval_seconds": METRICS_REFRESH_INTERVAL_SECONDS,
-                    "last_refresh_age_seconds": (now - last) if last else None,
-                    "errors": metrics_meta["last_refresh_errors"],
-                    "metrics": {
-                        url: {
-                            "num_running_reqs": m.num_running_reqs,
-                            "num_queue_reqs": m.num_queue_reqs,
-                            "num_used_tokens": m.num_used_tokens,
-                            "latency_seconds": m.latency,
-                            "gen_throughput": m.gen_throughput,
-                            "utilization": m.utilization,
-                        }
-                        for url, m in live_metrics.items()
-                    },
-                    "endpoints_queued_tokens": endpoints_queued_tokens,
-                },
-            )
-            return
-
-        if path == "/hyperparameters":
-            if method == "GET":
-                await _send_json(
-                    send,
-                    200,
-                    {
-                        "hyperparameters": state["hyperparameters"],
-                        "allowed_keys": sorted(ALLOWED_HYPERPARAM_KEYS),
-                        "defaults": DEFAULT_GORGO_HYPERPARAMETERS,
-                    },
-                )
-                return
-            if method in ("POST", "PATCH", "PUT"):
-                body = await _read_body(receive)
-                try:
-                    data = json.loads(body.decode()) if body else {}
-                except json.JSONDecodeError:
-                    await _send_json(send, 400, {"error": "invalid JSON body"})
-                    return
-                if not isinstance(data, dict):
-                    await _send_json(
-                        send, 400, {"error": "body must be a JSON object of hyperparameters"}
-                    )
-                    return
-                unknown = sorted(k for k in data if k not in ALLOWED_HYPERPARAM_KEYS)
-                if unknown:
-                    await _send_json(
-                        send,
-                        400,
-                        {
-                            "error": f"unknown hyperparameter(s): {unknown}",
-                            "allowed_keys": sorted(ALLOWED_HYPERPARAM_KEYS),
-                        },
-                    )
-                    return
-                try:
-                    updates = {k: float(v) for k, v in data.items()}
-                except (TypeError, ValueError):
-                    await _send_json(send, 400, {"error": "hyperparameter values must be numeric"})
-                    return
-                if method == "PUT":
-                    merged = dict(DEFAULT_GORGO_HYPERPARAMETERS)
-                    merged.update(updates)
-                    state["hyperparameters"] = merged
-                else:
-                    state["hyperparameters"].update(updates)
-                print(f"[proxy] hyperparameters updated: {state['hyperparameters']}")
-                await _send_json(send, 200, {"hyperparameters": state["hyperparameters"]})
-                return
-            await _send_json(send, 405, {"error": "method not allowed"})
-            return
-
-        if path == "/flush":
-            if method != "POST":
-                await _send_json(send, 405, {"error": "method not allowed"})
-                return
-            radix_trie.clear()
-            client = state["upstream_client"]
-            replica_results: dict[str, dict] = {}
-            if client is None:
-                for u in replica_urls:
-                    replica_results[u] = {
-                        "ok": False,
-                        "error": "upstream client not yet initialized",
-                    }
-            elif replica_urls:
-                pairs = await asyncio.gather(
-                    *[_flush_upstream_replica(client, u) for u in replica_urls],
-                )
-                replica_results = dict(pairs)
-            await _send_json(
-                send,
-                200,
-                {
-                    "radix_trie_cleared": True,
-                    "replicas": replica_results,
-                },
-            )
-            return
-
         if path == "/v1/chat/completions" and method == "POST":
-            body = await _read_body(receive)
-            try:
-                data = json.loads(body.decode()) if body else {}
-            except json.JSONDecodeError:
-                await _send_json(send, 400, {"error": "invalid JSON body"})
-                return
-            if not isinstance(data, dict):
-                await _send_json(send, 400, {"error": "body must be a JSON object"})
-                return
+            await _handle_chat_completions(receive, send)
+            return
 
-            messages = data.get("messages", [])
-            if not isinstance(messages, list):
-                await _send_json(send, 400, {"error": "'messages' must be a list"})
-                return
-
-            token_ids = tokenize_input(messages)
-            request_tokens = len(token_ids)
-
-            try:
-                target = _select_endpoint(token_ids)
-            except Exception as e:
-                print(f"[proxy] policy {state['policy']!r} failed ({e}); falling back to random")
-                target = random.choice(replica_urls)
-
-            endpoints_queued_tokens[target] = (
-                endpoints_queued_tokens.get(target, 0) + request_tokens
-            )
-            client = state["upstream_client"]
-            if client is None:
-                # Shouldn't happen outside of a race between startup and the
-                # first inbound request; be defensive anyway.
-                await _send_json(send, 503, {"error": "upstream client not yet initialized"})
-                if target in endpoints_queued_tokens:
-                    endpoints_queued_tokens[target] = max(
-                        0, endpoints_queued_tokens[target] - request_tokens
-                    )
-                return
-
-            # Stream the upstream response straight through to the client so
-            # the first SSE event / first response chunk arrives as soon as
-            # SGLang emits it (critical for TTFT measurements).
-            #
-            # We forward the raw request bytes (``content=body``) instead of
-            # re-serializing ``data`` -- we already parsed once to tokenize
-            # and pick a route, no reason to pay json.dumps() again. The
-            # ``application/json`` content-type is set explicitly because
-            # httpx won't infer it from raw bytes.
-            #
-            # ``accept-encoding: identity`` tells the upstream not to
-            # compress, so we don't have to juggle ``content-encoding`` on
-            # the way out to the client.
-            upstream_headers = {
-                "accept-encoding": "identity",
-                "content-type": "application/json",
-            }
-            headers_sent = False
-            try:
-                async with client.stream(
-                    "POST",
-                    f"{target}/v1/chat/completions",
-                    content=body,
-                    headers=upstream_headers,
-                ) as upstream:
-                    # At this point the request body has been sent upstream
-                    # and the response headers have come back, so the replica
-                    # has ingested the prompt and (at minimum) started
-                    # prefill. Record the prefix on the trie so concurrent
-                    # requests arriving during our streaming phase can see
-                    # that ``target`` now caches this prefix.
-                    #
-                    # Only tag successful dispatches -- a 4xx/5xx likely
-                    # means the replica never got far enough to cache
-                    # anything meaningful.
-                    if token_ids and 200 <= upstream.status_code < 300:
-                        try:
-                            radix_trie.insert(token_ids, endpoint=target)
-                        except Exception as e:
-                            # Trie bookkeeping must never break forwarding.
-                            print(f"[proxy] radix trie insert failed: {e}")
-
-                    response_headers = [
-                        (k.lower().encode(), v.encode())
-                        for k, v in upstream.headers.items()
-                        if k.lower() not in _HOP_BY_HOP_HEADERS
-                    ]
-                    await send(
-                        {
-                            "type": "http.response.start",
-                            "status": upstream.status_code,
-                            "headers": response_headers,
-                        }
-                    )
-                    headers_sent = True
-                    async for chunk in upstream.aiter_raw():
-                        if not chunk:
-                            continue
-                        await send(
-                            {
-                                "type": "http.response.body",
-                                "body": chunk,
-                                "more_body": True,
-                            }
-                        )
-                    await send({"type": "http.response.body", "body": b"", "more_body": False})
-            except (httpx.ConnectError, httpx.ConnectTimeout) as e:
-                if not headers_sent:
-                    await _send_json(send, 502, {"error": f"upstream replica unreachable: {e}"})
-            except httpx.HTTPError as e:
-                if headers_sent:
-                    # Already committed to a status; best we can do is close
-                    # the body cleanly so the client sees a truncated stream.
-                    print(f"[proxy] upstream stream error mid-response: {e}")
-                    try:
-                        await send({"type": "http.response.body", "body": b"", "more_body": False})
-                    except Exception:
-                        pass
-                else:
-                    await _send_json(send, 502, {"error": f"upstream stream error: {e}"})
-            finally:
-                # Only decrement if the replica is still registered; if it was
-                # removed mid-request via /replicas POST, don't leak its key
-                # back into the queue-tokens dict.
-                if target in endpoints_queued_tokens:
-                    endpoints_queued_tokens[target] = max(
-                        0, endpoints_queued_tokens[target] - request_tokens
-                    )
+        if await _dispatch_json(method, path, receive, send):
             return
 
         await send(
@@ -809,40 +1042,3 @@ def proxy():
         print(f"proxy listening at {tunnel.url}")
         # TODO: replace uvicorn with a faster reverse-proxy (e.g. nginx, envoy, or Rust-based)
         uvicorn.run(asgi_app, host="0.0.0.0", port=8000)
-
-
-async def fetch_replica_metrics(endpoints: list[str]) -> dict[str, ReplicaSnapshot]:
-    import time
-
-    # TODO(atoniolo76): is this a bad metric for latency since we are hitting metrics which may be expensive depending on grafana
-    async def _fetch(client: httpx.AsyncClient, endpoint: str) -> tuple[str, ReplicaSnapshot]:
-        # TODO(atoniolo76): can we ping the route here instead of having to hit metrics to record latency sepecifically?
-        t0 = time.monotonic()
-        resp = await client.get(f"{endpoint}/metrics")
-        latency = time.monotonic() - t0
-
-        metrics = {
-            parts[0].split("{")[0]: float(parts[1])
-            for line in resp.text.splitlines()
-            if not line.startswith("#")
-            and len(parts := line.rsplit(" ", 1)) == 2
-            and parts[1]
-            .replace(".", "", 1)
-            .replace("e+", "", 1)
-            .replace("e-", "", 1)
-            .lstrip("-")
-            .isdigit()
-        }
-
-        return endpoint, ReplicaSnapshot(
-            num_running_reqs=int(metrics.get("sglang:num_running_reqs", 0)),
-            num_queue_reqs=int(metrics.get("sglang:num_queue_reqs", 0)),
-            num_used_tokens=int(metrics.get("sglang:num_used_tokens", 0)),
-            latency=latency,
-            gen_throughput=float(metrics.get("sglang:gen_throughput", 0.0)),
-            utilization=float(metrics.get("sglang:utilization", 0.0)),
-        )
-
-    async with httpx.AsyncClient() as client:
-        results = await asyncio.gather(*[_fetch(client, ep) for ep in endpoints])
-        return dict(results)

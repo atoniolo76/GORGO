@@ -39,7 +39,16 @@ HF_CACHE_VOL = modal.Volume.from_name(
 HF_CACHE_PATH = "/root/.cache/huggingface"
 FULL_MODEL_NAME = f"{MODEL_ORG}/{MODEL_NAME}"
 MODEL_PATH = f"{HF_CACHE_PATH}/{FULL_MODEL_NAME}"
-MIN_CONTAINERS = os.getenv("MIN_CONTAINERS", 2)
+# Default to scale-to-zero: ``modal deploy`` parks the function with no
+# warm replicas, the first inbound /v1/chat/completions cold-starts a
+# container and ``wait_ready`` does an in-process warmup before
+# registering the tunnel URL in ``replicas[REGION]`` (the workload
+# client also has its own client-side warmup phase). Once warm, the
+# container survives ``SCALEDOWN_WINDOW_SECONDS`` of idle so back-to-back
+# experiments avoid paying cold-start again. Set ``MIN_CONTAINERS`` to a
+# positive integer if you want a permanently-warm pool instead.
+MIN_CONTAINERS = os.getenv("MIN_CONTAINERS", 0)
+SCALEDOWN_WINDOW_SECONDS = int(os.getenv("SCALEDOWN_WINDOW_SECONDS", 15 * 60))
 WAIT_READY_TIMEOUT = os.getenv("WAIT_READY_TIMEOUT", 1200)
 DG_CACHE_VOL = modal.Volume.from_name(
     "deepgemm-cache", create_if_missing=True, environment_name=ENVIRONMENT_NAME
@@ -66,6 +75,7 @@ sglang_image = sglang_image.run_commands(
     region=REGION,
     gpu=GPU,
     min_containers=int(MIN_CONTAINERS),
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
     volumes={HF_CACHE_PATH: HF_CACHE_VOL},
 )
 def model_endpoint():

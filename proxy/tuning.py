@@ -37,7 +37,7 @@ Algorithms (selected via ``--algorithm``):
   1/5. Eval-efficient (1 eval/step), handles diagonal interactions,
   reproducible via ``--seed``.
 
-Usage::
+Usage (flag-driven CLI)::
 
     modal run proxy/tuning.py --proxy-url https://... \\
         --start-time 2026-04-01T12:00:00 \\
@@ -48,11 +48,20 @@ Usage::
         --max-steps 16 \\
         --seed 0
 
-The workload-shaped flags (``--start-time``/``--end-time``/``--offset``/
-``--num-requests``/``--concurrency``/``--model``/``--stream``/
-``--max-tokens``) mirror ``proxy/workload.py`` exactly: pick a small,
-fast slice (a few hundred requests is typical) so each tuning trial
-takes seconds, not minutes.
+Usage (interactive TUI -- prompts for every knob, including the
+hyperparameter search ranges, and confirms before launching)::
+
+    modal run proxy/tuning.py::tune_interactive --proxy-url https://...
+
+Both entrypoints accept the same set of knobs. The workload-shaped
+flags (``--start-time``/``--end-time``/``--offset``/``--num-requests``/
+``--concurrency``/``--model``/``--stream``/``--max-tokens``) mirror
+``proxy/workload.py`` exactly: pick a small, fast slice (a few hundred
+requests is typical) so each tuning trial takes seconds, not minutes.
+The hyperparameter search ranges (``--t-prefill-min`` /
+``--t-prefill-max`` / ``--queued-tokens-weight-min`` /
+``--queued-tokens-weight-max``) default to :data:`HYPERPARAM_RANGES`
+but can be tightened or widened per-run without editing the source.
 """
 
 from __future__ import annotations
@@ -79,16 +88,48 @@ image = (
 )
 
 
-# Search ranges per hyperparameter. Mirrors
+# Default search ranges per hyperparameter. Keys mirror
 # ``proxy/modal_proxy.py``::ALLOWED_HYPERPARAM_KEYS, so a typo here
-# would surface as a 400 from the proxy on first POST. Multiplicative
-# step search means the range only needs to be order-of-magnitude
+# would surface as a 400 from the proxy on first POST. The tuners use
+# multiplicative steps, so the range only needs to be order-of-magnitude
 # correct.
-# TODO(atoniolo76): adjust upper range to be OOM within calibrate.py results
+#
+# Bounds are sized so calibrate.py's typical recommended values
+# (per-token prefill / decode rates, on the order of 1e-4 to 1e-2 s/tok
+# on current GPUs) sit comfortably inside the interior, with ~2 OOM of
+# headroom above for slow paths and ~1-2 OOM below for fast paths.
+# Upper bound of 1.0 also coincides with the proxy default
+# (``DEFAULT_GORGO_HYPERPARAMETERS``), so a bootstrap from that default
+# starts at the upper edge and the search can only move inward.
+#
+# These act as defaults for :func:`tune` -- the per-key bounds can be
+# overridden at runtime via ``--t-prefill-{min,max}`` /
+# ``--queued-tokens-weight-{min,max}`` (or the matching prompts in
+# :func:`tune_interactive`) without editing this file.
 HYPERPARAM_RANGES: dict[str, tuple[float, float]] = {
-    "t_prefill": (1e-5, 10.0),
-    "queued_tokens_weight": (1e-5, 100.0),
+    "t_prefill": (1e-5, 1.0),
+    "queued_tokens_weight": (1e-5, 1.0),
 }
+
+
+def _validated_ranges(
+    overrides: dict[str, tuple[float, float]],
+) -> dict[str, tuple[float, float]]:
+    """Merge ``overrides`` on top of :data:`HYPERPARAM_RANGES` and check
+    each pair satisfies ``0 < lo < hi``. The lower bound must be
+    strictly positive because both tuners sample in log-space; a zero
+    or negative ``lo`` would crash with a domain error inside
+    :class:`GaussianESTuner`.
+    """
+    merged = {k: tuple(v) for k, v in HYPERPARAM_RANGES.items()}
+    merged.update({k: tuple(v) for k, v in overrides.items()})
+    for k, (lo, hi) in merged.items():
+        if lo <= 0:
+            raise SystemExit(f"{k} lower bound must be > 0 (log-space sampling), got {lo}")
+        if lo >= hi:
+            raise SystemExit(f"{k} range invalid: lo ({lo}) must be < hi ({hi})")
+    return merged
+
 
 # Each entry maps a CLI ``--metric`` value to a function that pulls a
 # scalar to *maximize* out of a workload stats dict. Negate latencies
@@ -390,6 +431,10 @@ def tune(
     seed: int | None = None,
     relative_tolerance: float = 0.005,
     output_dir: str | None = None,
+    t_prefill_min: float = HYPERPARAM_RANGES["t_prefill"][0],
+    t_prefill_max: float = HYPERPARAM_RANGES["t_prefill"][1],
+    queued_tokens_weight_min: float = HYPERPARAM_RANGES["queued_tokens_weight"][0],
+    queued_tokens_weight_max: float = HYPERPARAM_RANGES["queued_tokens_weight"][1],
 ) -> dict:
     """Tune ``t_prefill`` / ``queued_tokens_weight`` on the proxy online.
 
@@ -418,6 +463,11 @@ def tune(
         output_dir: Where to write the per-tune-run artifact folder
             (relative paths are rooted at ``/results``). ``None`` ->
             ``/results/tune_<UTC-timestamp>``.
+        t_prefill_min/max, queued_tokens_weight_min/max: Per-key
+            search-range bounds. Default to :data:`HYPERPARAM_RANGES`.
+            Lower bounds must be strictly positive (log-space) and
+            strictly less than the upper bounds; otherwise the run is
+            rejected before any traffic is sent.
 
     Returns:
         Summary dict including ``best_params``, ``best_score``,
@@ -429,6 +479,16 @@ def tune(
     if metric not in SCORE_FUNCTIONS:
         raise SystemExit(f"unknown metric {metric!r}; choices: {sorted(SCORE_FUNCTIONS)}")
     score_fn = SCORE_FUNCTIONS[metric]
+
+    ranges = _validated_ranges(
+        {
+            "t_prefill": (t_prefill_min, t_prefill_max),
+            "queued_tokens_weight": (
+                queued_tokens_weight_min,
+                queued_tokens_weight_max,
+            ),
+        }
+    )
 
     proxy_url = proxy_url.rstrip("/")
     workload_kwargs = dict(
@@ -466,7 +526,7 @@ def tune(
         tuner: TunerLike = _build_tuner(
             algorithm,
             initial_params=current_hp,
-            ranges=HYPERPARAM_RANGES,
+            ranges=ranges,
             max_steps=max_steps,
             relative_tolerance=relative_tolerance,
             initial_step=initial_step,
@@ -555,7 +615,7 @@ def tune(
                 baseline_score=baseline_score,
                 history=history,
                 active_policy=active_policy,
-                ranges=HYPERPARAM_RANGES,
+                ranges=ranges,
                 finished_at=None,
                 output_path=summary_path,
             )
@@ -588,7 +648,7 @@ def tune(
         baseline_score=baseline_score,
         history=history,
         active_policy=active_policy,
-        ranges=HYPERPARAM_RANGES,
+        ranges=ranges,
         finished_at=datetime.now(timezone.utc),
         output_path=summary_path,
     )
@@ -642,6 +702,392 @@ def _build_summary(
     }
 
 
+def _parse_stream_flag(stream: str) -> bool | None:
+    """Stream sentinel parser shared by ``main`` and ``tune_interactive``.
+    Empty string -> ``None`` (use replay default); ``true/false/1/0/...``
+    coerce as expected. Anything else is rejected before any traffic."""
+    s = stream.strip().lower()
+    if s == "":
+        return None
+    if s in ("1", "true", "yes", "y", "on"):
+        return True
+    if s in ("0", "false", "no", "n", "off"):
+        return False
+    raise SystemExit(f"invalid stream={stream!r}; expected true/false")
+
+
+def _dispatch_tune(
+    *,
+    proxy_url: str,
+    start_time: str,
+    end_time: str,
+    offset: int,
+    num_requests: int,
+    concurrency: int,
+    model: str,
+    stream: str,
+    max_tokens: int,
+    metric: str,
+    algorithm: str,
+    max_steps: int,
+    initial_step: float,
+    min_step: float,
+    sigma: float,
+    sigma_min: float,
+    seed: int,
+    relative_tolerance: float,
+    output_dir: str,
+    t_prefill_min: float,
+    t_prefill_max: float,
+    queued_tokens_weight_min: float,
+    queued_tokens_weight_max: float,
+):
+    """Single point that converts CLI/TUI sentinels and forwards to
+    ``tune.remote``. Sentinel mapping matches ``proxy/workload.py``::
+
+        empty string for start_time/end_time/model/stream/output_dir
+        0 for num_requests/max_tokens
+        seed=-1 -> nondeterministic (only consulted by gaussian-es)
+    """
+    return tune.remote(
+        proxy_url=proxy_url,
+        start_time=start_time or None,
+        end_time=end_time or None,
+        offset=offset,
+        num_requests=num_requests or None,
+        concurrency=concurrency,
+        model=model or None,
+        stream=_parse_stream_flag(stream),
+        max_tokens=max_tokens or None,
+        metric=metric,
+        algorithm=algorithm,
+        max_steps=max_steps,
+        initial_step=initial_step,
+        min_step=min_step,
+        sigma=sigma,
+        sigma_min=sigma_min,
+        seed=None if seed < 0 else seed,
+        relative_tolerance=relative_tolerance,
+        output_dir=output_dir or None,
+        t_prefill_min=t_prefill_min,
+        t_prefill_max=t_prefill_max,
+        queued_tokens_weight_min=queued_tokens_weight_min,
+        queued_tokens_weight_max=queued_tokens_weight_max,
+    )
+
+
+# Spec for the interactive TUI: ordered groups of (name, kind, default,
+# help, choices?) entries. ``name`` matches ``_dispatch_tune`` kwargs
+# 1:1 so the prompted dict can be **-splat into the dispatcher with no
+# remapping. ``kind`` is one of {"str","int","float","choice"}. Hoisted
+# to module scope so it's discoverable / importable for testing.
+_TUNE_TUI_SPEC: list[tuple[str, list[dict]]] = [
+    (
+        "Workload (mirrors proxy/workload.py)",
+        [
+            {
+                "name": "start_time",
+                "kind": "str",
+                "default": "",
+                "help": "ISO-8601 start of replay window; empty = use first row",
+            },
+            {
+                "name": "end_time",
+                "kind": "str",
+                "default": "",
+                "help": "ISO-8601 end of replay window; empty = unbounded",
+            },
+            {
+                "name": "offset",
+                "kind": "int",
+                "default": 0,
+                "help": "Skip the first N rows of the replay window",
+            },
+            {
+                "name": "num_requests",
+                "kind": "int",
+                "default": 0,
+                "help": "Cap requests per trial (0 = full window)",
+            },
+            {
+                "name": "concurrency",
+                "kind": "int",
+                "default": 16,
+                "help": "Max in-flight requests per trial",
+            },
+            {
+                "name": "model",
+                "kind": "str",
+                "default": DEFAULT_MODEL,
+                "help": "Model name override sent to upstream",
+            },
+            {
+                "name": "stream",
+                "kind": "str",
+                "default": "",
+                "help": "true/false/empty -- empty uses replay default",
+            },
+            {
+                "name": "max_tokens",
+                "kind": "int",
+                "default": 0,
+                "help": "0 = use replay default",
+            },
+        ],
+    ),
+    (
+        "Tuner",
+        [
+            {
+                "name": "metric",
+                "kind": "choice",
+                "default": "output_throughput",
+                "help": "Score function to maximize",
+                "choices": sorted(SCORE_FUNCTIONS),
+            },
+            {
+                "name": "algorithm",
+                "kind": "choice",
+                "default": "hill-climb",
+                "help": "Search strategy",
+                "choices": ["hill-climb", "gaussian-es"],
+            },
+            {
+                "name": "max_steps",
+                "kind": "int",
+                "default": 16,
+                "help": "Max trials after the baseline",
+            },
+            {
+                "name": "relative_tolerance",
+                "kind": "float",
+                "default": 0.005,
+                "help": "Improvement fraction to count as real (0.005 = 0.5%)",
+            },
+            {
+                "name": "initial_step",
+                "kind": "float",
+                "default": 0.5,
+                "help": "hill-climb initial multiplicative step",
+            },
+            {
+                "name": "min_step",
+                "kind": "float",
+                "default": 0.05,
+                "help": "hill-climb step floor",
+            },
+            {
+                "name": "sigma",
+                "kind": "float",
+                "default": 0.5,
+                "help": "gaussian-es initial log-space sigma",
+            },
+            {
+                "name": "sigma_min",
+                "kind": "float",
+                "default": 0.02,
+                "help": "gaussian-es sigma floor",
+            },
+            {
+                "name": "seed",
+                "kind": "int",
+                "default": -1,
+                "help": "RNG seed for gaussian-es (-1 = nondeterministic)",
+            },
+        ],
+    ),
+    (
+        "Hyperparameter search ranges (log-space; lower bound > 0)",
+        [
+            {
+                "name": "t_prefill_min",
+                "kind": "float",
+                "default": HYPERPARAM_RANGES["t_prefill"][0],
+                "help": "Lower bound for t_prefill (s/tok)",
+            },
+            {
+                "name": "t_prefill_max",
+                "kind": "float",
+                "default": HYPERPARAM_RANGES["t_prefill"][1],
+                "help": "Upper bound for t_prefill (s/tok)",
+            },
+            {
+                "name": "queued_tokens_weight_min",
+                "kind": "float",
+                "default": HYPERPARAM_RANGES["queued_tokens_weight"][0],
+                "help": "Lower bound for queued_tokens_weight (s/tok)",
+            },
+            {
+                "name": "queued_tokens_weight_max",
+                "kind": "float",
+                "default": HYPERPARAM_RANGES["queued_tokens_weight"][1],
+                "help": "Upper bound for queued_tokens_weight (s/tok)",
+            },
+        ],
+    ),
+    (
+        "Output",
+        [
+            {
+                "name": "output_dir",
+                "kind": "str",
+                "default": "",
+                "help": "Empty = /results/tune_<UTC-timestamp>",
+            },
+        ],
+    ),
+]
+
+
+def _coerce_value(kind: str, raw: str, default):
+    """Parse a TUI string answer into the spec's declared type. Empty
+    answer falls back to ``default`` (the printed value)."""
+    if raw == "":
+        return default
+    if kind == "int":
+        return int(raw)
+    if kind == "float":
+        return float(raw)
+    return raw
+
+
+def _prompt_field_plain(field: dict) -> object:
+    """Stdlib-only prompt fallback (used when ``rich`` is unavailable).
+
+    Round-trips through :func:`_coerce_value` so the resulting type
+    exactly matches the rich-prompt path."""
+    name = field["name"]
+    default = field["default"]
+    label = f"  {name}"
+    if field.get("help"):
+        label += f"  ({field['help']})"
+    if field.get("choices"):
+        label += f"  [{'|'.join(field['choices'])}]"
+    label += f" [{default!r}]: "
+    while True:
+        raw = input(label).strip()
+        try:
+            value = _coerce_value(field["kind"], raw, default)
+        except ValueError as e:
+            print(f"    invalid: {e}")
+            continue
+        if field.get("choices") and value not in field["choices"]:
+            print(f"    must be one of {field['choices']}")
+            continue
+        return value
+
+
+def _print_config_table_plain(chosen: dict) -> None:
+    name_width = max(len(k) for k in chosen)
+    print()
+    print("Final configuration:")
+    print("-" * (name_width + 30))
+    for k, v in chosen.items():
+        print(f"  {k.ljust(name_width)}  {v!r}")
+    print("-" * (name_width + 30))
+
+
+def _run_tui(initial_proxy_url: str = "") -> dict:
+    """Drive the interactive flow. Returns the dict of chosen kwargs."""
+    try:
+        from rich.console import Console
+        from rich.prompt import Confirm, FloatPrompt, IntPrompt, Prompt
+        from rich.table import Table
+
+        rich_available = True
+    except ImportError:
+        rich_available = False
+
+    chosen: dict = {}
+
+    if rich_available:
+        console = Console()
+        console.rule("[bold cyan]GORGO online tuner[/]")
+        proxy_url = initial_proxy_url or Prompt.ask(
+            "[bold]proxy_url[/] [dim](base URL of running proxy)[/]"
+        )
+        chosen["proxy_url"] = proxy_url.strip()
+
+        for section, fields in _TUNE_TUI_SPEC:
+            console.print(f"\n[bold magenta]{section}[/]")
+            for f in fields:
+                label = f"  [cyan]{f['name']}[/]"
+                if f.get("help"):
+                    label += f" [dim]{f['help']}[/]"
+                if f["kind"] == "int":
+                    chosen[f["name"]] = IntPrompt.ask(
+                        label, default=int(f["default"]), console=console
+                    )
+                elif f["kind"] == "float":
+                    chosen[f["name"]] = FloatPrompt.ask(
+                        label, default=float(f["default"]), console=console
+                    )
+                elif f["kind"] == "choice":
+                    chosen[f["name"]] = Prompt.ask(
+                        label,
+                        default=str(f["default"]),
+                        choices=f["choices"],
+                        console=console,
+                    )
+                else:
+                    chosen[f["name"]] = Prompt.ask(
+                        label, default=str(f["default"]), console=console
+                    )
+
+        # Echo final config; cross-check ranges before shipping to remote.
+        try:
+            _validated_ranges(
+                {
+                    "t_prefill": (chosen["t_prefill_min"], chosen["t_prefill_max"]),
+                    "queued_tokens_weight": (
+                        chosen["queued_tokens_weight_min"],
+                        chosen["queued_tokens_weight_max"],
+                    ),
+                }
+            )
+        except SystemExit as e:
+            console.print(f"[bold red]invalid ranges:[/] {e}")
+            raise
+        table = Table(title="Final configuration", show_lines=False)
+        table.add_column("param", style="cyan", no_wrap=True)
+        table.add_column("value", style="white")
+        for k, v in chosen.items():
+            table.add_row(k, repr(v))
+        console.print(table)
+        if not Confirm.ask("Launch this run?", default=True):
+            console.print("[yellow]aborted[/]")
+            raise SystemExit(0)
+    else:
+        # Plain-text fallback: same prompt names + ordering, no styling.
+        print("=== GORGO online tuner ===")
+        proxy_url = initial_proxy_url or input("  proxy_url (base URL of running proxy): ")
+        chosen["proxy_url"] = proxy_url.strip()
+        for section, fields in _TUNE_TUI_SPEC:
+            print(f"\n[{section}]")
+            for f in fields:
+                chosen[f["name"]] = _prompt_field_plain(f)
+        try:
+            _validated_ranges(
+                {
+                    "t_prefill": (chosen["t_prefill_min"], chosen["t_prefill_max"]),
+                    "queued_tokens_weight": (
+                        chosen["queued_tokens_weight_min"],
+                        chosen["queued_tokens_weight_max"],
+                    ),
+                }
+            )
+        except SystemExit as e:
+            print(f"invalid ranges: {e}")
+            raise
+        _print_config_table_plain(chosen)
+        confirm = input("Launch this run? [Y/n]: ").strip().lower()
+        if confirm in ("n", "no"):
+            print("aborted")
+            raise SystemExit(0)
+
+    return chosen
+
+
 @app.local_entrypoint()
 def main(
     proxy_url: str,
@@ -663,34 +1109,25 @@ def main(
     seed: int = -1,
     relative_tolerance: float = 0.005,
     output_dir: str = "",
+    t_prefill_min: float = HYPERPARAM_RANGES["t_prefill"][0],
+    t_prefill_max: float = HYPERPARAM_RANGES["t_prefill"][1],
+    queued_tokens_weight_min: float = HYPERPARAM_RANGES["queued_tokens_weight"][0],
+    queued_tokens_weight_max: float = HYPERPARAM_RANGES["queued_tokens_weight"][1],
 ):
-    """CLI wrapper for ``tune``. Sentinel mapping matches workload.py:
-
-    empty string for start_time/end_time/model/stream/output_dir
-    0 for num_requests/max_tokens
-    seed=-1 -> nondeterministic (only consulted by gaussian-es)
-    """
-    stream_arg: bool | None
-    s = stream.strip().lower()
-    if s == "":
-        stream_arg = None
-    elif s in ("1", "true", "yes"):
-        stream_arg = True
-    elif s in ("0", "false", "no"):
-        stream_arg = False
-    else:
-        raise SystemExit(f"invalid --stream={stream!r}; expected true/false")
-
-    tune.remote(
+    """Flag-driven CLI wrapper around ``tune.remote``. Defaults are
+    intentionally identical to :data:`HYPERPARAM_RANGES` /
+    :func:`tune` so a no-flag invocation reproduces the canonical
+    setup; any subset of flags can be overridden per-run."""
+    _dispatch_tune(
         proxy_url=proxy_url,
-        start_time=start_time or None,
-        end_time=end_time or None,
+        start_time=start_time,
+        end_time=end_time,
         offset=offset,
-        num_requests=num_requests or None,
+        num_requests=num_requests,
         concurrency=concurrency,
-        model=model or None,
-        stream=stream_arg,
-        max_tokens=max_tokens or None,
+        model=model,
+        stream=stream,
+        max_tokens=max_tokens,
         metric=metric,
         algorithm=algorithm,
         max_steps=max_steps,
@@ -698,7 +1135,27 @@ def main(
         min_step=min_step,
         sigma=sigma,
         sigma_min=sigma_min,
-        seed=None if seed < 0 else seed,
+        seed=seed,
         relative_tolerance=relative_tolerance,
-        output_dir=output_dir or None,
+        output_dir=output_dir,
+        t_prefill_min=t_prefill_min,
+        t_prefill_max=t_prefill_max,
+        queued_tokens_weight_min=queued_tokens_weight_min,
+        queued_tokens_weight_max=queued_tokens_weight_max,
     )
+
+
+@app.local_entrypoint()
+def tune_interactive(proxy_url: str = ""):
+    """Interactive TUI walking through every tuning knob.
+
+    Invoke with ``modal run proxy/tuning.py::tune_interactive`` and
+    optionally pre-fill the proxy URL via ``--proxy-url``. Every other
+    parameter is prompted with its current default; pressing Enter
+    accepts the default. Uses ``rich`` for nicer rendering when
+    available, falls back to a stdlib-only flow otherwise. After
+    showing the full configuration the user confirms before any
+    traffic is sent; range bounds are validated client-side so an
+    invalid pair is rejected without paying for a remote launch."""
+    chosen = _run_tui(initial_proxy_url=proxy_url)
+    _dispatch_tune(**chosen)
