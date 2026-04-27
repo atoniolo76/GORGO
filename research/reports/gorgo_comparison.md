@@ -1,13 +1,15 @@
-# Gorgo (main's deployed routing rule) vs rome's policy library
+# Gorgo (main's namesake routing rule) vs rome's policy library
 
 > Bead: go-4jm
 >
 > rome and main both call something "gorgo," but the two are different
 > objects. On main, `utils/lb_aibrix.py:route_gorgo` is a single ~50-LOC
-> scoring rule deployed as the production routing policy. On rome,
-> "gorgo" names the whole simulator + 12-policy comparison harness.
-> This report reconciles the two: we port main's `route_gorgo` into
-> rome as `src/routing_harness/policies/gorgo.py` and benchmark it
+> multi-objective scoring rule registered as the project-namesake policy
+> (one of 17 selectable rules in `lb_aibrix.py`; the proxy currently
+> defaults to `random` and switches via control-plane POST `/policy`).
+> On rome, "gorgo" names the whole simulator + 12-policy comparison
+> harness. This report reconciles the two: we port main's `route_gorgo`
+> into rome as `src/routing_harness/policies/gorgo.py` and benchmark it
 > against the front-runners from §6 of `routing-comparison.md`
 > (`prefix-cache-preble`, `pd-preble`, `least-kv-cache`) under
 > identical simulated conditions.
@@ -54,8 +56,8 @@ min wins
 Three additive terms: a latency baseline, a soft prefix-affinity
 penalty for the uncached tail, and a load penalty combining queued
 prompt tokens and resident KV tokens. Two scalar hyperparameters
-(`t_prefill`, `queued_tokens_weight`) are tuned online in production;
-in this comparison we report the deployed defaults
+(`t_prefill`, `queued_tokens_weight`) are exposed for online tuning
+via the proxy control plane; we report main's checked-in defaults
 (`t_prefill = 0.05`, `queued_tokens_weight = 0.001`) plus a
 sensitivity grid.
 
@@ -203,13 +205,14 @@ bias and turns gorgo into a near-`least-kv-cache` variant. Neither
 substitution is going to outperform the gated, hotspot-aware
 front-runners on this workload.
 
-This finding is consistent with main's online tuning: tuning
-`t_prefill` and `queued_tokens_weight` is meaningful when the live
-signals genuinely change between configurations (a busy production
-cluster generates non-zero queued_tokens during normal operation).
-In a deterministic sequential simulator, those signals are diluted
-because there is no overlap between requests at low QPS — the
-hyperparameters cannot rescue gorgo from the structural problem.
+This finding is consistent with how online tuning would work on
+a live cluster: tuning `t_prefill` and `queued_tokens_weight` is
+meaningful when the live signals genuinely change between
+configurations (a busy cluster generates non-zero queued_tokens
+during normal operation). In a deterministic sequential simulator,
+those signals are diluted because there is no overlap between
+requests at low QPS — the hyperparameters cannot rescue gorgo from
+the structural problem.
 
 ## Where gorgo wins, where it loses, where it matches
 
@@ -232,29 +235,29 @@ hyperparameters cannot rescue gorgo from the structural problem.
 This is a simulator comparison. It uses rome's analytic cost model,
 which has been calibrated against measured per-token coefficients on
 A100 (`research/data/calibration/`, see `go-h3r` lineage report) but
-is not the production execution engine main is deployed against.
-Three caveats:
+is not a real GPU execution engine. Three caveats:
 
 1. **The arrival model is sequential.** The simulator processes
    requests in arrival order without true overlapping execution.
-   Production traffic interleaves: `queued_tokens` accumulates as
+   Real serving traffic interleaves: `queued_tokens` accumulates as
    new requests arrive while existing ones are still in prefill.
-   That signal is what gorgo's `queued_tokens_weight` is calibrated
-   for. The simulator's discrete arrival model dilutes this signal
-   at low QPS, which is precisely the regime where gorgo
+   That signal is what gorgo's `queued_tokens_weight` term is
+   designed for. The simulator's discrete arrival model dilutes this
+   signal at low QPS, which is precisely the regime where gorgo
    under-performs in this comparison. This does not mean gorgo is
-   bad in production; it means the simulator under-rewards gorgo's
+   bad in live serving; it means the simulator under-rewards gorgo's
    load-deflection mechanism at light load.
-2. **Online tuning is not modeled.** Main tunes `t_prefill` and
-   `queued_tokens_weight` against live latency observations. The
-   sensitivity grid here is a static cut, not the trajectory main's
-   tuner would follow. The flatness of that grid (§Hyperparameter
-   sensitivity) is suggestive — there isn't an obvious better
-   point — but it is not a substitute for the live tuner.
-3. **Use main's deployment for ground truth.** The simulator is a
+2. **Online tuning is not modeled.** A live cluster could tune
+   `t_prefill` and `queued_tokens_weight` against observed
+   latencies. The sensitivity grid here is a static cut, not the
+   trajectory a live tuner would follow. The flatness of that grid
+   (§Hyperparameter sensitivity) is suggestive — there isn't an
+   obvious better point in the static sweep — but it is not a
+   substitute for an online tuner.
+3. **Use a live deployment for ground truth.** The simulator is a
    ranking tool for policy *design*, useful for asking "would this
    structural change help?" Per-policy absolute numbers should not
-   be quoted as performance predictions for production.
+   be quoted as performance predictions for live serving.
 
 The takeaway from this comparison is design-level, not operational:
 **gorgo's scoring rule lacks the explicit hotspot / exploit-explore

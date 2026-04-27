@@ -1,7 +1,8 @@
 """GORGO multi-objective scoring policy (port of main's ``route_gorgo``).
 
-Ports the production scoring rule deployed in
-``utils/lb_aibrix.py:route_gorgo`` on the ``main`` branch into rome's
+Ports the project-namesake scoring rule registered in
+``utils/lb_aibrix.py:route_gorgo`` on the ``main`` branch (one of
+17 selectable rules; main's proxy default is ``random``) into rome's
 simulator so it can be benchmarked under identical conditions as the
 rest of the policy library.
 
@@ -25,11 +26,11 @@ Component meaning:
   in either dimension are penalized linearly.
 
 Hyperparameters ``t_prefill`` and ``queued_tokens_weight`` are scalar
-weights that trade off the three components. On main they are tuned
-online; here we expose them as policy params so a sweep can
-characterize sensitivity. Defaults (``t_prefill=0.05``,
-``queued_tokens_weight=0.001``) mirror the values in production at the
-time of porting.
+weights that trade off the three components. On main they are exposed
+for online tuning via the proxy control plane; here we expose them as
+policy params so a sweep can characterize sensitivity. Defaults
+(``t_prefill=0.05``, ``queued_tokens_weight=0.001``) mirror the
+checked-in values on main at the time of porting.
 
 Signal mapping main → rome simulator:
 
