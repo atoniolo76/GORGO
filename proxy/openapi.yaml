@@ -87,8 +87,19 @@ paths:
       tags: [control-plane]
       summary: Merge hyperparameter updates
       description: |
-        Partial update. Only the keys present in the body are changed; every
-        key must be in `allowed_keys` and every value must be numeric.
+        Partial update of the structured hyperparameter store. Two body
+        shapes are accepted:
+
+        * **Flat** -- `{"t_prefill": X, "queued_tokens_weight": Y}`. Keys
+          are written to the global `defaults` slot. This is the shape
+          `proxy/calibrate.py` and `proxy/tuning.py` use.
+        * **Structured** -- `{"defaults": {...}, "per_target": {url:
+          {...}}}`. Either branch is optional. `per_target` URLs must be
+          currently-registered replicas. Each block's keys must be a
+          subset of `allowed_keys` and values must be numeric.
+
+        Mixing flat keys with `defaults`/`per_target` in the same body
+        is rejected with a 400.
       requestBody:
         required: true
         content:
@@ -96,9 +107,27 @@ paths:
             schema: { $ref: '#/components/schemas/HyperparameterUpdate' }
             examples:
               tune_prefill:
+                summary: Update one default
                 value: { t_prefill: 0.8 }
-              both:
+              both_defaults:
+                summary: Update both defaults
                 value: { t_prefill: 0.8, queued_tokens_weight: 1.5 }
+              defaults_only_explicit:
+                summary: Same as flat, but using the structured slot
+                value: { defaults: { t_prefill: 0.8 } }
+              per_target_only:
+                summary: Override one replica without touching defaults
+                value:
+                  per_target:
+                    https://r1.modal.run:
+                      t_prefill: 0.0005
+              defaults_and_per_target:
+                summary: Update defaults and add one per-target override
+                value:
+                  defaults: { t_prefill: 0.8, queued_tokens_weight: 1.5 }
+                  per_target:
+                    https://r1.modal.run:
+                      queued_tokens_weight: 0.001
       responses:
         '200': { $ref: '#/components/responses/HyperparametersUpdated' }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -118,9 +147,11 @@ paths:
       tags: [control-plane]
       summary: Replace hyperparameters
       description: |
-        Resets hyperparameters to the factory defaults and then applies the
-        provided updates on top. Useful for returning to a known baseline in
-        one call.
+        Resets the entire hyperparameter store to factory defaults
+        (`defaults` re-seeded from `DEFAULT_GORGO_HYPERPARAMETERS`,
+        `per_target` cleared) and then applies the provided update on
+        top. Useful for returning to a known baseline -- including
+        clearing all per-target overrides -- in one call.
       requestBody:
         required: true
         content:
@@ -253,49 +284,90 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   /tune:
+    get:
+      tags: [observability, debug]
+      summary: Live auto-tuner status (no side effects)
+      description: |
+        Returns the current auto-tuner config (`enabled`, `window_size`,
+        `hop_size`, `apply`), per-window progress
+        (`samples_since_last_apply`, `samples_until_next_apply`) and
+        diagnostics (`applied_count`, `last_recommendation`,
+        `enabled_at_monotonic`, `current_policy`,
+        `current_hyperparameters`).
+      responses:
+        '200':
+          description: Auto-tuner snapshot.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [auto_tune]
+                properties:
+                  auto_tune: { $ref: '#/components/schemas/AutoTuneStatus' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
     post:
       tags: [control-plane]
-      summary: Recompute gorgo hyperparameters from recent live traffic
+      summary: Toggle / reconfigure the on-the-fly auto-tuner
       description: |
-        Slides a window of size `window_size` (default 100) over the
-        most-recent per-request samples and feeds it to the same
-        `recommend_hyperparameters` primitive that `proxy/calibrate.py`
-        uses for one-shot calibration. `hop_size` (default 0) acts as a
-        debounce: callers that poll `/tune` won't actually recompute
-        unless at least `hop_size` new samples have accumulated since the
-        last successful recompute. `apply` defaults to true and merges
-        the recommendation into `state["hyperparameters"]`; set to false
-        for a dry-run preview.
+        The auto-tuner is a *stateful toggle*, not a one-shot endpoint.
+        Once enabled it keeps recomputing `gorgo` hyperparameters every
+        `hop_size` new samples (after the first `window_size` samples
+        have accumulated to fill the window) until explicitly disabled.
 
-        Currently restricted to `policy: gorgo` because the recommended
-        scalars (`t_prefill`, `queued_tokens_weight`) are only consumed
-        by `route_gorgo`. Other policies receive a 400 carrying the
-        current policy id so the caller can switch first.
+        Each `POST /tune` atomically merges the body into the live
+        config; only the keys present in the body are touched, so
+        `{"hop_size": 25}` adjusts the hop without affecting `enabled`,
+        `window_size`, or `apply`. A bare `POST /tune {}` defaults to
+        `enabled: true` so the common case ("turn it on with current
+        defaults") stays terse. To turn it off, post
+        `{"enabled": false}`.
+
+        Recompute happens inline on the sample-recording hot path
+        (single asyncio thread, no background task) so reconfigures
+        take effect on the next inbound request. Switching to
+        `apply: false` runs the recommender in shadow mode -- updates
+        `last_recommendation` for diff inspection without mutating
+        `state["hyperparameters"]`.
+
+        Enabling requires `policy: gorgo` (the only policy that
+        consumes `t_prefill` / `queued_tokens_weight`). Disabling works
+        regardless of policy so a misconfigured tuner can always be
+        turned off.
       requestBody:
         required: false
         content:
           application/json:
             schema: { $ref: '#/components/schemas/TuneRequest' }
             examples:
-              defaults:
+              enable_with_defaults:
+                summary: Turn on with current config (window=100, hop=50)
                 value: {}
-              window_only:
-                value: { window_size: 200 }
-              auto_with_hop:
-                value: { window_size: 200, hop_size: 50, apply: true }
-              dry_run:
-                value: { window_size: 200, apply: false }
+              enable_explicit:
+                summary: Turn on, set window/hop/apply explicitly
+                value: { enabled: true, window_size: 200, hop_size: 50, apply: true }
+              reconfigure_hop:
+                summary: While running, drop the hop to react faster
+                value: { hop_size: 20 }
+              shadow_mode:
+                summary: Keep running but stop mutating hyperparameters
+                value: { apply: false }
+              disable:
+                summary: Turn the tuner off
+                value: { enabled: false }
       responses:
         '200':
           description: |
-            Either a successful recommendation (with `skipped: false`) or a
-            no-op response when the hop-size debounce hasn't elapsed or the
-            buffer is empty (`skipped: true`).
+            Auto-tuner reconfigured. Response includes the post-update
+            status snapshot and a best-effort `preview` (recommendation
+            + summary stats over the trailing `window_size` samples)
+            when the buffer is non-empty.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TuneResponse' }
         '400':
-          description: Active policy is not `gorgo`, or invalid request body.
+          description: |
+            Body is not an object, a numeric field is invalid, or
+            `enabled: true` was requested while `policy != 'gorgo'`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -370,7 +442,7 @@ components:
       type: string
       description: |
         Routing policy id. The set of accepted values comes from
-        `utils.lb_aibrix.ROUTING_POLICIES`; names are kebab-case after the
+        `policy.ROUTING_POLICIES`; names are kebab-case after the
         proxy normalizes the request body (underscores -> hyphens, lowercased,
         trimmed).
 
@@ -386,7 +458,7 @@ components:
           `least-busy-time`, `throughput`, `pack-load`, `prefix-cache`,
           `queue-router`, `vtc`, `vtc-basic`, `slo`, `slo-pack-load`,
           `slo-least-load`, `slo-least-load-pulling`, `fallback`: Aibrix
-          gateway/algorithms aliases (see `utils/lb_aibrix.py`).
+          gateway/algorithms aliases (see `policy/lb_aibrix.py`).
         - `simple-session-affinity`: hash-based; reads the radix trie and
           queue counters but not `/metrics`.
         - `pd`, `pd-disaggregation`: accepted for API compatibility but not
@@ -437,7 +509,7 @@ components:
           type: array
           description: Sorted list of all policy ids accepted by this proxy.
           items: { $ref: '#/components/schemas/Policy' }
-        hyperparameters: { $ref: '#/components/schemas/Hyperparameters' }
+        hyperparameters: { $ref: '#/components/schemas/HyperparameterStore' }
 
     PolicyUpdateResponse:
       type: object
@@ -445,40 +517,85 @@ components:
       description: Response body from `POST /policy`. Does not include `supported`.
       properties:
         policy: { $ref: '#/components/schemas/Policy' }
-        hyperparameters: { $ref: '#/components/schemas/Hyperparameters' }
+        hyperparameters: { $ref: '#/components/schemas/HyperparameterStore' }
 
     Hyperparameters:
       type: object
-      description: Tunables consumed by the `gorgo` policy scoring function.
-      required: [t_prefill, queued_tokens_weight]
+      description: |
+        Per-replica tunables consumed by the `gorgo` policy scoring
+        function. This is the *block* schema used inside both
+        `defaults` and each `per_target` entry of
+        `HyperparameterStore`. All keys are optional inside a block;
+        missing keys fall through to defaults. Unknown keys are
+        rejected with a 400.
       properties:
         t_prefill:
           type: number
-          description: Coefficient applied to the request's token count to estimate prefill cost.
+          description: Coefficient applied to the request's effective prefill token count.
         queued_tokens_weight:
           type: number
-          description: Coefficient applied to `(in_flight_queue + num_used_tokens)` per replica.
+          description: Coefficient applied to `(in_flight_queue + num_used_tokens)`.
       additionalProperties: false
 
-    HyperparameterUpdate:
+    HyperparameterStore:
       type: object
       description: |
-        Subset of `Hyperparameters` to apply. Unknown keys are rejected with
-        a 400 whose body lists `allowed_keys`.
+        Structured GORGO hyperparameter store. `defaults` applies to
+        every replica; `per_target` keys specific replica URLs that
+        override individual scalars. The auto-tuner produces
+        per-target overrides automatically once enough live samples
+        accumulate per replica; `proxy/calibrate.py` and
+        `proxy/tuning.py` write only `defaults`.
+
+        Resolution order for a single replica `u` is:
+        `per_target[u]` (if present) layered on top of `defaults`,
+        layered on top of `DEFAULT_GORGO_HYPERPARAMETERS`.
+      required: [defaults, per_target]
       properties:
-        t_prefill: { type: number }
-        queued_tokens_weight: { type: number }
-      additionalProperties: false
+        defaults:
+          $ref: '#/components/schemas/Hyperparameters'
+        per_target:
+          type: object
+          description: Map of replica URL -> override block.
+          additionalProperties:
+            $ref: '#/components/schemas/Hyperparameters'
+
+    HyperparameterUpdate:
+      description: |
+        Body shape for `POST` / `PATCH` / `PUT /hyperparameters`.
+        Two equivalent forms are accepted:
+
+        1. **Flat** -- a `Hyperparameters` block; the keys are written
+           to the `defaults` slot.
+        2. **Structured** -- an object with optional `defaults` and
+           optional `per_target` (URL -> block). Lets callers write
+           per-replica overrides.
+
+        Mixing the two shapes (flat keys alongside `defaults` /
+        `per_target`) is rejected with a 400.
+      oneOf:
+        - $ref: '#/components/schemas/Hyperparameters'
+        - type: object
+          properties:
+            defaults: { $ref: '#/components/schemas/Hyperparameters' }
+            per_target:
+              type: object
+              additionalProperties:
+                $ref: '#/components/schemas/Hyperparameters'
+          additionalProperties: false
 
     HyperparameterState:
       type: object
       required: [hyperparameters, allowed_keys, defaults]
       properties:
-        hyperparameters: { $ref: '#/components/schemas/Hyperparameters' }
+        hyperparameters: { $ref: '#/components/schemas/HyperparameterStore' }
         allowed_keys:
           type: array
+          description: Allowed keys inside any `defaults` / `per_target.<url>` block.
           items: { type: string }
-        defaults: { $ref: '#/components/schemas/Hyperparameters' }
+        defaults:
+          $ref: '#/components/schemas/Hyperparameters'
+          description: Factory defaults used as a baseline; not the active `defaults`.
 
     ReplicaUrl:
       type: string
@@ -627,29 +744,101 @@ components:
     TuneRequest:
       type: object
       description: |
-        All fields are optional. The proxy applies sensible defaults
-        (`window_size=100`, `hop_size=0` -> no debounce, `apply=true`).
+        All fields are optional; only present keys are merged into the
+        live auto-tuner config. `enabled` defaults to `true` so a bare
+        `{}` body turns the tuner on with current settings; pass
+        `{"enabled": false}` to disable.
       properties:
+        enabled:
+          type: boolean
+          description: |
+            Toggle the auto-tuner. Defaults to `true` when the field is
+            absent so the common "turn it on" call is just `POST /tune
+            {}`. When transitioning from off to on the per-window
+            counter is reset, so the next recompute is timed from this
+            moment.
         window_size:
           type: integer
           minimum: 1
           description: |
-            Number of trailing samples to feed the recommender. Capped
-            implicitly at `max_buffer_size` from `/samples`.
+            Trailing-sample window fed to `recommend_hyperparameters`
+            on each recompute. Capped implicitly at `max_buffer_size`
+            from `/samples`. The very first recompute waits until the
+            buffer holds at least this many samples.
         hop_size:
           type: integer
-          minimum: 0
+          minimum: 1
           description: |
-            Minimum number of new samples that must accumulate since the
-            last successful tune before this call recomputes. `0`
-            disables the debounce.
+            Recompute every N new samples. Smaller hops react faster to
+            load shifts; larger hops are more stable. Must be > 0.
         apply:
           type: boolean
           description: |
-            When true (default), merges the recommendation into the
-            active hyperparameter map. When false, returns the
-            recommendation without mutating proxy state.
+            When `true` (default), merges each recommendation into the
+            live hyperparameter map. When `false`, the recommender
+            still runs (and `last_recommendation` is updated) but
+            `state["hyperparameters"]` is not mutated -- useful for
+            shadow-mode comparison against the current settings.
       additionalProperties: false
+
+    AutoTuneStatus:
+      type: object
+      description: |
+        Live snapshot of the auto-tuner's config + diagnostics.
+      required:
+        - enabled
+        - window_size
+        - hop_size
+        - apply
+        - buffered_samples
+        - samples_since_last_apply
+        - applied_count
+        - current_policy
+        - current_hyperparameters
+      properties:
+        enabled: { type: boolean }
+        window_size: { type: integer }
+        hop_size: { type: integer }
+        apply: { type: boolean }
+        buffered_samples:
+          type: integer
+          description: Current size of the per-request sample ring buffer.
+        samples_since_last_apply:
+          type: integer
+          description: |
+            Counter incremented on each successful sample append while
+            enabled; resets to 0 after each recompute.
+        samples_until_next_apply:
+          type: [integer, "null"]
+          description: |
+            Convenience: `max(0, hop_size - samples_since_last_apply)`
+            while enabled, or `null` while disabled.
+        applied_count:
+          type: integer
+          description: How many recomputes have fired since the proxy started.
+        last_applied_at_monotonic:
+          type: [number, "null"]
+          description: time.monotonic() of the most recent recompute, or null.
+        last_recommendation:
+          oneOf:
+            - { $ref: '#/components/schemas/HyperparameterStore' }
+            - { type: "null" }
+          description: |
+            Last recommendation produced by the auto-tuner. Carries
+            both pooled `defaults` and any `per_target` overrides
+            that crossed the per-target sample threshold during the
+            most recent window.
+        enabled_at_monotonic:
+          type: [number, "null"]
+          description: time.monotonic() when the tuner was last enabled.
+        current_policy:
+          type: string
+          description: |
+            Current routing policy. Auto-tune only mutates anything when
+            this is `gorgo`; under other policies recomputes are skipped
+            and the per-window counter pins at `hop_size`.
+        current_hyperparameters:
+          $ref: '#/components/schemas/HyperparameterStore'
 
     TuneSample:
       type: object
@@ -696,7 +885,7 @@ components:
 
     SamplesState:
       type: object
-      required: [buffered_samples, max_buffer_size, total_samples_appended]
+      required: [buffered_samples, max_buffer_size, total_samples_appended, auto_tune]
       properties:
         buffered_samples: { type: integer }
         max_buffer_size: { type: integer }
@@ -705,15 +894,9 @@ components:
           description: |
             Monotonically increasing across the proxy lifetime. Unlike
             `buffered_samples`, this does not saturate at `max_buffer_size`,
-            so it can be diffed across `/tune` calls to determine new arrivals.
-        samples_since_last_tune: { type: integer }
-        last_tune_at_monotonic:
-          type: [number, "null"]
-          description: time.monotonic() of the last successful /tune call, or null.
-        last_recommendation:
-          oneOf:
-            - { $ref: '#/components/schemas/Hyperparameters' }
-            - { type: "null" }
+            so it can be diffed across snapshots to count new arrivals.
+        auto_tune:
+          $ref: '#/components/schemas/AutoTuneStatus'
         recent:
           type: array
           description: Last 50 samples appended (newest at the end).
@@ -721,37 +904,33 @@ components:
 
     TuneResponse:
       type: object
-      required: [skipped]
+      required: [auto_tune]
       description: |
-        Discriminated by `skipped`. When `skipped: true` only the no-op
-        fields are populated; when `skipped: false` the full
-        recommendation + stats block is included.
+        Returned from `POST /tune` after the live config is updated.
+        Always carries the post-update `auto_tune` snapshot;
+        additionally, when the sample buffer is non-empty, includes a
+        `preview` of what the next recompute would produce against the
+        current trailing window.
       properties:
-        skipped: { type: boolean }
-        reason:
-          type: string
-          description: "Present when `skipped: true`."
-        recommendation:
-          $ref: '#/components/schemas/Hyperparameters'
-        applied:
-          type: boolean
-          description: True iff the recommendation was merged into proxy state.
-        current_hyperparameters:
-          $ref: '#/components/schemas/Hyperparameters'
-        hyperparameters:
-          $ref: '#/components/schemas/Hyperparameters'
-        window_size_requested: { type: integer }
-        window_size_used: { type: integer }
-        buffered_samples: { type: integer }
-        samples_since_last_tune: { type: integer }
-        stats:
-          type: object
-          properties:
-            prefill_rate_seconds_per_token: { $ref: '#/components/schemas/StatsBlock' }
-            decode_rate_seconds_per_token: { $ref: '#/components/schemas/StatsBlock' }
-            ping_seconds: { $ref: '#/components/schemas/StatsBlock' }
-            prefill_ols_fit: { $ref: '#/components/schemas/OLSFit' }
-            decode_ols_fit: { $ref: '#/components/schemas/OLSFit' }
+        auto_tune:
+          $ref: '#/components/schemas/AutoTuneStatus'
+        preview:
+          oneOf:
+            - { type: "null" }
+            - type: object
+              required: [window_size_used, recommendation, stats]
+              properties:
+                window_size_used: { type: integer }
+                recommendation:
+                  $ref: '#/components/schemas/HyperparameterStore'
+                stats:
+                  type: object
+                  properties:
+                    prefill_rate_seconds_per_token: { $ref: '#/components/schemas/StatsBlock' }
+                    decode_rate_seconds_per_token: { $ref: '#/components/schemas/StatsBlock' }
+                    ping_seconds: { $ref: '#/components/schemas/StatsBlock' }
+                    prefill_ols_fit: { $ref: '#/components/schemas/OLSFit' }
+                    decode_ols_fit: { $ref: '#/components/schemas/OLSFit' }
 
     ChatCompletionsRequest:
       type: object
@@ -822,11 +1001,11 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
 
     HyperparametersUpdated:
-      description: Updated hyperparameter map.
+      description: Post-update view of the hyperparameter store.
       content:
         application/json:
           schema:
             type: object
             required: [hyperparameters]
             properties:
-              hyperparameters: { $ref: '#/components/schemas/Hyperparameters' }
+              hyperparameters: { $ref: '#/components/schemas/HyperparameterStore' }

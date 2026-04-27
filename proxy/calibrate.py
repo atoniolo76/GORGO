@@ -2,7 +2,7 @@
 
 Produces an *initial estimate* for ``t_prefill`` and
 ``queued_tokens_weight`` -- the two knobs in
-``utils/lb_aibrix.py::route_gorgo``::
+``policy/gorgo.py::route_gorgo``::
 
     score(u) = latency(u)
              + t_prefill            * effective_prefill_tokens
@@ -97,7 +97,7 @@ REGION = os.getenv("REGION", "us-east")
 image = (
     modal.Image.debian_slim()
     .pip_install("httpx[http2]", "pyarrow", "datasets>=3.0")
-    .add_local_python_source("app", "proxy", "utils")
+    .add_local_python_source("app", "proxy", "policy", "utils")
 )
 
 

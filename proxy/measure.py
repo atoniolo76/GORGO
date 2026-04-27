@@ -315,13 +315,19 @@ async def measure_chat_completion(
 
 
 def recommend_hyperparameters(samples: list[dict]) -> dict:
-    """Median-of-rates recommendation for the GORGO scoring weights.
+    """Median-of-rates recommendation for the GORGO scoring weights,
+    pooled across whatever replicas produced ``samples``.
 
     Both ``t_prefill`` and ``queued_tokens_weight`` have units of
     seconds-per-token in the scoring function, so we report the median
     per-sample rate (robust to outliers) for each. ``t_prefill`` is the
     median prefill rate; ``queued_tokens_weight`` is the median decode
     rate, since queued / used tokens drain at the decode rate.
+
+    Pooled output is the right answer for *defaults* (offline
+    calibrate, fleet-wide tuning) and for replicas the auto-tuner has
+    not yet observed. For per-replica recommendations off live
+    traffic, see :func:`recommend_hyperparameters_per_target`.
     """
     if not samples:
         return {"t_prefill": 0.0, "queued_tokens_weight": 0.0}
@@ -331,6 +337,47 @@ def recommend_hyperparameters(samples: list[dict]) -> dict:
         "t_prefill": prefill_sorted[len(prefill_sorted) // 2],
         "queued_tokens_weight": decode_sorted[len(decode_sorted) // 2],
     }
+
+
+def recommend_hyperparameters_per_target(
+    samples: list[dict],
+    *,
+    min_samples_per_target: int = 5,
+) -> dict:
+    """Bucket ``samples`` by ``target`` and produce per-replica
+    GORGO recommendations alongside a pooled ``defaults`` fallback.
+
+    Returns the structured shape consumed by
+    :mod:`policy.gorgo`'s hyperparameter store::
+
+        {
+            "defaults":   {"t_prefill": ..., "queued_tokens_weight": ...},
+            "per_target": {<url>: {"t_prefill": ..., "queued_tokens_weight": ...}, ...}
+        }
+
+    Targets with fewer than ``min_samples_per_target`` observations
+    in the window are skipped (the per-target median over <5 samples
+    is too noisy to be useful) -- those replicas keep falling back
+    to ``defaults`` until enough live signal accumulates. Targets
+    with no ``target`` field (e.g. legacy samples) contribute only
+    to ``defaults``.
+    """
+    defaults = recommend_hyperparameters(samples)
+
+    by_target: dict[str, list[dict]] = {}
+    for s in samples:
+        url = s.get("target")
+        if not isinstance(url, str) or not url:
+            continue
+        by_target.setdefault(url, []).append(s)
+
+    per_target: dict[str, dict[str, float]] = {}
+    for url, group in by_target.items():
+        if len(group) < min_samples_per_target:
+            continue
+        per_target[url] = recommend_hyperparameters(group)
+
+    return {"defaults": defaults, "per_target": per_target}
 
 
 def summarize_samples(samples: list[dict]) -> dict:

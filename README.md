@@ -39,6 +39,8 @@ modal run proxy/workload.py --proxy-url https://... \
 - *proxy*: Request handling, workload streaming, and parameter tuning code that all runs on CPU instances in the same region.
 - *engine*: LLM inference engine backend. Currently sglang is supported with deepgemm kernels (cached) and volume weight loading.
 - *data_processing*: Scripts for reading from HF/local volumes and saving data + statistics + serialized radix trees to volumes.
+- *policy*: Various load-balancing policies constructed from both Arcadia Research's GORGO paper and vLLM's AI-Brix model gateway.
+- *utils*: Helpful util classes including RadixTrie, which is used for storing KV-cache state across sglang servers in the proxy.
 
 ## Tuning Parameters
 

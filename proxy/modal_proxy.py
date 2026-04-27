@@ -13,15 +13,24 @@ from proxy.measure import (
     NS_PER_S,
     consume_sse_stream,
     recommend_hyperparameters,
+    recommend_hyperparameters_per_target,
     summarize_samples,
 )
-from utils.lb_aibrix import (
+from policy import (
     POLICY_REGISTRY,
     ROUTING_POLICIES,
     PolicyDef,
     ReplicaSnapshot,
     RouteContext,
     normalize_policy,
+)
+from policy.gorgo import (
+    ALLOWED_HYPERPARAM_KEYS,
+    DEFAULT_GORGO_HYPERPARAMETERS,
+    make_default_store,
+    merge_update,
+    prune_per_target,
+    validate_update,
 )
 from utils.radix_trie import RadixTrie
 
@@ -30,21 +39,26 @@ from utils.radix_trie import RadixTrie
 REGION = os.getenv("REGION", "us-east")
 
 DEFAULT_POLICY = "random"
-DEFAULT_GORGO_HYPERPARAMETERS = {"t_prefill": 1.0, "queued_tokens_weight": 1.0}
-ALLOWED_HYPERPARAM_KEYS = set(DEFAULT_GORGO_HYPERPARAMETERS)
 METRICS_REFRESH_INTERVAL_SECONDS = 1.0
 METRICS_FETCH_TIMEOUT_SECONDS = 2.0
 # SGLang may wait until idle; allow a generous read window for POST /flush_cache.
 FLUSH_UPSTREAM_TIMEOUT_SECONDS = 120.0
 
 # On-the-fly tuning. The proxy keeps a bounded ring buffer of per-request
-# samples (TTFT / total / token counts / per-token rates) so ``POST /tune``
-# can recommend ``gorgo`` hyperparameters from recent live traffic via
+# samples (TTFT / total / token counts / per-token rates); when the
+# auto-tuner is enabled (``POST /tune``) it sliding-window-recomputes
+# ``gorgo`` hyperparameters from this buffer via
 # ``proxy.measure.recommend_hyperparameters`` -- the same primitive
 # ``proxy/calibrate.py`` uses for one-shot calibration.
+#
+# The auto-tuner is a stateful toggle, *not* a one-shot endpoint: once
+# enabled it keeps recomputing every ``hop_size`` new samples until
+# explicitly disabled (``POST /tune {"enabled": false}``). Subsequent
+# POSTs while it's running atomically reconfigure the live tuner.
 MAX_REQUEST_SAMPLES = 1000
 DEFAULT_TUNE_WINDOW_SIZE = 100
-DEFAULT_TUNE_HOP_SIZE = 0  # 0 == no debounce; every call recomputes
+DEFAULT_TUNE_HOP_SIZE = 50  # recompute every N new samples once warm
+DEFAULT_TUNE_APPLY = True  # default to actually mutating hyperparameters
 
 # Headers that are connection-local and must not be forwarded verbatim when
 # we proxy upstream responses back to the client. Re-emitting these would
@@ -160,7 +174,7 @@ def _parse_metrics_text(text: str) -> dict[str, float]:
 @app.function(
     image=modal.Image.debian_slim()
     .pip_install("httpx[http2]", "uvicorn", "tiktoken")
-    .add_local_python_source("app", "proxy", "utils"),
+    .add_local_python_source("app", "proxy", "policy", "utils"),
     region=REGION,
     timeout=(24 * 60 * 60),
 )
@@ -184,18 +198,38 @@ def proxy():
     # the right event loop; closed in lifespan.shutdown.
     state: dict = {
         "policy": DEFAULT_POLICY,
-        "hyperparameters": dict(DEFAULT_GORGO_HYPERPARAMETERS),
+        # Structured GORGO hyperparameter store (see policy/gorgo.py).
+        # ``defaults`` applies to every replica; ``per_target`` keys
+        # specific replicas to override individual scalars. The auto-
+        # tuner writes per-target overrides automatically once enough
+        # live samples accumulate per replica; offline tools (calibrate,
+        # tuning.py) typically write only ``defaults``.
+        "hyperparameters": make_default_store(),
         "upstream_client": None,
         "metrics_task": None,
-        # Monotonically-incrementing sample counters used by /tune to
-        # implement hop-size debouncing without depending on deque length
-        # (which saturates at ``maxlen``).
+        # Total samples appended over the proxy lifetime. Doesn't
+        # saturate at ``MAX_REQUEST_SAMPLES`` (unlike ``len(samples)``)
+        # so it can be diffed across snapshots to count arrivals.
         "total_samples_appended": 0,
-        "last_tune_appended": 0,
-        # Last successful /tune result -- handy for /samples to surface
-        # what the most recent recommendation looked like.
-        "last_tune_at_monotonic": None,
-        "last_recommendation": None,
+        # Live auto-tuner config. Reconfigured atomically by ``POST
+        # /tune``; consumed by ``_record_request_sample`` after every
+        # successful sample append. ``enabled=False`` means the
+        # background recompute is dormant and the rest of the dict is
+        # frozen at its last value.
+        "auto_tune": {
+            "enabled": False,
+            "window_size": DEFAULT_TUNE_WINDOW_SIZE,
+            "hop_size": DEFAULT_TUNE_HOP_SIZE,
+            "apply": DEFAULT_TUNE_APPLY,
+            # Counter zeroed on enable / on apply, incremented per
+            # sample. Triggers a recompute when it crosses ``hop_size``.
+            "samples_since_last_apply": 0,
+            # Diagnostics surfaced by GET /tune.
+            "applied_count": 0,
+            "last_applied_at_monotonic": None,
+            "last_recommendation": None,
+            "enabled_at_monotonic": None,
+        },
     }
     endpoints_queued_tokens: dict[str, int] = {url: 0 for url in replica_urls}
 
@@ -355,7 +389,7 @@ def proxy():
     # ---------- Routing ----------
 
     def _select_endpoint(token_ids: list[int]) -> str:
-        """Pick an upstream URL using the policy registry in ``utils.lb_aibrix``.
+        """Pick an upstream URL using the policy registry in :mod:`policy`.
 
         For policies that don't need ``/metrics`` data (random, pd*,
         simple-session-affinity) we skip the snapshot entirely so the proxy
@@ -401,19 +435,28 @@ def proxy():
 
     # ---------- JSON route handlers ----------
     #
-    # Each handler returns ``(status, payload)``; the dispatcher reads the
-    # body, calls the handler, and serializes the response. Body parsing
-    # / 400-on-invalid-json is handled by ``_dispatch_json`` so individual
-    # handlers can focus on validation and side effects.
+    # Each handler returns ``(status, payload)``; the dispatcher reads
+    # the body, calls the handler, and serializes the response. Body
+    # parsing / 400-on-invalid-json is handled by ``_dispatch_json`` so
+    # individual handlers can focus on validation and side effects.
+    #
+    # All handlers are nested closures because they read / mutate state
+    # captured in this ``proxy()`` invocation -- ``replicas``,
+    # ``live_metrics``, ``samples``, ``radix_trie``,
+    # ``endpoints_queued_tokens``, ``state``. Lifting them to module
+    # scope would require threading a ``ProxyContext`` through every
+    # call. The naming convention matches the other request-shaped
+    # closures already living here (``_handle_chat_completions``,
+    # ``_handle_lifespan``).
 
-    async def h_get_policy(_data) -> tuple[int, dict]:
+    async def _handle_get_policy(_data) -> tuple[int, dict]:
         return 200, {
             "policy": state["policy"],
             "supported": sorted(ROUTING_POLICIES),
             "hyperparameters": state["hyperparameters"],
         }
 
-    async def h_post_policy(data) -> tuple[int, dict]:
+    async def _handle_post_policy(data) -> tuple[int, dict]:
         raw = (data or {}).get("policy") or (data or {}).get("name")
         if not isinstance(raw, str):
             return 400, {"error": "body must include string policy or name"}
@@ -427,10 +470,10 @@ def proxy():
         print(f"[proxy] routing policy set to {name!r}")
         return 200, {"policy": state["policy"], "hyperparameters": state["hyperparameters"]}
 
-    async def h_get_replicas(_data) -> tuple[int, dict]:
+    async def _handle_get_replicas(_data) -> tuple[int, dict]:
         return 200, {"replicas": list(replica_urls), "count": len(replica_urls)}
 
-    async def h_post_replicas(data) -> tuple[int, dict]:
+    async def _handle_post_replicas(data) -> tuple[int, dict]:
         if isinstance(data, list):
             raw = data
         elif isinstance(data, dict):
@@ -479,6 +522,12 @@ def proxy():
             endpoints_queued_tokens.pop(u, None)
             live_metrics.pop(u, None)
             metrics_meta["last_refresh_errors"].pop(u, None)
+        # Drop any per-target hyperparameter overrides that targeted
+        # a now-removed replica. Stale overrides are harmless for
+        # routing (effective_hyperparameters won't look them up) but
+        # they'd accumulate over a long-running proxy and confuse
+        # ``GET /hyperparameters`` consumers.
+        prune_per_target(state["hyperparameters"], set(replica_urls))
 
         print(
             f"[proxy] replicas updated: +{len(added)} -{len(removed)} (total={len(replica_urls)})"
@@ -490,7 +539,7 @@ def proxy():
             "removed": removed,
         }
 
-    async def h_get_trie(_data) -> tuple[int, dict]:
+    async def _handle_get_trie(_data) -> tuple[int, dict]:
         # Summary stats only -- the full trie is too large to serialize on
         # every request. ``coverage`` counts how many nodes are tagged with
         # each replica URL: a useful sanity check that routing is producing
@@ -514,7 +563,7 @@ def proxy():
             "replica_coverage": coverage,
         }
 
-    async def h_get_replica_metrics(_data) -> tuple[int, dict]:
+    async def _handle_get_replica_metrics(_data) -> tuple[int, dict]:
         now = time.monotonic()
         last = metrics_meta["last_refresh_monotonic"]
         return 200, {
@@ -535,52 +584,59 @@ def proxy():
             "endpoints_queued_tokens": endpoints_queued_tokens,
         }
 
-    async def h_get_hyperparameters(_data) -> tuple[int, dict]:
+    async def _handle_get_hyperparameters(_data) -> tuple[int, dict]:
         return 200, {
             "hyperparameters": state["hyperparameters"],
             "allowed_keys": sorted(ALLOWED_HYPERPARAM_KEYS),
-            "defaults": DEFAULT_GORGO_HYPERPARAMETERS,
+            "defaults": dict(DEFAULT_GORGO_HYPERPARAMETERS),
         }
 
-    async def h_write_hyperparameters(data, *, replace: bool) -> tuple[int, dict]:
-        """POST/PATCH merge updates into current state; PUT replaces by
-        re-merging on top of defaults. Both validate keys and coerce to
-        float."""
-        if not isinstance(data, dict):
-            return 400, {"error": "body must be a JSON object of hyperparameters"}
-        unknown = sorted(k for k in data if k not in ALLOWED_HYPERPARAM_KEYS)
-        if unknown:
+    async def _handle_write_hyperparameters(data, *, replace: bool) -> tuple[int, dict]:
+        """Validate + apply a hyperparameter update against the
+        structured store (see :mod:`policy.gorgo`).
+
+        Two body shapes are accepted, both validated by
+        ``policy.gorgo.validate_update``:
+
+        * **Flat** -- ``{"t_prefill": X, "queued_tokens_weight": Y}``
+          updates ``defaults`` only (backward-compat: this is what
+          ``proxy/tuning.py`` and ``proxy/calibrate.py`` POST).
+        * **Structured** -- ``{"defaults": {...}, "per_target": {url:
+          {...}}}`` lets callers write per-replica overrides.
+
+        ``replace=True`` (PUT) resets the store to factory defaults
+        before applying the update; ``replace=False`` (POST/PATCH)
+        layers the update on top of the existing store.
+        """
+        update, err = validate_update(data, known_targets=set(replica_urls))
+        if err is not None:
             return 400, {
-                "error": f"unknown hyperparameter(s): {unknown}",
+                "error": err,
                 "allowed_keys": sorted(ALLOWED_HYPERPARAM_KEYS),
             }
-        try:
-            updates = {k: float(v) for k, v in data.items()}
-        except (TypeError, ValueError):
-            return 400, {"error": "hyperparameter values must be numeric"}
-        if replace:
-            merged = dict(DEFAULT_GORGO_HYPERPARAMETERS)
-            merged.update(updates)
-            state["hyperparameters"] = merged
-        else:
-            state["hyperparameters"].update(updates)
+        state["hyperparameters"] = merge_update(
+            state["hyperparameters"], update or {}, replace=replace
+        )
         print(f"[proxy] hyperparameters updated: {state['hyperparameters']}")
         return 200, {"hyperparameters": state["hyperparameters"]}
 
-    async def h_post_hyperparameters(data) -> tuple[int, dict]:
-        return await h_write_hyperparameters(data, replace=False)
+    async def _handle_post_hyperparameters(data) -> tuple[int, dict]:
+        return await _handle_write_hyperparameters(data, replace=False)
 
-    async def h_put_hyperparameters(data) -> tuple[int, dict]:
-        return await h_write_hyperparameters(data, replace=True)
+    async def _handle_put_hyperparameters(data) -> tuple[int, dict]:
+        return await _handle_write_hyperparameters(data, replace=True)
 
-    async def h_post_flush(_data) -> tuple[int, dict]:
+    async def _handle_post_flush(_data) -> tuple[int, dict]:
         radix_trie.clear()
         # Drop tuning samples too: post-flush per-token rates will look
         # different (cold KV cache, fresh queue depths) so mixing them
-        # with pre-flush samples would bias the next /tune call.
+        # with pre-flush samples would bias the next auto-tune
+        # recompute. The auto-tuner config (enabled / window / hop /
+        # apply) is intentionally preserved -- only the buffered
+        # samples + the per-window counter are reset.
         samples.clear()
         state["total_samples_appended"] = 0
-        state["last_tune_appended"] = 0
+        state["auto_tune"]["samples_since_last_apply"] = 0
         client = state["upstream_client"]
         replica_results: dict[str, dict] = {}
         if client is None:
@@ -596,119 +652,155 @@ def proxy():
             replica_results = dict(pairs)
         return 200, {"radix_trie_cleared": True, "replicas": replica_results}
 
-    async def h_get_samples(_data) -> tuple[int, dict]:
+    def _auto_tune_status() -> dict:
+        """Snapshot of the live auto-tuner config + diagnostics.
+        Shared by ``GET /tune``, ``GET /samples``, and the response of
+        every ``POST /tune`` so callers always see what they just
+        configured."""
+        at = state["auto_tune"]
+        return {
+            "enabled": at["enabled"],
+            "window_size": at["window_size"],
+            "hop_size": at["hop_size"],
+            "apply": at["apply"],
+            "buffered_samples": len(samples),
+            "samples_since_last_apply": at["samples_since_last_apply"],
+            "samples_until_next_apply": (
+                max(0, at["hop_size"] - at["samples_since_last_apply"]) if at["enabled"] else None
+            ),
+            "applied_count": at["applied_count"],
+            "last_applied_at_monotonic": at["last_applied_at_monotonic"],
+            "last_recommendation": at["last_recommendation"],
+            "enabled_at_monotonic": at["enabled_at_monotonic"],
+            "current_policy": state["policy"],
+            "current_hyperparameters": state["hyperparameters"],
+        }
+
+    async def _handle_get_samples(_data) -> tuple[int, dict]:
         """Visibility into the tuning sample buffer. Returns the most
-        recent samples (capped to keep the response small) plus
-        bookkeeping that ``/tune`` uses for hop-size debouncing."""
+        recent samples (capped to keep the response small) plus the
+        live auto-tuner status."""
         recent = list(samples)[-50:]
         return 200, {
             "buffered_samples": len(samples),
             "max_buffer_size": samples.maxlen,
             "total_samples_appended": state["total_samples_appended"],
-            "samples_since_last_tune": (
-                state["total_samples_appended"] - state["last_tune_appended"]
-            ),
-            "last_tune_at_monotonic": state["last_tune_at_monotonic"],
-            "last_recommendation": state["last_recommendation"],
+            "auto_tune": _auto_tune_status(),
             "recent": recent,
         }
 
-    async def h_post_tune(data) -> tuple[int, dict]:
-        """Recompute ``gorgo`` hyperparameters from recent live traffic.
+    async def _handle_get_tune(_data) -> tuple[int, dict]:
+        """Live auto-tuner status (no side effects)."""
+        return 200, {"auto_tune": _auto_tune_status()}
+
+    async def _handle_post_tune(data) -> tuple[int, dict]:
+        """Toggle / reconfigure the on-the-fly auto-tuner.
+
+        The auto-tuner is *stateful*: once enabled it keeps
+        recomputing ``t_prefill`` / ``queued_tokens_weight`` every
+        ``hop_size`` new samples (after the first ``window_size``
+        samples have buffered to fill the window) until disabled.
+        Each ``POST /tune`` atomically merges the body into the live
+        config; only the keys present in the body are touched.
 
         Body (all optional):
-          * ``window_size``: int (default ``DEFAULT_TUNE_WINDOW_SIZE``).
-            Number of most-recent samples to feed the recommender.
-          * ``hop_size``:    int (default ``DEFAULT_TUNE_HOP_SIZE``).
-            Minimum number of new samples since the last successful tune
-            before this call actually recomputes. Acts as a debounce so
-            a hot caller polling /tune doesn't churn hyperparameters on
-            every request. ``0`` disables the debounce.
-          * ``apply``:       bool (default ``True``). When false the
-            response carries the recommendation without mutating
-            ``state["hyperparameters"]`` (dry run).
+          * ``enabled``:     bool. When omitted, defaults to ``True``
+            so a bare ``POST /tune {}`` turns the tuner on with the
+            current config. Pass ``{"enabled": false}`` to disable.
+          * ``window_size``: int. Trailing-sample window fed to
+            ``recommend_hyperparameters``.
+          * ``hop_size``:    int (>0). Recompute every N new samples.
+            A small ``hop_size`` reacts faster to load shifts; a
+            larger one is more stable.
+          * ``apply``:       bool. When ``False`` the recommender
+            still runs (and ``last_recommendation`` is updated) but
+            ``state["hyperparameters"]`` is not mutated -- useful for
+            shadow-mode comparison against the current settings.
 
-        Currently restricted to ``policy == 'gorgo'`` because the recommended
-        scalars (``t_prefill``, ``queued_tokens_weight``) are only consumed
-        by ``route_gorgo``. Other policies will get a 400 with their current
-        policy id so the caller can decide whether to switch first.
+        Enabling requires ``policy == 'gorgo'`` (the only policy that
+        consumes the tuned scalars). Disabling works regardless of
+        policy so a misconfigured tuner can always be turned off.
         """
-        if normalize_policy(state["policy"]) != "gorgo":
-            return 400, {
-                "error": ("on-the-fly tuning is only supported when the active policy is 'gorgo'"),
-                "current_policy": state["policy"],
-            }
-
         if not isinstance(data, dict):
             return 400, {"error": "body must be a JSON object"}
 
-        try:
-            window_size = int(data.get("window_size", DEFAULT_TUNE_WINDOW_SIZE))
-            hop_size = int(data.get("hop_size", DEFAULT_TUNE_HOP_SIZE))
-        except (TypeError, ValueError):
-            return 400, {"error": "window_size and hop_size must be integers"}
-        apply = bool(data.get("apply", True))
+        at = state["auto_tune"]
 
-        if window_size <= 0:
-            return 400, {"error": "window_size must be positive"}
-        if hop_size < 0:
-            return 400, {"error": "hop_size must be >= 0"}
+        # Validate first; only mutate after every requested key passes.
+        # Otherwise a bad ``hop_size`` after a good ``window_size``
+        # would leave the tuner half-configured.
+        new_window = at["window_size"]
+        new_hop = at["hop_size"]
+        new_apply = at["apply"]
 
-        new_samples = state["total_samples_appended"] - state["last_tune_appended"]
-        if hop_size > 0 and new_samples < hop_size:
-            return 200, {
-                "skipped": True,
-                "reason": (
-                    f"only {new_samples} new sample(s) since last tune (hop_size={hop_size})"
-                ),
-                "samples_since_last_tune": new_samples,
-                "buffered_samples": len(samples),
-                "hyperparameters": state["hyperparameters"],
+        if "window_size" in data:
+            try:
+                new_window = int(data["window_size"])
+            except (TypeError, ValueError):
+                return 400, {"error": "window_size must be an integer"}
+            if new_window <= 0:
+                return 400, {"error": "window_size must be positive"}
+        if "hop_size" in data:
+            try:
+                new_hop = int(data["hop_size"])
+            except (TypeError, ValueError):
+                return 400, {"error": "hop_size must be an integer"}
+            if new_hop <= 0:
+                return 400, {"error": "hop_size must be > 0"}
+        if "apply" in data:
+            new_apply = bool(data["apply"])
+
+        # Default to enabling so a bare POST /tune {} turns it on. To
+        # leave the toggle alone (e.g. just adjust window_size while
+        # already running) callers can pass the current value back, but
+        # in practice the explicit-default keeps the common case terse.
+        new_enabled = bool(data.get("enabled", True))
+
+        if new_enabled and normalize_policy(state["policy"]) != "gorgo":
+            return 400, {
+                "error": ("auto-tuning can only be enabled when the active policy is 'gorgo'"),
+                "current_policy": state["policy"],
             }
 
-        if not samples:
-            return 200, {
-                "skipped": True,
-                "reason": "no samples buffered yet -- send some chat completions first",
-                "buffered_samples": 0,
-                "hyperparameters": state["hyperparameters"],
-            }
+        was_enabled = at["enabled"]
+        at["window_size"] = new_window
+        at["hop_size"] = new_hop
+        at["apply"] = new_apply
+        at["enabled"] = new_enabled
 
-        # Sliding window: take the trailing ``window_size`` samples (or
-        # everything we have, if the buffer is shorter than requested).
-        window = list(samples)[-window_size:]
-        recommendation = recommend_hyperparameters(window)
-        summary = summarize_samples(window)
-
-        applied = False
-        if apply:
-            state["hyperparameters"].update(recommendation)
-            applied = True
+        if new_enabled and not was_enabled:
+            # Fresh enable: zero the per-window counter so the first
+            # recompute is measured from this moment, not from stale
+            # samples that landed while the tuner was off.
+            at["samples_since_last_apply"] = 0
+            at["enabled_at_monotonic"] = time.monotonic()
+            print(f"[proxy] auto-tune ENABLED window={new_window} hop={new_hop} apply={new_apply}")
+        elif not new_enabled and was_enabled:
+            print("[proxy] auto-tune DISABLED")
+        elif new_enabled:
+            # Reconfigured while running -- keep the existing counter
+            # so we don't reset the "samples until next apply" clock
+            # on every adjustment.
             print(
-                f"[proxy] /tune applied window={len(window)} -> {recommendation} "
-                f"(samples_since_last={new_samples})"
+                f"[proxy] auto-tune RECONFIGURED window={new_window} "
+                f"hop={new_hop} apply={new_apply}"
             )
 
-        state["last_tune_appended"] = state["total_samples_appended"]
-        state["last_tune_at_monotonic"] = time.monotonic()
-        state["last_recommendation"] = dict(recommendation)
+        # Best-effort summary of the current trailing window if it's
+        # already large enough; gives the caller something useful to
+        # see immediately even before the next recompute fires.
+        preview: dict | None = None
+        if samples:
+            window = list(samples)[-new_window:]
+            preview = {
+                "window_size_used": len(window),
+                "recommendation": recommend_hyperparameters_per_target(window),
+                "stats": summarize_samples(window),
+            }
 
         return 200, {
-            "skipped": False,
-            "recommendation": recommendation,
-            "applied": applied,
-            "current_hyperparameters": state["hyperparameters"],
-            "window_size_requested": window_size,
-            "window_size_used": len(window),
-            "buffered_samples": len(samples),
-            "samples_since_last_tune": new_samples,
-            "stats": {
-                "prefill_rate_seconds_per_token": summary["prefill_rate_seconds_per_token"],
-                "decode_rate_seconds_per_token": summary["decode_rate_seconds_per_token"],
-                "ping_seconds": summary["ping_seconds"],
-                "prefill_ols_fit": summary["prefill_ols_fit"],
-                "decode_ols_fit": summary["decode_ols_fit"],
-            },
+            "auto_tune": _auto_tune_status(),
+            "preview": preview,
         }
 
     # JSON route table. The dispatcher distinguishes 405 (method exists
@@ -716,19 +808,20 @@ def proxy():
     # checks, so adding a new (method, path) entry here is the only edit
     # required to expose a new JSON endpoint.
     json_routes: dict[tuple[str, str], object] = {
-        ("GET", "/policy"): h_get_policy,
-        ("POST", "/policy"): h_post_policy,
-        ("GET", "/replicas"): h_get_replicas,
-        ("POST", "/replicas"): h_post_replicas,
-        ("GET", "/trie"): h_get_trie,
-        ("GET", "/replica_metrics"): h_get_replica_metrics,
-        ("GET", "/hyperparameters"): h_get_hyperparameters,
-        ("POST", "/hyperparameters"): h_post_hyperparameters,
-        ("PATCH", "/hyperparameters"): h_post_hyperparameters,
-        ("PUT", "/hyperparameters"): h_put_hyperparameters,
-        ("POST", "/flush"): h_post_flush,
-        ("GET", "/samples"): h_get_samples,
-        ("POST", "/tune"): h_post_tune,
+        ("GET", "/policy"): _handle_get_policy,
+        ("POST", "/policy"): _handle_post_policy,
+        ("GET", "/replicas"): _handle_get_replicas,
+        ("POST", "/replicas"): _handle_post_replicas,
+        ("GET", "/trie"): _handle_get_trie,
+        ("GET", "/replica_metrics"): _handle_get_replica_metrics,
+        ("GET", "/hyperparameters"): _handle_get_hyperparameters,
+        ("POST", "/hyperparameters"): _handle_post_hyperparameters,
+        ("PATCH", "/hyperparameters"): _handle_post_hyperparameters,
+        ("PUT", "/hyperparameters"): _handle_put_hyperparameters,
+        ("POST", "/flush"): _handle_post_flush,
+        ("GET", "/samples"): _handle_get_samples,
+        ("GET", "/tune"): _handle_get_tune,
+        ("POST", "/tune"): _handle_post_tune,
     }
 
     async def _dispatch_json(method: str, path: str, receive, send) -> bool:
@@ -809,6 +902,56 @@ def proxy():
             }
         )
         state["total_samples_appended"] += 1
+
+        # Auto-tune hook: only fire on the same code path that produced
+        # the sample so the recompute is naturally serialized with
+        # appends (single asyncio thread, no lock needed). The fast path
+        # is a single bool check when the tuner is disabled.
+        at = state["auto_tune"]
+        if not at["enabled"]:
+            return
+        at["samples_since_last_apply"] += 1
+        if at["samples_since_last_apply"] < at["hop_size"]:
+            return
+        if len(samples) < at["window_size"]:
+            # Don't fire until the buffer holds at least one full window;
+            # earlier recomputes would over-weight whichever short prefix
+            # of the run happens to have landed first.
+            return
+        if normalize_policy(state["policy"]) != "gorgo":
+            # Auto-tune only writes ``t_prefill`` / ``queued_tokens_weight``;
+            # under any other policy the writes are inert. Skip the work
+            # and keep the counter pinned so a switch back to gorgo
+            # immediately resumes recomputing on the next sample.
+            at["samples_since_last_apply"] = at["hop_size"]
+            return
+
+        window = list(samples)[-at["window_size"] :]
+        # Per-target recommendation: pooled ``defaults`` for unseen
+        # replicas, plus per-replica overrides for any replica with
+        # at least ``min_samples_per_target`` observations in the
+        # window. Replicas that fall below the threshold simply
+        # inherit ``defaults`` instead of getting a noisy single-
+        # sample median.
+        recommendation = recommend_hyperparameters_per_target(window)
+        if at["apply"]:
+            # Use the same merge primitive as ``POST /hyperparameters``
+            # so layering rules stay identical between manual writes
+            # and auto-tune writes (key-level merge: per-target keys
+            # not in the recommendation are preserved).
+            state["hyperparameters"] = merge_update(
+                state["hyperparameters"], recommendation, replace=False
+            )
+        at["applied_count"] += 1
+        at["last_applied_at_monotonic"] = time.monotonic()
+        at["last_recommendation"] = recommendation
+        at["samples_since_last_apply"] = 0
+        print(
+            f"[proxy] auto-tune #{at['applied_count']} "
+            f"window={len(window)} defaults={recommendation['defaults']} "
+            f"per_target={list(recommendation['per_target'])} "
+            f"(apply={at['apply']})"
+        )
 
     async def _handle_chat_completions(receive, send) -> None:
         try:
