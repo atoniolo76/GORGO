@@ -5,6 +5,15 @@ Decrease TTFT from standard methods for LLM load balanacing (least-load, consist
 
 ## Getting Started
 
+Setup your Python environment:
+```
+uv venv
+source .venv/bin/activate
+uv sync
+```
+
+Note that for the following `run` commands, you can optionally specify a `--env=<your-modal-env>` following the `run` subcommand.
+
 To launch a model replica:
 ```bash
 REGION=us-east GPU_TYPE=H100 MODEL_ORG=Qwen MODEL_NAME=Qwen3.5-35B-A3B-FP8 modal deploy engine/modal_sglang.py
@@ -37,7 +46,7 @@ modal run proxy/workload.py --proxy-url https://... \
 ## Project Structure
 
 - *proxy*: Request handling, workload streaming, and parameter tuning code that all runs on CPU instances in the same region.
-- *engine*: LLM inference engine backend. Currently sglang is supported with deepgemm kernels (cached) and volume weight loading.
+- *engine*: LLM inference engine backend. Currently sglang is supported with DeepGEMM kernels built into the image and volume weight loading.
 - *data_processing*: Scripts for reading from HF/local volumes and saving data + statistics + serialized radix trees to volumes.
 - *policy*: Various load-balancing policies constructed from both Arcadia Research's GORGO paper and vLLM's AI-Brix model gateway.
 - *utils*: Helpful util classes including RadixTrie, which is used for storing KV-cache state across sglang servers in the proxy.

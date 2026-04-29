@@ -11,8 +11,7 @@ engine). Three data sources are supported via the ``--source`` flag:
   WildChat-4.8M, etc.). Reads the first non-empty among the ``conversation``
   / ``messages`` / ``conversations`` columns and assembles an OpenAI-style
   chat body. ``--preset lmsys`` or ``--preset wildchat`` fills in default
-  disk paths under the ``GORGO-lmsys-chat-1m`` (``/lmsys``) and
-  ``GORGO-hf-datasets`` (``/datasets``) volumes; ``--data-path`` overrides.
+  disk paths under the mounted dataset volumes; ``--data-path`` overrides.
   HF rows have no native timestamp, so ``--start-time`` / ``--end-time`` are
   ignored for this source.
 
@@ -92,7 +91,7 @@ SUPPORTED_SOURCES = (SOURCE_GLM5, SOURCE_HF)
 # by ``data_processing/build_hf_prefix_trie.py``.
 GLM5_DEFAULT_PATH = "/data"
 HF_PRESETS = {
-    "lmsys": "/lmsys/lmsys-chat-1m",
+    "lmsys": "/datasets/datasets/lmsys__lmsys-chat-1m",
     "wildchat": "/datasets/datasets/allenai__WildChat-4.8M",
 }
 

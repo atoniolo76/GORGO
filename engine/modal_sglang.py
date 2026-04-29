@@ -50,10 +50,6 @@ MODEL_PATH = f"{HF_CACHE_PATH}/{FULL_MODEL_NAME}"
 MIN_CONTAINERS = os.getenv("MIN_CONTAINERS", 0)
 SCALEDOWN_WINDOW_SECONDS = int(os.getenv("SCALEDOWN_WINDOW_SECONDS", 15 * 60))
 WAIT_READY_TIMEOUT = os.getenv("WAIT_READY_TIMEOUT", 1200)
-DG_CACHE_VOL = modal.Volume.from_name(
-    "deepgemm-cache", create_if_missing=True, environment_name=ENVIRONMENT_NAME
-)
-DG_CACHE_PATH = "/root/.cache/deepgemm"
 
 sglang_image = sglang_image.env(
     {
@@ -64,7 +60,10 @@ sglang_image = sglang_image.env(
 )
 sglang_image = sglang_image.run_commands(
     f"python3 -m sglang.compile_deep_gemm --model-path {FULL_MODEL_NAME} --revision {MODEL_REVISION} --tp {N_GPUS}",
-    volumes={DG_CACHE_PATH: DG_CACHE_VOL, HF_CACHE_PATH: HF_CACHE_VOL},
+    # Do not mount the DeepGEMM cache here; compiled kernels should be written
+    # into the image layer. The HF cache remains a volume so model files are not
+    # baked into the image.
+    volumes={HF_CACHE_PATH: HF_CACHE_VOL},
     gpu=GPU,
 )
 
@@ -78,7 +77,7 @@ sglang_image = sglang_image.run_commands(
     scaledown_window=SCALEDOWN_WINDOW_SECONDS,
     volumes={HF_CACHE_PATH: HF_CACHE_VOL},
 )
-def model_endpoint():
+def model_endpoint(registry_key: str = REGION):
     import os
 
     os.environ["SGLANG_JIT_DEEPGEMM_FAST_WARMUP"] = "1"
@@ -113,10 +112,21 @@ def model_endpoint():
         print(f"tunnel.url        = {tunnel.url}")
         print(f"tunnel.tls_socket = {tunnel.tls_socket}")
         process = subprocess.Popen(cmd)
-        wait_ready(process)
-        replicas[REGION] = tunnel.url
-        print(replicas[REGION])
-        process.wait()
+        try:
+            wait_ready(process)
+            replicas[registry_key] = tunnel.url
+            print(replicas[registry_key])
+            process.wait()
+        finally:
+            if replicas.get(registry_key) == tunnel.url:
+                replicas[registry_key] = ""
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
 
 
 def _check_process(process: subprocess.Popen):
@@ -160,4 +170,4 @@ def wait_ready(process: subprocess.Popen, timeout: int = WAIT_READY_TIMEOUT):
 
 
 if __name__ == "__main__":
-    model_endpoint.remote()
+    model_endpoint.remote(REGION)

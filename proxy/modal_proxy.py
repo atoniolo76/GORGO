@@ -39,7 +39,7 @@ from utils.radix_trie import RadixTrie
 REGION = os.getenv("REGION", "us-east")
 
 DEFAULT_POLICY = "random"
-METRICS_REFRESH_INTERVAL_SECONDS = 1.0
+METRICS_REFRESH_INTERVAL_SECONDS = float(os.getenv("METRICS_REFRESH_INTERVAL_SECONDS", 30.0))
 METRICS_FETCH_TIMEOUT_SECONDS = 2.0
 # SGLang may wait until idle; allow a generous read window for POST /flush_cache.
 FLUSH_UPSTREAM_TIMEOUT_SECONDS = 120.0
@@ -184,7 +184,7 @@ def proxy():
     import httpx
     import uvicorn
 
-    replica_urls: list[str] = list(replicas.values())
+    replica_urls: list[str] = []
 
     # Routing state. Kept in a dict so the asgi_app closure can mutate it in
     # place from the /policy handler; uvicorn is single-process / single-loop
@@ -273,6 +273,77 @@ def proxy():
         "last_refresh_errors": {},  # url -> str
     }
 
+    def _registry_from_items(items) -> dict[str, str]:
+        registry: dict[str, str] = {}
+        for key, value in items:
+            if not isinstance(key, str):
+                key = str(key)
+            registry[key] = value if isinstance(value, str) else ""
+        return registry
+
+    def _active_urls_from_registry(registry: dict[str, str]) -> list[str]:
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for url in registry.values():
+            url = url.strip().rstrip("/")
+            if not url or not (url.startswith("http://") or url.startswith("https://")):
+                continue
+            if url in seen:
+                continue
+            seen.add(url)
+            normalized.append(url)
+        return normalized
+
+    def _replace_replica_urls(normalized: list[str], *, source: str) -> tuple[list[str], list[str]]:
+        old = set(replica_urls)
+        new = set(normalized)
+        added = sorted(new - old)
+        removed = sorted(old - new)
+        if not added and not removed and list(replica_urls) == normalized:
+            return added, removed
+
+        replica_urls.clear()
+        replica_urls.extend(normalized)
+        for url in added:
+            endpoints_queued_tokens[url] = 0
+        for url in removed:
+            endpoints_queued_tokens.pop(url, None)
+            live_metrics.pop(url, None)
+            metrics_meta["last_refresh_errors"].pop(url, None)
+        prune_per_target(state["hyperparameters"], set(replica_urls))
+        print(
+            f"[proxy] replicas synced from {source}: "
+            f"+{len(added)} -{len(removed)} (total={len(replica_urls)})"
+        )
+        return added, removed
+
+    def _sync_replicas_from_modal_dict() -> tuple[dict[str, str], list[str], list[str]]:
+        registry = _registry_from_items(replicas.items())
+        added, removed = _replace_replica_urls(
+            _active_urls_from_registry(registry),
+            source="modal dict",
+        )
+        return registry, added, removed
+
+    async def _sync_replicas_from_modal_dict_async() -> tuple[dict[str, str], list[str], list[str]]:
+        items = []
+        async for item in replicas.items.aio():
+            items.append(item)
+        registry = _registry_from_items(items)
+        added, removed = _replace_replica_urls(
+            _active_urls_from_registry(registry),
+            source="modal dict",
+        )
+        return registry, added, removed
+
+    def _sync_replicas_from_manual_urls(normalized: list[str]) -> tuple[list[str], list[str]]:
+        return _replace_replica_urls(
+            normalized,
+            source="/replicas",
+        )
+
+    _sync_replicas_from_modal_dict()
+
     # ---------- ASGI helpers ----------
 
     async def _read_json_body(receive) -> dict | list:
@@ -343,6 +414,7 @@ def proxy():
 
     async def _refresh_all(client: httpx.AsyncClient | None) -> None:
         """One pass: refresh every registered replica in parallel."""
+        await _sync_replicas_from_modal_dict_async()
         if client is None or not replica_urls:
             return
         await asyncio.gather(
@@ -449,12 +521,20 @@ def proxy():
     # closures already living here (``_handle_chat_completions``,
     # ``_handle_lifespan``).
 
-    async def _handle_get_policy(_data) -> tuple[int, dict]:
-        return 200, {
-            "policy": state["policy"],
-            "supported": sorted(ROUTING_POLICIES),
-            "hyperparameters": state["hyperparameters"],
+    def _policy_payload(*, include_supported: bool) -> dict:
+        policy = state["policy"]
+        uses_hyperparameters = normalize_policy(policy) == "gorgo"
+        payload = {
+            "policy": policy,
+            "uses_hyperparameters": uses_hyperparameters,
+            "hyperparameters": state["hyperparameters"] if uses_hyperparameters else None,
         }
+        if include_supported:
+            payload["supported"] = sorted(ROUTING_POLICIES)
+        return payload
+
+    async def _handle_get_policy(_data) -> tuple[int, dict]:
+        return 200, _policy_payload(include_supported=True)
 
     async def _handle_post_policy(data) -> tuple[int, dict]:
         raw = (data or {}).get("policy") or (data or {}).get("name")
@@ -468,10 +548,15 @@ def proxy():
             }
         state["policy"] = name
         print(f"[proxy] routing policy set to {name!r}")
-        return 200, {"policy": state["policy"], "hyperparameters": state["hyperparameters"]}
+        return 200, _policy_payload(include_supported=False)
 
     async def _handle_get_replicas(_data) -> tuple[int, dict]:
-        return 200, {"replicas": list(replica_urls), "count": len(replica_urls)}
+        registry, _, _ = await _sync_replicas_from_modal_dict_async()
+        return 200, {
+            "replicas": list(replica_urls),
+            "count": len(replica_urls),
+            "registry": registry,
+        }
 
     async def _handle_post_replicas(data) -> tuple[int, dict]:
         if isinstance(data, list):
@@ -507,27 +592,10 @@ def proxy():
                 "invalid": invalid,
             }
 
-        old = set(replica_urls)
-        new = set(normalized)
-        added = sorted(new - old)
-        removed = sorted(old - new)
-
-        # Mutate the same list/dict objects so the background refresh
-        # loop and _select_endpoint closure see the update.
-        replica_urls.clear()
-        replica_urls.extend(normalized)
-        for u in added:
-            endpoints_queued_tokens[u] = 0
-        for u in removed:
-            endpoints_queued_tokens.pop(u, None)
-            live_metrics.pop(u, None)
-            metrics_meta["last_refresh_errors"].pop(u, None)
-        # Drop any per-target hyperparameter overrides that targeted
-        # a now-removed replica. Stale overrides are harmless for
-        # routing (effective_hyperparameters won't look them up) but
-        # they'd accumulate over a long-running proxy and confuse
-        # ``GET /hyperparameters`` consumers.
-        prune_per_target(state["hyperparameters"], set(replica_urls))
+        await replicas.clear.aio()
+        for idx, url in enumerate(normalized):
+            await replicas.put.aio(f"manual-{idx}", url)
+        added, removed = _sync_replicas_from_manual_urls(normalized)
 
         print(
             f"[proxy] replicas updated: +{len(added)} -{len(removed)} (total={len(replica_urls)})"
@@ -535,6 +603,7 @@ def proxy():
         return 200, {
             "replicas": list(replica_urls),
             "count": len(replica_urls),
+            "registry": {f"manual-{idx}": url for idx, url in enumerate(normalized)},
             "added": added,
             "removed": removed,
         }
@@ -997,6 +1066,12 @@ def proxy():
         # the encoder. ``accept-encoding: identity`` tells the upstream
         # not to compress so we don't have to juggle ``content-encoding``
         # on the way out to the client.
+        if data.get("stream") is True:
+            stream_options = data.get("stream_options")
+            if not isinstance(stream_options, dict):
+                stream_options = {}
+                data["stream_options"] = stream_options
+            stream_options.setdefault("include_usage", True)
         upstream_body = json.dumps(data).encode()
         upstream_headers = {
             "accept-encoding": "identity",

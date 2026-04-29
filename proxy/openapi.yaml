@@ -66,7 +66,7 @@ paths:
                 value: { policy: least-request }
       responses:
         '200':
-          description: Policy updated. Returns the new policy and the current hyperparameters.
+          description: Policy updated. Returns the new policy and whether it consumes GORGO hyperparameters.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PolicyUpdateResponse' }
@@ -502,22 +502,36 @@ components:
 
     PolicyState:
       type: object
-      required: [policy, supported, hyperparameters]
+      required: [policy, supported, uses_hyperparameters, hyperparameters]
       properties:
         policy: { $ref: '#/components/schemas/Policy' }
         supported:
           type: array
           description: Sorted list of all policy ids accepted by this proxy.
           items: { $ref: '#/components/schemas/Policy' }
-        hyperparameters: { $ref: '#/components/schemas/HyperparameterStore' }
+        uses_hyperparameters:
+          type: boolean
+          description: True only for policies that consume the GORGO hyperparameter store.
+        hyperparameters:
+          oneOf:
+            - $ref: '#/components/schemas/HyperparameterStore'
+            - type: 'null'
+          description: Current GORGO hyperparameters when the active policy uses them; otherwise null.
 
     PolicyUpdateResponse:
       type: object
-      required: [policy, hyperparameters]
+      required: [policy, uses_hyperparameters, hyperparameters]
       description: Response body from `POST /policy`. Does not include `supported`.
       properties:
         policy: { $ref: '#/components/schemas/Policy' }
-        hyperparameters: { $ref: '#/components/schemas/HyperparameterStore' }
+        uses_hyperparameters:
+          type: boolean
+          description: True only for policies that consume the GORGO hyperparameter store.
+        hyperparameters:
+          oneOf:
+            - $ref: '#/components/schemas/HyperparameterStore'
+            - type: 'null'
+          description: Current GORGO hyperparameters when the active policy uses them; otherwise null.
 
     Hyperparameters:
       type: object
@@ -606,12 +620,17 @@ components:
 
     ReplicasList:
       type: object
-      required: [replicas, count]
+      required: [replicas, count, registry]
       properties:
         replicas:
           type: array
           items: { $ref: '#/components/schemas/ReplicaUrl' }
         count: { type: integer, minimum: 0 }
+        registry:
+          type: object
+          description: Raw Modal Dict key/value view. Empty values are inactive and excluded from `replicas`.
+          additionalProperties:
+            type: string
 
     ReplicasRequestArray:
       type: array
