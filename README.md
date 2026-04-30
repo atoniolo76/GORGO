@@ -55,12 +55,12 @@ modal run proxy/workload.py --proxy-url https://... \
 
 The tuning script will present a TUI allowing you to adjust default parameters before running workload steps.
 ```bash
-modal run proxy/tuning.py::tune_interactive --proxy-url https://your-proxy.modal.run
+modal run -q proxy/tuning.py::tune_interactive --proxy-url https://your-proxy.modal.run
 ```
 
 Alternatively, you can specify the specific parameters/settings via CLI args:
 ```bash
-modal run proxy/tuning.py --proxy-url https://your-proxy.modal.run \
+modal run proxy/tuning.py::tune_cli --proxy-url https://your-proxy.modal.run \
   --start-time 2026-04-01T12:00:00 \
   --num-requests 200 \
   --concurrency 32 \

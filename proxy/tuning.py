@@ -39,7 +39,7 @@ Algorithms (selected via ``--algorithm``):
 
 Usage (flag-driven CLI)::
 
-    modal run proxy/tuning.py --proxy-url https://... \\
+    modal run proxy/tuning.py::tune_cli --proxy-url https://... \\
         --start-time 2026-04-01T12:00:00 \\
         --num-requests 200 \\
         --concurrency 32 \\
@@ -421,6 +421,7 @@ def tune(
     model: str | None = DEFAULT_MODEL,
     stream: bool | None = None,
     max_tokens: int | None = None,
+    max_input_tokens: int | None = None,
     metric: str = "output_throughput",
     algorithm: str = "hill-climb",
     max_steps: int = 16,
@@ -441,9 +442,14 @@ def tune(
     Args:
         proxy_url: Base URL of the proxy (the ``modal.forward`` tunnel).
         start_time/end_time/offset/num_requests/concurrency/model/
-        stream/max_tokens: Forwarded verbatim to ``replay``. Pick a
-            short slice (e.g. ``--num-requests 200``) so each tuning
-            trial completes quickly.
+        stream/max_tokens/max_input_tokens: Forwarded verbatim to
+            ``replay``. Pick a short slice (e.g. ``--num-requests
+            200``) so each tuning trial completes quickly. See
+            ``proxy/workload.py``::``replay`` for ``max_input_tokens``
+            semantics (``None``/``0`` auto-detects from
+            ``/get_server_info``); leaving it at the default is
+            recommended so trials don't burn budget on context-overflow
+            failures.
         metric: Key into :data:`SCORE_FUNCTIONS`; the metric to maximize.
         algorithm: ``"hill-climb"`` (coordinate hill-climb with
             shrinking step; deterministic) or ``"gaussian-es"`` ((1+1)-ES
@@ -500,6 +506,7 @@ def tune(
         model=model,
         stream=stream,
         max_tokens=max_tokens,
+        max_input_tokens=max_input_tokens,
         save_per_request=False,
     )
 
@@ -703,7 +710,7 @@ def _build_summary(
 
 
 def _parse_stream_flag(stream: str) -> bool | None:
-    """Stream sentinel parser shared by ``main`` and ``tune_interactive``.
+    """Stream sentinel parser shared by ``tune_cli`` and ``tune_interactive``.
     Empty string -> ``None`` (use replay default); ``true/false/1/0/...``
     coerce as expected. Anything else is rejected before any traffic."""
     s = stream.strip().lower()
@@ -727,6 +734,7 @@ def _dispatch_tune(
     model: str,
     stream: str,
     max_tokens: int,
+    max_input_tokens: int,
     metric: str,
     algorithm: str,
     max_steps: int,
@@ -747,6 +755,7 @@ def _dispatch_tune(
 
         empty string for start_time/end_time/model/stream/output_dir
         0 for num_requests/max_tokens
+        0 for max_input_tokens (auto-detect); negative disables filter
         seed=-1 -> nondeterministic (only consulted by gaussian-es)
     """
     return tune.remote(
@@ -759,6 +768,7 @@ def _dispatch_tune(
         model=model or None,
         stream=_parse_stream_flag(stream),
         max_tokens=max_tokens or None,
+        max_input_tokens=max_input_tokens,
         metric=metric,
         algorithm=algorithm,
         max_steps=max_steps,
@@ -789,13 +799,13 @@ _TUNE_TUI_SPEC: list[tuple[str, list[dict]]] = [
                 "name": "start_time",
                 "kind": "str",
                 "default": "",
-                "help": "ISO-8601 start of replay window; empty = use first row",
+                "help": "YYYY-MM-DD start of replay window; empty = use first row",
             },
             {
                 "name": "end_time",
                 "kind": "str",
                 "default": "",
-                "help": "ISO-8601 end of replay window; empty = unbounded",
+                "help": "YYYY-MM-DD end of replay window; empty = unbounded",
             },
             {
                 "name": "offset",
@@ -832,6 +842,12 @@ _TUNE_TUI_SPEC: list[tuple[str, list[dict]]] = [
                 "kind": "int",
                 "default": 0,
                 "help": "0 = use replay default",
+            },
+            {
+                "name": "max_input_tokens",
+                "kind": "int",
+                "default": 0,
+                "help": "Per-request input cap; 0=auto from /get_server_info, <0=disable, >0=use",
             },
         ],
     ),
@@ -1053,6 +1069,7 @@ def _run_tui(initial_proxy_url: str = "") -> dict:
         table.add_column("value", style="white")
         for k, v in chosen.items():
             table.add_row(k, repr(v))
+        console.print()
         console.print(table)
         if not Confirm.ask("Launch this run?", default=True):
             console.print("[yellow]aborted[/]")
@@ -1089,7 +1106,7 @@ def _run_tui(initial_proxy_url: str = "") -> dict:
 
 
 @app.local_entrypoint()
-def main(
+def tune_cli(
     proxy_url: str,
     start_time: str = "",
     end_time: str = "",
@@ -1099,6 +1116,7 @@ def main(
     model: str = DEFAULT_MODEL,
     stream: str = "",
     max_tokens: int = 0,
+    max_input_tokens: int = 0,
     metric: str = "output_throughput",
     algorithm: str = "hill-climb",
     max_steps: int = 16,
@@ -1128,6 +1146,7 @@ def main(
         model=model,
         stream=stream,
         max_tokens=max_tokens,
+        max_input_tokens=max_input_tokens,
         metric=metric,
         algorithm=algorithm,
         max_steps=max_steps,
@@ -1145,6 +1164,23 @@ def main(
     )
 
 
+def _suppress_modal_status_spinner() -> None:
+    """Stop the ``modal run`` "Running app..." live spinner so it doesn't
+    repaint over our Rich prompts. Touches private Modal internals
+    (``modal._output.manager``); wrapped in try/except so a Modal SDK
+    refactor degrades to "user sees a spinner, runs with -q" instead of
+    crashing the TUI."""
+    try:
+        from modal._output.manager import OutputManager
+
+        mgr = OutputManager.get()
+        stop = getattr(mgr, "stop_status_spinner", None)
+        if callable(stop):
+            stop()
+    except Exception:
+        pass
+
+
 @app.local_entrypoint()
 def tune_interactive(proxy_url: str = ""):
     """Interactive TUI walking through every tuning knob.
@@ -1156,6 +1192,11 @@ def tune_interactive(proxy_url: str = ""):
     available, falls back to a stdlib-only flow otherwise. After
     showing the full configuration the user confirms before any
     traffic is sent; range bounds are validated client-side so an
-    invalid pair is rejected without paying for a remote launch."""
+    invalid pair is rejected without paying for a remote launch.
+
+    Note: ``modal run`` shows a Rich live "Running app..." spinner that
+    repaints over interactive prompts; we stop it explicitly here so the
+    TUI is usable without ``modal run -q``."""
+    _suppress_modal_status_spinner()
     chosen = _run_tui(initial_proxy_url=proxy_url)
     _dispatch_tune(**chosen)

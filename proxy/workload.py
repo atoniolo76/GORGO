@@ -59,6 +59,22 @@ from app import (
 )
 from proxy.measure import consume_sse_stream
 
+
+def _ts() -> str:
+    """Millisecond-precision ISO 8601 UTC timestamp string. Matches the
+    format used by ``proxy/modal_proxy.py``::``_log`` so workload and
+    proxy lines sort/correlate cleanly when interleaved."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _log(message: str) -> None:
+    """Emit a ``[workload]`` log line prefixed with an ISO 8601 UTC
+    timestamp. ``flush=True`` so progress is visible in real time when
+    streamed via ``modal run`` (Modal's stdout otherwise line-buffers
+    inside the container)."""
+    print(f"{_ts()} [workload] {message}", flush=True)
+
+
 # We want to launch the workload client in the same region as the proxy server
 # in order to minimize the variable latency of crossing regions. REGION strings
 # can also contain a zone like 1.
@@ -66,9 +82,16 @@ REGION = os.getenv("REGION", "us-east-1")
 
 image = (
     modal.Image.debian_slim()
-    .pip_install("httpx[http2]", "pyarrow", "datasets>=3.0")
+    .pip_install("httpx[http2]", "pyarrow", "datasets>=3.0", "tiktoken")
     .add_local_python_source("app", "proxy")
 )
+
+# Auto-detected context_length, plus a constant safety margin for chat
+# template tokens / role markers that the gpt-4o tokenizer doesn't see
+# but the model's actual tokenizer does. Empirically ~256 covers
+# ``<|im_start|>role\n`` boundaries on Qwen-style chat templates with
+# room to spare.
+CONTEXT_LENGTH_SAFETY_MARGIN_TOKENS = 256
 
 DEFAULT_MODEL = "Qwen/Qwen3.5-35B-A3B-FP8"
 
@@ -94,6 +117,51 @@ HF_PRESETS = {
     "lmsys": "/datasets/datasets/lmsys__lmsys-chat-1m",
     "wildchat": "/datasets/datasets/allenai__WildChat-4.8M",
 }
+
+
+_TIKTOKEN_ENCODER = None
+
+
+def _get_encoder():
+    """Cached cl100k tiktoken encoder. Module-level cache so the encoder
+    isn't reinitialized per row during ``_iter_bodies`` filtering."""
+    global _TIKTOKEN_ENCODER
+    if _TIKTOKEN_ENCODER is None:
+        import tiktoken
+
+        _TIKTOKEN_ENCODER = tiktoken.encoding_for_model("gpt-4o")
+    return _TIKTOKEN_ENCODER
+
+
+def _approx_input_tokens(messages) -> int:
+    """Quick, directional token count for a chat-completions ``messages``
+    payload. Mirrors :func:`proxy.modal_proxy.tokenize_input` so the
+    workload's pre-filter sees the same numbers the proxy uses for
+    routing decisions.
+
+    Tiktoken's BPE diverges from Qwen's vocab (typically within ±20% on
+    English-heavy chat data, more divergent on code / non-English), so
+    callers feeding this into a context-length filter should leave a
+    safety margin -- :data:`CONTEXT_LENGTH_SAFETY_MARGIN_TOKENS` is
+    applied automatically by :func:`_resolve_input_token_cap`."""
+    if not isinstance(messages, list) or not messages:
+        return 0
+    enc = _get_encoder()
+    total = 0
+    for msg in messages:
+        if isinstance(msg, dict):
+            content = msg.get("content")
+            if isinstance(content, str):
+                total += len(enc.encode(content))
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text") or ""
+                        if text:
+                            total += len(enc.encode(text))
+        elif isinstance(msg, str):
+            total += len(enc.encode(msg))
+    return total
 
 
 def _parse_iso(s: str | None) -> datetime | None:
@@ -299,10 +367,7 @@ def _iter_hf_rows(data_path: str) -> RowSource:
             f"available columns: {sorted(columns)}"
         )
 
-    print(
-        f"[workload] hf dataset at {data_path!r}: {len(ds)} rows, using column {msg_col!r}",
-        flush=True,
-    )
+    _log(f"hf dataset at {data_path!r}: {len(ds)} rows, using column {msg_col!r}")
     for row in ds:
         msgs = _hf_normalize_messages(row[msg_col])
         if not msgs:
@@ -339,11 +404,7 @@ def _build_row_source(
         else:
             raise SystemExit("--source hf requires either --preset {lmsys|wildchat} or --data-path")
         if start_dt is not None or end_dt is not None:
-            print(
-                "[workload] note: --start-time / --end-time ignored for --source hf "
-                "(no per-row timestamps)",
-                flush=True,
-            )
+            _log("note: --start-time / --end-time ignored for --source hf (no per-row timestamps)")
         return _iter_hf_rows(path), path
     raise SystemExit(f"unknown --source {source!r}; expected one of {list(SUPPORTED_SOURCES)}")
 
@@ -356,6 +417,8 @@ def _iter_bodies(
     model_override: str | None,
     stream_override: bool | None,
     max_tokens_override: int | None,
+    max_input_tokens: int | None = None,
+    filter_stats: dict | None = None,
 ) -> RowSource:
     """Layer offset / limit / per-request field overrides / stream_options
     injection on top of any :data:`RowSource`.
@@ -363,6 +426,15 @@ def _iter_bodies(
     Splitting source enumeration from this transformer step lets the GLM5
     and HF readers stay simple generators -- all CLI knobs are honored
     uniformly here.
+
+    ``max_input_tokens`` (when truthy) caps the approximate input token
+    count per row using the same tiktoken-cl100k encoder as
+    ``proxy/modal_proxy.py``. Rows whose count exceeds the cap are
+    silently skipped *before* counting toward the offset/limit, so
+    ``num_requests=N`` still yields ``N`` valid rows when the cap
+    filters out the long tail. ``filter_stats`` (when provided) is
+    populated in place with ``filtered`` / ``max_filtered_tokens``
+    counters for end-of-run reporting.
     """
     skipped = 0
     yielded = 0
@@ -372,6 +444,18 @@ def _iter_bodies(
         msgs = body.get("messages")
         if not isinstance(msgs, list) or not msgs:
             continue
+        # Apply the input-token cap *before* the offset accounting so a
+        # filtered row doesn't burn one of the offset slots; users
+        # specifying ``--offset N`` typically mean "skip N usable rows",
+        # not "skip N rows including overlong ones".
+        if max_input_tokens and max_input_tokens > 0:
+            n_tokens = _approx_input_tokens(msgs)
+            if n_tokens > max_input_tokens:
+                if filter_stats is not None:
+                    filter_stats["filtered"] = filter_stats.get("filtered", 0) + 1
+                    if n_tokens > filter_stats.get("max_filtered_tokens", 0):
+                        filter_stats["max_filtered_tokens"] = n_tokens
+                continue
         if skipped < offset:
             skipped += 1
             continue
@@ -403,6 +487,37 @@ def _iter_bodies(
         yielded += 1
         if num_requests is not None and yielded >= num_requests:
             return
+
+
+def _resolve_input_token_cap(
+    *,
+    user_override: int | None,
+    context_length: int | None,
+    max_tokens: int | None,
+) -> int | None:
+    """Resolve the per-request input-token cap used by ``_iter_bodies``.
+
+    Priority:
+      * ``user_override > 0`` -> return as-is (operator knows best).
+      * ``user_override < 0`` -> disable filtering entirely.
+      * ``user_override == 0`` (the auto sentinel):
+          - if ``context_length`` is known, return
+            ``context_length - max_tokens - SAFETY_MARGIN`` so prompt +
+            completion budget stays comfortably under the model's hard
+            cap.
+          - else return ``None`` (filter disabled; caller logs a
+            warning so the operator knows to set the flag manually).
+    """
+    if user_override is not None:
+        if user_override < 0:
+            return None
+        if user_override > 0:
+            return user_override
+    if context_length is None or context_length <= 0:
+        return None
+    reserve = (max_tokens or 0) + CONTEXT_LENGTH_SAFETY_MARGIN_TOKENS
+    cap = context_length - reserve
+    return cap if cap > 0 else None
 
 
 def _percentile(xs: list[float], p: float) -> float:
@@ -459,6 +574,18 @@ async def _fetch_proxy_info(client) -> dict:
             info["served_models"] = models
             info["served_model"] = models[0] if models else None
             info["model_source_replica"] = replica
+        # SGLang's ``/get_server_info`` returns ``context_length: null``
+        # when the operator didn't pass ``--context-length`` to
+        # ``launch_server`` (in which case the model's tokenizer
+        # ``model_max_length`` is used at runtime). Capture whatever the
+        # server reports so the workload's input-token filter can
+        # auto-size against the actual configured cap when one exists.
+        server_info = await _get_json(f"{replica}/get_server_info")
+        if server_info is not None:
+            ctx = server_info.get("context_length")
+            info["context_length"] = ctx if isinstance(ctx, int) and ctx > 0 else None
+            info["max_total_num_tokens"] = server_info.get("max_total_num_tokens")
+            info["max_prefill_tokens"] = server_info.get("max_prefill_tokens")
 
     if not info["errors"]:
         del info["errors"]
@@ -514,6 +641,28 @@ async def _send_one(client, body: dict) -> dict:
         ) as resp:
             is_sse = resp.headers.get("content-type", "").startswith("text/event-stream")
             if not is_sse:
+                # Two cases here:
+                #   (a) Upstream returned an error status (e.g. 400 from
+                #       SGLang chat-template validation). The body is a
+                #       small JSON error and we want both the real status
+                #       code and a snippet of the body in ``error`` so
+                #       downstream log lines / saved JSON reflect the
+                #       actual failure mode.
+                #   (b) Upstream returned 2xx but non-SSE. Unsupported by
+                #       this measurement strategy -- keep ``status: 0``
+                #       as the sentinel for "no usable HTTP status".
+                body_bytes = await resp.aread()
+                snippet = body_bytes[:512].decode("utf-8", errors="replace").strip()
+                if not 200 <= resp.status_code < 300:
+                    return {
+                        "status": resp.status_code,
+                        "ttft_ns": None,
+                        "total_ns": time.perf_counter_ns() - request_start_ns,
+                        "input_tokens": None,
+                        "output_tokens": 0,
+                        "is_sse": False,
+                        "error": f"upstream_error: {snippet}" if snippet else "upstream_error",
+                    }
                 raise _NonStreamingResponse(
                     f"upstream returned content-type "
                     f"{resp.headers.get('content-type')!r}; "
@@ -583,50 +732,50 @@ def _print_summary(stats: dict, fail_breakdown: dict[int, int]) -> None:
     out_tok_s = stats["output_tokens"]
 
     print()
-    print(f"[workload] done in {elapsed:.1f}s")
-    print(f"[workload]   sent={sent} ok={ok} fail={fail} success_rate={success_rate * 100:.1f}%")
+    _log(f"done in {elapsed:.1f}s")
+    _log(f"  sent={sent} ok={ok} fail={fail} success_rate={success_rate * 100:.1f}%")
     if fail_breakdown:
-        print(f"[workload]   failures by status: {dict(sorted(fail_breakdown.items()))}")
-    print(f"[workload]   request throughput={stats['request_throughput_rps']:.2f} req/s")
-    print(
-        f"[workload]   token throughput   "
+        _log(f"  failures by status: {dict(sorted(fail_breakdown.items()))}")
+    _log(f"  request throughput={stats['request_throughput_rps']:.2f} req/s")
+    _log(
+        f"  token throughput   "
         f"input={stats['input_token_throughput']:,.1f} tok/s  "
         f"output={stats['output_token_throughput']:,.1f} tok/s  "
         f"total={stats['total_token_throughput']:,.1f} tok/s"
     )
     if ttft_s["n"]:
-        print(
-            f"[workload]   TTFT (s)         avg={ttft_s['avg']:.3f} "
+        _log(
+            f"  TTFT (s)         avg={ttft_s['avg']:.3f} "
             f"p50={ttft_s['p50']:.3f} p95={ttft_s['p95']:.3f} p99={ttft_s['p99']:.3f} "
             f"(n={ttft_s['n']})"
         )
     if total_s["n"]:
-        print(
-            f"[workload]   request E2E (s)  avg={total_s['avg']:.2f} "
+        _log(
+            f"  request E2E (s)  avg={total_s['avg']:.2f} "
             f"p50={total_s['p50']:.2f} p95={total_s['p95']:.2f} p99={total_s['p99']:.2f} "
             f"(n={total_s['n']})"
         )
     if itl_s["n"]:
-        print(
-            f"[workload]   ITL (ms)         avg={itl_s['avg']:.1f} "
+        _log(
+            f"  ITL (ms)         avg={itl_s['avg']:.1f} "
             f"p50={itl_s['p50']:.1f} p95={itl_s['p95']:.1f} p99={itl_s['p99']:.1f} "
             f"(n={itl_s['n']})"
         )
     if decode_s["n"]:
-        print(
-            f"[workload]   decode (tok/s)   avg={decode_s['avg']:.1f} "
+        _log(
+            f"  decode (tok/s)   avg={decode_s['avg']:.1f} "
             f"p50={decode_s['p50']:.1f} p95={decode_s['p95']:.1f} p99={decode_s['p99']:.1f} "
             f"(n={decode_s['n']})"
         )
     if in_tok_s["n"]:
-        print(
-            f"[workload]   input tokens     avg={in_tok_s['avg']:.0f} "
+        _log(
+            f"  input tokens     avg={in_tok_s['avg']:.0f} "
             f"p50={in_tok_s['p50']:.0f} p95={in_tok_s['p95']:.0f} p99={in_tok_s['p99']:.0f} "
             f"(n={in_tok_s['n']})"
         )
     if out_tok_s["n"]:
-        print(
-            f"[workload]   output tokens    avg={out_tok_s['avg']:.0f} "
+        _log(
+            f"  output tokens    avg={out_tok_s['avg']:.0f} "
             f"p50={out_tok_s['p50']:.0f} p95={out_tok_s['p95']:.0f} p99={out_tok_s['p99']:.0f} "
             f"(n={out_tok_s['n']})"
         )
@@ -657,6 +806,7 @@ def replay(
     model: str | None = DEFAULT_MODEL,
     stream: bool | None = None,
     max_tokens: int | None = None,
+    max_input_tokens: int | None = None,
     output_path: str | None = None,
     save_per_request: bool = True,
 ) -> dict:
@@ -691,6 +841,15 @@ def replay(
             pass through (HF rows default to non-streaming, so passing
             ``True`` is recommended for accurate TTFT measurements).
         max_tokens: Override ``max_tokens``. ``None`` = pass through.
+        max_input_tokens: Cap on the approximate input token count per
+            request; rows above the cap are skipped before counting
+            toward ``num_requests``. ``None`` (or ``0``) = auto-resolve
+            from the SGLang replica's ``/get_server_info`` (using
+            ``context_length - max_tokens - safety_margin``); negative
+            disables the filter. Counts are computed via the same
+            tiktoken-cl100k encoder the proxy uses, so they're
+            directional rather than exact (apply your own headroom if
+            tuning against multilingual corpora).
         output_path: Where to write the JSON results doc inside the
             ``GORGO-bench-results`` volume. Relative paths are resolved
             under ``/results``. ``None`` (default) -> auto-generated
@@ -727,6 +886,7 @@ def replay(
         "model": model,
         "stream": stream,
         "max_tokens": max_tokens,
+        "max_input_tokens": max_input_tokens,
         "region": REGION,
         "run_started_at": run_started_at.isoformat().replace("+00:00", "Z"),
     }
@@ -760,12 +920,12 @@ def replay(
                 f" until {end_time}" if end_time else "",
             ]
         )
-    print(
-        f"[workload] source={source} path={resolved_path}{range_desc}"
+    _log(
+        f"source={source} path={resolved_path}{range_desc}"
         + (f" (preset={preset})" if preset else "")
     )
-    print(
-        f"[workload] dispatching: proxy={proxy_url} concurrency={concurrency} "
+    _log(
+        f"dispatching: proxy={proxy_url} concurrency={concurrency} "
         f"offset={offset} limit={num_requests if num_requests is not None else 'all'}"
     )
 
@@ -795,15 +955,47 @@ def replay(
         ) as client:
             # Snapshot the currently policy info and print to console
             proxy_info = await _fetch_proxy_info(client)
-            print(
-                f"[workload]   proxy: policy={proxy_info.get('policy')!r} "
+            _log(
+                f"  proxy: policy={proxy_info.get('policy')!r} "
                 f"model={proxy_info.get('served_model')!r} "
                 f"replicas={proxy_info.get('replica_count')}"
             )
             if proxy_info.get("proxy_hyperparameters"):
-                print(f"[workload]   proxy hyperparameters: {proxy_info['proxy_hyperparameters']}")
+                _log(f"  proxy hyperparameters: {proxy_info['proxy_hyperparameters']}")
+
+            # Resolve the input-token filter cap. ``user_override=0``
+            # is the auto sentinel (matches the workload CLI default),
+            # so a missing flag still triggers auto-detection.
+            input_token_cap = _resolve_input_token_cap(
+                user_override=max_input_tokens,
+                context_length=proxy_info.get("context_length"),
+                max_tokens=max_tokens,
+            )
+            if input_token_cap is not None:
+                origin = (
+                    "operator override"
+                    if (max_input_tokens is not None and max_input_tokens > 0)
+                    else (
+                        f"auto from context_length={proxy_info.get('context_length')} - "
+                        f"max_tokens={max_tokens or 0} - margin={CONTEXT_LENGTH_SAFETY_MARGIN_TOKENS}"
+                    )
+                )
+                _log(
+                    f"  input-token filter: cap={input_token_cap} ({origin}); "
+                    f"rows above cap will be skipped before counting toward num_requests"
+                )
+            else:
+                ctx_len = proxy_info.get("context_length")
+                _log(
+                    f"  input-token filter: disabled "
+                    f"(context_length={ctx_len!r}, override={max_input_tokens!r}); "
+                    f"overlong rows will hit upstream as 4xx -- pass --max-input-tokens N to filter"
+                )
+            config["input_token_cap"] = input_token_cap
+            config["context_length"] = proxy_info.get("context_length")
 
             progress_log: list[dict] = []
+            filter_stats: dict = {"filtered": 0, "max_filtered_tokens": 0}
 
             async def worker() -> None:
                 nonlocal done, last_log
@@ -815,12 +1007,26 @@ def replay(
                     res = await _send_one(client, body)
                     results.append(res)
                     done += 1
+                    # Emit a single-line failure record as soon as it
+                    # happens. Useful when the proxy returns 4xx/5xx
+                    # mid-run (e.g. SGLang chat-template validation
+                    # rejecting a malformed conversation): without this,
+                    # the only signal is a bumped ``fail`` counter on
+                    # the next 5-second progress tick.
+                    if not (200 <= res["status"] < 300):
+                        snippet = (res.get("error") or "")[:160]
+                        _log(
+                            f"  request fail status={res['status']} "
+                            f"input_tokens={res.get('input_tokens')} "
+                            f'error="{snippet}"'
+                        )
                     now = time.perf_counter()
                     if now - last_log >= 5.0:
                         elapsed = now - t_start
                         ok_n = sum(1 for r in results if 200 <= r["status"] < 300)
                         rate = done / elapsed if elapsed > 0 else 0.0
                         progress = {
+                            "ts": _ts(),
                             "event": "progress",
                             "elapsed_seconds": round(elapsed, 3),
                             "sent": sent,
@@ -832,7 +1038,9 @@ def replay(
                         progress_log.append(progress)
                         # Emit as a single-line JSON record so log scrapers
                         # can grep ``"event": "progress"`` and parse with
-                        # ``jq``; no second human-friendly line needed.
+                        # ``jq``; the ``ts`` field is the wall-clock time
+                        # of the snapshot (paired with ``elapsed_seconds``
+                        # which is monotonic-clock since dispatch start).
                         print(json.dumps(progress), flush=True)
                         last_log = now
 
@@ -851,6 +1059,8 @@ def replay(
                     model_override=model,
                     stream_override=stream,
                     max_tokens_override=max_tokens,
+                    max_input_tokens=input_token_cap,
+                    filter_stats=filter_stats,
                 ):
                     await queue.put((ts, body))
                     sent += 1
@@ -938,6 +1148,17 @@ def replay(
             "input_tokens": in_tok_s,
             "output_tokens": out_tok_s,
         }
+        if filter_stats.get("filtered"):
+            stats["input_filtered"] = {
+                "count": filter_stats["filtered"],
+                "max_filtered_tokens": filter_stats["max_filtered_tokens"],
+                "cap": input_token_cap,
+            }
+            _log(
+                f"  input-token filter: skipped {filter_stats['filtered']} "
+                f"row(s) over cap={input_token_cap} "
+                f"(largest={filter_stats['max_filtered_tokens']} approx tokens)"
+            )
         _print_summary(stats, fail_breakdown)
         return stats, results, proxy_info, progress_log
 
@@ -983,7 +1204,7 @@ def replay(
     with open(resolved_output_path, "w") as f:
         json.dump(output_doc, f)
     bench_results_volume.commit()
-    print(f"[workload]   saved results to volume GORGO-bench-results at {resolved_output_path}")
+    _log(f"  saved results to volume GORGO-bench-results at {resolved_output_path}")
 
     stats["output_path"] = resolved_output_path
     return stats
@@ -1003,6 +1224,7 @@ def main(
     model: str = DEFAULT_MODEL,
     stream: str = "",
     max_tokens: int = 0,
+    max_input_tokens: int = 0,
     output_path: str = "",
     save_per_request: bool = True,
 ):
@@ -1012,6 +1234,8 @@ def main(
       empty string for preset / data_path / start_time / end_time /
         model / stream / output_path
       0 for num_requests / max_tokens
+      0 for max_input_tokens (= auto-detect from /get_server_info);
+        positive = explicit cap; negative = disable filter
     """
     stream_arg: bool | None
     s = stream.strip().lower()
@@ -1037,6 +1261,7 @@ def main(
         model=model or None,
         stream=stream_arg,
         max_tokens=max_tokens or None,
+        max_input_tokens=max_input_tokens,
         output_path=output_path or None,
         save_per_request=save_per_request,
     )

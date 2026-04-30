@@ -1,8 +1,71 @@
 import asyncio
 import json
+import logging
 import os
 import random
+import time
 from collections import deque
+from datetime import datetime, timezone
+
+# Force ``logging.Formatter`` to format ``%(asctime)s`` in UTC so the
+# ``Z`` suffix in the uvicorn log config below is honest regardless of
+# the container's tzdata. Touches the base class so it propagates to
+# uvicorn's ``DefaultFormatter`` / ``AccessFormatter`` subclasses too.
+logging.Formatter.converter = time.gmtime
+
+
+def _log(message: str) -> None:
+    """Emit a ``[proxy]`` log line prefixed with an ISO 8601 UTC
+    timestamp (millisecond precision). Wraps ``print`` so it composes
+    with Modal's stdout streaming; ``flush=True`` keeps lines visible
+    on long-running uvicorn workers where stdout would otherwise
+    line-buffer."""
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    print(f"{ts} [proxy] {message}", flush=True)
+
+
+# uvicorn ships a sensible LOGGING_CONFIG but its formatters have no
+# timestamps -- fine for short request/response loops, but we run the
+# proxy for hours and need to correlate access lines with the
+# ``_log()`` output above (replica syncs, hyperparameter applies, etc.)
+# and with the workload-side logs. Same datefmt as ``_log`` (sans
+# milliseconds, which uvicorn's logging.Formatter doesn't support
+# natively without a custom Formatter class) so visual scan order
+# matches across streams.
+_UVICORN_LOG_CONFIG: dict = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {
+            "()": "uvicorn.logging.DefaultFormatter",
+            "fmt": "%(asctime)sZ %(levelprefix)s %(message)s",
+            "datefmt": "%Y-%m-%dT%H:%M:%S",
+            "use_colors": None,
+        },
+        "access": {
+            "()": "uvicorn.logging.AccessFormatter",
+            "fmt": '%(asctime)sZ %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s',
+            "datefmt": "%Y-%m-%dT%H:%M:%S",
+        },
+    },
+    "handlers": {
+        "default": {
+            "formatter": "default",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+        },
+        "access": {
+            "formatter": "access",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "loggers": {
+        "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
+        "uvicorn.error": {"level": "INFO"},
+        "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
+    },
+}
 
 import httpx
 import modal
@@ -311,8 +374,8 @@ def proxy():
             live_metrics.pop(url, None)
             metrics_meta["last_refresh_errors"].pop(url, None)
         prune_per_target(state["hyperparameters"], set(replica_urls))
-        print(
-            f"[proxy] replicas synced from {source}: "
+        _log(
+            f"replicas synced from {source}: "
             f"+{len(added)} -{len(removed)} (total={len(replica_urls)})"
         )
         return added, removed
@@ -432,7 +495,7 @@ def proxy():
                 try:
                     await _refresh_all(state["upstream_client"])
                 except Exception as e:
-                    print(f"[proxy] metrics refresh iteration failed: {e}")
+                    _log(f"metrics refresh iteration failed: {e}")
                 await asyncio.sleep(METRICS_REFRESH_INTERVAL_SECONDS)
         except asyncio.CancelledError:
             pass
@@ -485,8 +548,8 @@ def proxy():
             metrics = {u: live_metrics[u] for u in replica_urls if u in live_metrics}
             if len(metrics) < len(replica_urls):
                 missing = len(replica_urls) - len(metrics)
-                print(
-                    f"[proxy] live metrics missing for {missing} replica(s); "
+                _log(
+                    f"live metrics missing for {missing} replica(s); "
                     f"falling back to random for this request"
                 )
                 return random.choice(replica_urls)
@@ -547,7 +610,7 @@ def proxy():
                 "supported": sorted(ROUTING_POLICIES),
             }
         state["policy"] = name
-        print(f"[proxy] routing policy set to {name!r}")
+        _log(f"routing policy set to {name!r}")
         return 200, _policy_payload(include_supported=False)
 
     async def _handle_get_replicas(_data) -> tuple[int, dict]:
@@ -597,9 +660,7 @@ def proxy():
             await replicas.put.aio(f"manual-{idx}", url)
         added, removed = _sync_replicas_from_manual_urls(normalized)
 
-        print(
-            f"[proxy] replicas updated: +{len(added)} -{len(removed)} (total={len(replica_urls)})"
-        )
+        _log(f"replicas updated: +{len(added)} -{len(removed)} (total={len(replica_urls)})")
         return 200, {
             "replicas": list(replica_urls),
             "count": len(replica_urls),
@@ -686,7 +747,7 @@ def proxy():
         state["hyperparameters"] = merge_update(
             state["hyperparameters"], update or {}, replace=replace
         )
-        print(f"[proxy] hyperparameters updated: {state['hyperparameters']}")
+        _log(f"hyperparameters updated: {state['hyperparameters']}")
         return 200, {"hyperparameters": state["hyperparameters"]}
 
     async def _handle_post_hyperparameters(data) -> tuple[int, dict]:
@@ -843,17 +904,14 @@ def proxy():
             # samples that landed while the tuner was off.
             at["samples_since_last_apply"] = 0
             at["enabled_at_monotonic"] = time.monotonic()
-            print(f"[proxy] auto-tune ENABLED window={new_window} hop={new_hop} apply={new_apply}")
+            _log(f"auto-tune ENABLED window={new_window} hop={new_hop} apply={new_apply}")
         elif not new_enabled and was_enabled:
-            print("[proxy] auto-tune DISABLED")
+            _log("auto-tune DISABLED")
         elif new_enabled:
             # Reconfigured while running -- keep the existing counter
             # so we don't reset the "samples until next apply" clock
             # on every adjustment.
-            print(
-                f"[proxy] auto-tune RECONFIGURED window={new_window} "
-                f"hop={new_hop} apply={new_apply}"
-            )
+            _log(f"auto-tune RECONFIGURED window={new_window} hop={new_hop} apply={new_apply}")
 
         # Best-effort summary of the current trailing window if it's
         # already large enough; gives the caller something useful to
@@ -1015,8 +1073,8 @@ def proxy():
         at["last_applied_at_monotonic"] = time.monotonic()
         at["last_recommendation"] = recommendation
         at["samples_since_last_apply"] = 0
-        print(
-            f"[proxy] auto-tune #{at['applied_count']} "
+        _log(
+            f"auto-tune #{at['applied_count']} "
             f"window={len(window)} defaults={recommendation['defaults']} "
             f"per_target={list(recommendation['per_target'])} "
             f"(apply={at['apply']})"
@@ -1043,7 +1101,7 @@ def proxy():
         try:
             target = _select_endpoint(token_ids)
         except Exception as e:
-            print(f"[proxy] policy {state['policy']!r} failed ({e}); falling back to random")
+            _log(f"policy {state['policy']!r} failed ({e}); falling back to random")
             if not replica_urls:
                 await _send_json(send, 503, {"error": "no replicas registered"})
                 return
@@ -1104,7 +1162,7 @@ def proxy():
                         radix_trie.insert(token_ids, endpoint=target)
                     except Exception as e:
                         # Trie bookkeeping must never break forwarding.
-                        print(f"[proxy] radix trie insert failed: {e}")
+                        _log(f"radix trie insert failed: {e}")
 
                 response_headers = [
                     (k.lower().encode(), v.encode())
@@ -1171,7 +1229,7 @@ def proxy():
             if headers_sent:
                 # Already committed to a status; best we can do is close
                 # the body cleanly so the client sees a truncated stream.
-                print(f"[proxy] upstream stream error mid-response: {e}")
+                _log(f"upstream stream error mid-response: {e}")
                 try:
                     await send({"type": "http.response.body", "body": b"", "more_body": False})
                 except Exception:
@@ -1199,10 +1257,10 @@ def proxy():
                 try:
                     await _refresh_all(state["upstream_client"])
                 except Exception as e:
-                    print(f"[proxy] initial metrics refresh failed: {e}")
+                    _log(f"initial metrics refresh failed: {e}")
                 state["metrics_task"] = asyncio.create_task(_metrics_refresh_loop())
-                print(
-                    f"[proxy] metrics refresh loop started "
+                _log(
+                    f"metrics refresh loop started "
                     f"(interval={METRICS_REFRESH_INTERVAL_SECONDS}s, "
                     f"{len(replica_urls)} replicas); "
                     f"upstream client: http2=True, "
@@ -1223,7 +1281,7 @@ def proxy():
                     try:
                         await client.aclose()
                     except Exception as e:
-                        print(f"[proxy] upstream client close failed: {e}")
+                        _log(f"upstream client close failed: {e}")
                     state["upstream_client"] = None
                 await send({"type": "lifespan.shutdown.complete"})
                 return
@@ -1257,6 +1315,11 @@ def proxy():
         await send({"type": "http.response.body", "body": b"Not found"})
 
     with modal.forward(8000) as tunnel:
-        print(f"proxy listening at {tunnel.url}")
+        _log(f"proxy listening at {tunnel.url}")
         # TODO: replace uvicorn with a faster reverse-proxy (e.g. nginx, envoy, or Rust-based)
-        uvicorn.run(asgi_app, host="0.0.0.0", port=8000)
+        uvicorn.run(
+            asgi_app,
+            host="0.0.0.0",
+            port=8000,
+            log_config=_UVICORN_LOG_CONFIG,
+        )

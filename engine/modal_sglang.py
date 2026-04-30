@@ -33,6 +33,13 @@ MODEL_REVISION = (  # pin revision id to avoid nasty surprises!
 N_GPUS = os.getenv("N_GPUS", 1)
 GPU = f"{GPU_TYPE}:{N_GPUS}"
 PORT = 8000
+# Pinning ``--context-length`` lets ``proxy/workload.py`` auto-detect a
+# safe input-token cap from ``/get_server_info`` (which would otherwise
+# return ``context_length: null`` and force operators to remember
+# ``--max-input-tokens N`` on every workload/tuning run). Default is
+# Qwen3's native 32k window; bump via env var if the GPU has the KV
+# headroom to support longer prompts.
+CONTEXT_LENGTH = int(os.getenv("CONTEXT_LENGTH", 32768))
 HF_CACHE_VOL = modal.Volume.from_name(
     f"{MODEL_NAME}-huggingface-cache", create_if_missing=True, environment_name=ENVIRONMENT_NAME
 )
@@ -104,6 +111,8 @@ def model_endpoint(registry_key: str = REGION):
         "100",
         "--mem-fraction",  # leave space for speculative model
         "0.8",
+        "--context-length",  # surfaces in /get_server_info; drives workload pre-filter
+        f"{CONTEXT_LENGTH}",
     ]
 
     # SGLang exposes OpenAI-compatible routes plus control endpoints; RadixAttention
