@@ -1,11 +1,14 @@
 import asyncio
 import json
 import logging
+import math
 import os
 import random
 import time
+import uuid
 from collections import deque
 from datetime import datetime, timezone
+from typing import Callable
 
 # Force ``logging.Formatter`` to format ``%(asctime)s`` in UTC so the
 # ``Z`` suffix in the uvicorn log config below is honest regardless of
@@ -71,7 +74,14 @@ import httpx
 import modal
 import tiktoken
 
-from app import app, replicas
+from app import (
+    app,
+    bench_results_volume,
+    completions_volume,
+    hf_datasets_volume,
+    lmsys_chat_1m_volume,
+    replicas,
+)
 from proxy.measure import (
     NS_PER_S,
     consume_sse_stream,
@@ -106,6 +116,279 @@ METRICS_REFRESH_INTERVAL_SECONDS = float(os.getenv("METRICS_REFRESH_INTERVAL_SEC
 METRICS_FETCH_TIMEOUT_SECONDS = 2.0
 # SGLang may wait until idle; allow a generous read window for POST /flush_cache.
 FLUSH_UPSTREAM_TIMEOUT_SECONDS = 120.0
+
+
+HYPERPARAM_RANGES: dict[str, tuple[float, float]] = {
+    "t_prefill": (1e-5, 1.0),
+    "queued_tokens_weight": (1e-5, 1.0),
+}
+
+
+def validated_ranges(
+    overrides: dict[str, tuple[float, float]],
+) -> dict[str, tuple[float, float]]:
+    """Merge ``overrides`` with defaults and check each pair is ``0 < lo < hi``."""
+    merged = {k: tuple(v) for k, v in HYPERPARAM_RANGES.items()}
+    merged.update({k: tuple(v) for k, v in overrides.items()})
+    for k, (lo, hi) in merged.items():
+        if lo <= 0:
+            raise ValueError(f"{k} lower bound must be > 0 (log-space sampling), got {lo}")
+        if lo >= hi:
+            raise ValueError(f"{k} range invalid: lo ({lo}) must be < hi ({hi})")
+    return merged
+
+
+SCORE_FUNCTIONS: dict[str, Callable[[dict], float]] = {
+    "output_throughput": lambda s: float(s["output_token_throughput"]),
+    "total_throughput": lambda s: float(s["total_token_throughput"]),
+    "request_throughput": lambda s: float(s["request_throughput_rps"]),
+    "neg_p95_ttft": lambda s: -float(s["ttft_seconds"]["p95"]),
+    "neg_p99_ttft": lambda s: -float(s["ttft_seconds"]["p99"]),
+    "neg_p95_e2e": lambda s: -float(s["request_e2e_seconds"]["p95"]),
+    "neg_avg_itl": lambda s: -float(s["itl_ms"]["avg"]),
+}
+
+
+class HillClimbTuner:
+    """Coordinate hill-climb with shrinking multiplicative step."""
+
+    name = "coordinate-hill-climb-shrink"
+
+    def __init__(
+        self,
+        initial_params: dict[str, float],
+        ranges: dict[str, tuple[float, float]],
+        *,
+        initial_step: float = 0.5,
+        min_step: float = 0.05,
+        tol: float = 0.005,
+        max_steps: int = 16,
+    ) -> None:
+        self.ranges = ranges
+        self.best_params: dict[str, float] = {
+            k: self._clamp(k, float(initial_params.get(k, sum(ranges[k]) / 2))) for k in ranges
+        }
+        self.best_score: float | None = None
+        self.step = float(initial_step)
+        self.min_step = float(min_step)
+        self.tol = float(tol)
+        self.max_steps = int(max_steps)
+        self.evaluated_after_baseline = 0
+        self._sweep: list[tuple[str, int]] = []
+        self._sweep_improved = False
+        self._build_sweep()
+
+    def _clamp(self, key: str, v: float) -> float:
+        lo, hi = self.ranges[key]
+        return max(lo, min(hi, v))
+
+    def _build_sweep(self) -> None:
+        self._sweep = [(key, sign) for key in self.ranges for sign in (+1, -1)]
+        self._sweep_improved = False
+
+    @property
+    def state(self) -> dict:
+        return {"step": self.step, "sweep_improved": self._sweep_improved}
+
+    def propose(self) -> dict[str, float] | None:
+        if self.best_score is None:
+            return dict(self.best_params)
+        if self.evaluated_after_baseline >= self.max_steps:
+            return None
+        while True:
+            while self._sweep:
+                key, sign = self._sweep.pop(0)
+                factor = 1.0 + sign * self.step
+                candidate_val = self._clamp(key, self.best_params[key] * factor)
+                if abs(candidate_val - self.best_params[key]) < 1e-12:
+                    continue
+                cand = dict(self.best_params)
+                cand[key] = candidate_val
+                return cand
+            if not self._sweep_improved:
+                self.step *= 0.5
+                if self.step < self.min_step:
+                    return None
+            self._build_sweep()
+
+    def report(self, candidate: dict[str, float], score: float) -> bool:
+        if self.best_score is None:
+            self.best_score = score
+            self.best_params = dict(candidate)
+            return True
+        self.evaluated_after_baseline += 1
+        if score > self.best_score * (1.0 + self.tol):
+            self.best_score = score
+            self.best_params = dict(candidate)
+            self._sweep_improved = True
+            return True
+        return False
+
+
+class GaussianESTuner:
+    """(1+1)-Evolution Strategy with Rechenberg's 1/5 success rule."""
+
+    name = "gaussian-es-1plus1-1over5"
+
+    def __init__(
+        self,
+        initial_params: dict[str, float],
+        ranges: dict[str, tuple[float, float]],
+        *,
+        sigma: float = 0.5,
+        sigma_min: float = 0.02,
+        sigma_decay: float = 0.817,
+        success_window: int = 8,
+        target_rate: float = 0.2,
+        tol: float = 0.005,
+        max_steps: int = 16,
+        seed: int | None = None,
+    ) -> None:
+        self.ranges = ranges
+        self.keys = list(ranges.keys())
+        self.best_params: dict[str, float] = {
+            k: self._clamp(k, float(initial_params.get(k, sum(ranges[k]) / 2))) for k in ranges
+        }
+        self.best_score: float | None = None
+        self.sigma = float(sigma)
+        self.sigma_min = float(sigma_min)
+        self.sigma_decay = float(sigma_decay)
+        self.success_window = int(success_window)
+        self.target_rate = float(target_rate)
+        self.tol = float(tol)
+        self.max_steps = int(max_steps)
+        self.evaluated_after_baseline = 0
+        self._recent: list[bool] = []
+        self._rng = random.Random(seed)
+
+    def _clamp(self, key: str, v: float) -> float:
+        lo, hi = self.ranges[key]
+        return max(lo, min(hi, v))
+
+    def propose(self) -> dict[str, float] | None:
+        if self.best_score is None:
+            return dict(self.best_params)
+        if self.evaluated_after_baseline >= self.max_steps:
+            return None
+        if self.sigma < self.sigma_min:
+            return None
+        cand: dict[str, float] = {}
+        for key in self.keys:
+            v = self.best_params[key]
+            log_new = math.log(max(v, 1e-300)) + self.sigma * self._rng.gauss(0.0, 1.0)
+            cand[key] = self._clamp(key, math.exp(log_new))
+        return cand
+
+    def report(self, candidate: dict[str, float], score: float) -> bool:
+        if self.best_score is None:
+            self.best_score = score
+            self.best_params = dict(candidate)
+            return True
+        self.evaluated_after_baseline += 1
+        accepted = score > self.best_score * (1.0 + self.tol)
+        if accepted:
+            self.best_score = score
+            self.best_params = dict(candidate)
+        self._recent.append(accepted)
+        if len(self._recent) > self.success_window:
+            self._recent.pop(0)
+        if len(self._recent) >= self.success_window:
+            rate = sum(self._recent) / len(self._recent)
+            if rate > self.target_rate:
+                self.sigma /= self.sigma_decay
+            elif rate < self.target_rate:
+                self.sigma *= self.sigma_decay
+        return accepted
+
+    @property
+    def state(self) -> dict:
+        recent_rate = sum(self._recent) / len(self._recent) if self._recent else None
+        return {
+            "sigma": self.sigma,
+            "recent_success_rate": recent_rate,
+            "recent_window_filled": len(self._recent),
+        }
+
+
+TunerLike = HillClimbTuner | GaussianESTuner
+
+
+def build_tuner(
+    algorithm: str,
+    *,
+    initial_params: dict[str, float],
+    ranges: dict[str, tuple[float, float]],
+    max_steps: int,
+    relative_tolerance: float,
+    initial_step: float,
+    min_step: float,
+    sigma: float,
+    sigma_min: float,
+    seed: int | None,
+) -> TunerLike:
+    if algorithm == "hill-climb":
+        return HillClimbTuner(
+            initial_params=initial_params,
+            ranges=ranges,
+            initial_step=initial_step,
+            min_step=min_step,
+            tol=relative_tolerance,
+            max_steps=max_steps,
+        )
+    if algorithm == "gaussian-es":
+        return GaussianESTuner(
+            initial_params=initial_params,
+            ranges=ranges,
+            sigma=sigma,
+            sigma_min=sigma_min,
+            tol=relative_tolerance,
+            max_steps=max_steps,
+            seed=seed,
+        )
+    raise ValueError(f"unknown algorithm {algorithm!r}; choices: 'hill-climb', 'gaussian-es'")
+
+
+def build_summary(
+    *,
+    run_started_at: datetime,
+    proxy_url: str,
+    workload_kwargs: dict,
+    metric: str,
+    tuner: TunerLike,
+    baseline_score: float | None,
+    history: list[dict],
+    active_policy: str | None,
+    ranges: dict[str, tuple[float, float]],
+    finished_at: datetime | None,
+    output_path: str,
+) -> dict:
+    return {
+        "started_at": run_started_at.isoformat().replace("+00:00", "Z"),
+        "finished_at": finished_at.isoformat().replace("+00:00", "Z") if finished_at else None,
+        "proxy_url": proxy_url,
+        "active_policy": active_policy,
+        "metric": metric,
+        "workload": workload_kwargs,
+        "tuning": {
+            "algorithm": tuner.name,
+            "ranges": {k: list(v) for k, v in ranges.items()},
+            "max_steps": tuner.max_steps,
+            "relative_tolerance": tuner.tol,
+            "trials_run": len(history),
+            "current_state": dict(tuner.state),
+        },
+        "best_params": dict(tuner.best_params),
+        "best_score": tuner.best_score,
+        "baseline_score": baseline_score,
+        "improvement_over_baseline": (
+            (tuner.best_score - baseline_score) / abs(baseline_score)
+            if baseline_score not in (None, 0)
+            else None
+        ),
+        "history": history,
+        "output_path": output_path,
+    }
+
 
 # On-the-fly tuning. The proxy keeps a bounded ring buffer of per-request
 # samples (TTFT / total / token counts / per-token rates); when the
@@ -236,10 +519,16 @@ def _parse_metrics_text(text: str) -> dict[str, float]:
 
 @app.function(
     image=modal.Image.debian_slim()
-    .pip_install("httpx[http2]", "uvicorn", "tiktoken")
+    .pip_install("httpx[http2]", "uvicorn", "tiktoken", "pyarrow", "datasets>=3.0")
     .add_local_python_source("app", "proxy", "policy", "utils"),
     region=REGION,
     timeout=(24 * 60 * 60),
+    volumes={
+        "/data": completions_volume,
+        "/lmsys": lmsys_chat_1m_volume,
+        "/datasets": hf_datasets_volume,
+        "/results": bench_results_volume,
+    },
 )
 def proxy():
     import time
@@ -292,6 +581,23 @@ def proxy():
             "last_applied_at_monotonic": None,
             "last_recommendation": None,
             "enabled_at_monotonic": None,
+        },
+        "batch_tuning": {
+            "running": False,
+            "status": "idle",
+            "task": None,
+            "run_id": None,
+            "started_at": None,
+            "finished_at": None,
+            "config": None,
+            "trial": None,
+            "history": [],
+            "best_params": None,
+            "best_score": None,
+            "baseline_score": None,
+            "output_path": None,
+            "error": None,
+            "stop_requested": False,
         },
     }
     endpoints_queued_tokens: dict[str, int] = {url: 0 for url in replica_urls}
@@ -930,6 +1236,320 @@ def proxy():
             "preview": preview,
         }
 
+    def _batch_tuning_public_state() -> dict:
+        bt = state["batch_tuning"]
+        payload = {k: v for k, v in bt.items() if k != "task"}
+        payload["history"] = list(bt.get("history") or [])
+        return payload
+
+    def _parse_int(data: dict, key: str, default: int) -> int:
+        try:
+            return int(data.get(key, default))
+        except (TypeError, ValueError):
+            raise ValueError(f"{key} must be an integer")
+
+    def _parse_float(data: dict, key: str, default: float) -> float:
+        try:
+            return float(data.get(key, default))
+        except (TypeError, ValueError):
+            raise ValueError(f"{key} must be a number")
+
+    def _parse_optional_str(data: dict, key: str, default: str = "") -> str:
+        value = data.get(key, default)
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise ValueError(f"{key} must be a string")
+        return value
+
+    def _parse_optional_bool(data: dict, key: str):
+        value = data.get(key, None)
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in ("1", "true", "yes", "y", "on"):
+                return True
+            if s in ("0", "false", "no", "n", "off"):
+                return False
+        raise ValueError(f"{key} must be true/false/null")
+
+    def _normalize_batch_tuning_config(data: dict) -> dict:
+        if not isinstance(data, dict):
+            raise ValueError("body must be a JSON object")
+        metric = _parse_optional_str(data, "metric", "output_throughput")
+        if metric not in SCORE_FUNCTIONS:
+            raise ValueError(f"unknown metric {metric!r}; choices: {sorted(SCORE_FUNCTIONS)}")
+        algorithm = _parse_optional_str(data, "algorithm", "hill-climb")
+        if algorithm not in ("hill-climb", "gaussian-es"):
+            raise ValueError("algorithm must be 'hill-climb' or 'gaussian-es'")
+        ranges = validated_ranges(
+            {
+                "t_prefill": (
+                    _parse_float(data, "t_prefill_min", 1e-5),
+                    _parse_float(data, "t_prefill_max", 1.0),
+                ),
+                "queued_tokens_weight": (
+                    _parse_float(data, "queued_tokens_weight_min", 1e-5),
+                    _parse_float(data, "queued_tokens_weight_max", 1.0),
+                ),
+            }
+        )
+        return {
+            "start_time": _parse_optional_str(data, "start_time"),
+            "end_time": _parse_optional_str(data, "end_time"),
+            "offset": _parse_int(data, "offset", 0),
+            "num_requests": (_parse_int(data, "num_requests", 0) or None),
+            "concurrency": _parse_int(data, "concurrency", 16),
+            "model": _parse_optional_str(data, "model", ""),
+            "stream": _parse_optional_bool(data, "stream"),
+            "max_tokens": (_parse_int(data, "max_tokens", 0) or None),
+            "max_input_tokens": _parse_int(data, "max_input_tokens", 0),
+            "metric": metric,
+            "algorithm": algorithm,
+            "max_steps": _parse_int(data, "max_steps", 16),
+            "initial_step": _parse_float(data, "initial_step", 0.5),
+            "min_step": _parse_float(data, "min_step", 0.05),
+            "sigma": _parse_float(data, "sigma", 0.5),
+            "sigma_min": _parse_float(data, "sigma_min", 0.02),
+            "seed": (_parse_int(data, "seed", -1)),
+            "relative_tolerance": _parse_float(data, "relative_tolerance", 0.005),
+            "output_dir": _parse_optional_str(data, "output_dir", ""),
+            "ranges": ranges,
+        }
+
+    async def _run_batch_tuning(run_id: str, config: dict) -> None:
+        from proxy.workload import DEFAULT_MODEL, run_replay_async
+
+        bt = state["batch_tuning"]
+        run_started_at = datetime.now(timezone.utc)
+        out_dir = (
+            config["output_dir"]
+            if config["output_dir"] and os.path.isabs(config["output_dir"])
+            else os.path.join(
+                "/results",
+                config["output_dir"] or f"tune_{run_started_at.strftime('%Y%m%d_%H%M%S')}",
+            )
+        )
+        os.makedirs(out_dir, exist_ok=True)
+        summary_path = os.path.join(out_dir, "summary.json")
+        bt["output_path"] = summary_path
+
+        workload_kwargs = {
+            "start_time": config["start_time"] or None,
+            "end_time": config["end_time"] or None,
+            "offset": config["offset"],
+            "num_requests": config["num_requests"],
+            "concurrency": config["concurrency"],
+            "model": config["model"] or DEFAULT_MODEL,
+            "stream": config["stream"],
+            "max_tokens": config["max_tokens"],
+            "max_input_tokens": config["max_input_tokens"],
+            "save_per_request": False,
+        }
+        metric = config["metric"]
+        score_fn = SCORE_FUNCTIONS[metric]
+        active_policy = state["policy"]
+        current_hp = dict((state["hyperparameters"] or {}).get("defaults") or {})
+        tuner = build_tuner(
+            config["algorithm"],
+            initial_params=current_hp,
+            ranges=config["ranges"],
+            max_steps=config["max_steps"],
+            relative_tolerance=config["relative_tolerance"],
+            initial_step=config["initial_step"],
+            min_step=config["min_step"],
+            sigma=config["sigma"],
+            sigma_min=config["sigma_min"],
+            seed=None if config["seed"] < 0 else config["seed"],
+        )
+        history: list[dict] = []
+        baseline_score: float | None = None
+
+        def persist_summary(finished_at: datetime | None = None) -> None:
+            summary = build_summary(
+                run_started_at=run_started_at,
+                proxy_url="http://127.0.0.1:8000",
+                workload_kwargs=workload_kwargs,
+                metric=metric,
+                tuner=tuner,
+                baseline_score=baseline_score,
+                history=history,
+                active_policy=active_policy,
+                ranges=config["ranges"],
+                finished_at=finished_at,
+                output_path=summary_path,
+            )
+            tmp_path = f"{summary_path}.tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(summary, f, indent=2)
+            os.replace(tmp_path, summary_path)
+            bench_results_volume.commit()
+
+        try:
+            _log(
+                f"batch tuning {run_id} started algorithm={tuner.name} "
+                f"metric={metric} max_steps={config['max_steps']}"
+            )
+            trial_idx = 0
+            while True:
+                candidate = tuner.propose()
+                if candidate is None:
+                    break
+                if bt.get("stop_requested"):
+                    raise asyncio.CancelledError()
+                is_baseline = tuner.best_score is None
+                bt["trial"] = trial_idx
+                _log(f"batch tuning {run_id} trial {trial_idx}: evaluating {candidate}")
+
+                status, payload = await _handle_post_flush({})
+                if status >= 400:
+                    raise RuntimeError(f"flush: {payload}")
+                status, payload = await _handle_post_hyperparameters(candidate)
+                if status >= 400:
+                    raise RuntimeError(f"hyperparameters: {payload}")
+
+                trial_output = os.path.join(out_dir, f"replay_trial_{trial_idx:03d}.json")
+                stats = await run_replay_async(
+                    proxy_url="http://127.0.0.1:8000",
+                    output_path=trial_output,
+                    **workload_kwargs,
+                )
+                score = score_fn(stats)
+                accepted = tuner.report(candidate, score)
+                tuner_state = dict(tuner.state)
+                if is_baseline:
+                    baseline_score = score
+                    _log(f"batch tuning {run_id} trial {trial_idx}: baseline score={score:.4f}")
+                else:
+                    tag = "ACCEPTED" if accepted else "rejected"
+                    _log(
+                        f"batch tuning {run_id} trial {trial_idx}: "
+                        f"score={score:.4f} {tag} incumbent={tuner.best_score:.4f}"
+                    )
+                history.append(
+                    {
+                        "trial": trial_idx,
+                        "kind": "baseline" if is_baseline else "trial",
+                        "params": candidate,
+                        "score": score,
+                        "incumbent_score": tuner.best_score,
+                        "incumbent_params": dict(tuner.best_params),
+                        "tuner_state": tuner_state,
+                        "accepted": accepted,
+                        "metric": metric,
+                        "stats": stats,
+                    }
+                )
+                bt["history"] = history
+                bt["best_params"] = dict(tuner.best_params)
+                bt["best_score"] = tuner.best_score
+                bt["baseline_score"] = baseline_score
+                persist_summary()
+                trial_idx += 1
+
+            if tuner.best_params:
+                status, payload = await _handle_post_hyperparameters(tuner.best_params)
+                if status >= 400:
+                    raise RuntimeError(f"final hyperparameters: {payload}")
+                status, payload = await _handle_post_flush({})
+                if status >= 400:
+                    raise RuntimeError(f"final flush: {payload}")
+
+            finished_at = datetime.now(timezone.utc)
+            persist_summary(finished_at=finished_at)
+            bt["status"] = "succeeded"
+            bt["finished_at"] = finished_at.isoformat().replace("+00:00", "Z")
+            _log(f"batch tuning {run_id} succeeded output={summary_path}")
+        except asyncio.CancelledError:
+            finished_at = datetime.now(timezone.utc)
+            bt["status"] = "cancelled"
+            bt["finished_at"] = finished_at.isoformat().replace("+00:00", "Z")
+            bt["error"] = "cancelled"
+            try:
+                persist_summary(finished_at=finished_at)
+            except Exception as e:
+                _log(f"batch tuning {run_id} summary persist after cancel failed: {e}")
+            _log(f"batch tuning {run_id} cancelled")
+        except Exception as e:
+            finished_at = datetime.now(timezone.utc)
+            bt["status"] = "failed"
+            bt["finished_at"] = finished_at.isoformat().replace("+00:00", "Z")
+            bt["error"] = f"{type(e).__name__}: {e}"
+            _log(f"batch tuning {run_id} failed: {bt['error']}")
+        finally:
+            bt["running"] = False
+            bt["task"] = None
+            bt["stop_requested"] = False
+
+    async def _handle_post_tuning_start(data) -> tuple[int, dict]:
+        if not isinstance(data, dict):
+            return 400, {"error": "body must be a JSON object"}
+        bt = state["batch_tuning"]
+        task = bt.get("task")
+        if task is not None and not task.done():
+            return 409, {
+                "error": "batch tuning already running",
+                "batch_tuning": _batch_tuning_public_state(),
+            }
+        if normalize_policy(state["policy"]) != "gorgo":
+            return 400, {
+                "error": "batch tuning requires active policy 'gorgo'",
+                "current_policy": state["policy"],
+            }
+        if state["auto_tune"]["enabled"]:
+            return 409, {"error": "disable live auto-tune before starting batch tuning"}
+        if not replica_urls:
+            return 400, {"error": "no replicas registered"}
+        try:
+            config = _normalize_batch_tuning_config(data)
+        except ValueError as e:
+            return 400, {"error": str(e)}
+
+        run_id = (
+            f"tune-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+        )
+        bt.update(
+            {
+                "running": True,
+                "status": "running",
+                "run_id": run_id,
+                "started_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "finished_at": None,
+                "config": config,
+                "trial": None,
+                "history": [],
+                "best_params": None,
+                "best_score": None,
+                "baseline_score": None,
+                "output_path": None,
+                "error": None,
+                "stop_requested": False,
+            }
+        )
+        task = asyncio.create_task(_run_batch_tuning(run_id, config))
+        bt["task"] = task
+        return 202, {
+            "run_id": run_id,
+            "status": "running",
+            "status_url": "/tuning/status",
+            "batch_tuning": _batch_tuning_public_state(),
+        }
+
+    async def _handle_get_tuning_status(_data) -> tuple[int, dict]:
+        return 200, {"batch_tuning": _batch_tuning_public_state()}
+
+    async def _handle_post_tuning_stop(_data) -> tuple[int, dict]:
+        bt = state["batch_tuning"]
+        task = bt.get("task")
+        if task is None or task.done():
+            return 200, {"batch_tuning": _batch_tuning_public_state()}
+        bt["stop_requested"] = True
+        task.cancel()
+        return 202, {"batch_tuning": _batch_tuning_public_state()}
+
     # JSON route table. The dispatcher distinguishes 405 (method exists
     # for path but not this verb) from 404 (path unknown) by membership
     # checks, so adding a new (method, path) entry here is the only edit
@@ -949,6 +1569,9 @@ def proxy():
         ("GET", "/samples"): _handle_get_samples,
         ("GET", "/tune"): _handle_get_tune,
         ("POST", "/tune"): _handle_post_tune,
+        ("POST", "/tuning/start"): _handle_post_tuning_start,
+        ("GET", "/tuning/status"): _handle_get_tuning_status,
+        ("POST", "/tuning/stop"): _handle_post_tuning_stop,
     }
 
     async def _dispatch_json(method: str, path: str, receive, send) -> bool:
@@ -1269,6 +1892,14 @@ def proxy():
                 )
                 await send({"type": "lifespan.startup.complete"})
             elif msg["type"] == "lifespan.shutdown":
+                batch_task = state["batch_tuning"].get("task")
+                if batch_task is not None:
+                    state["batch_tuning"]["stop_requested"] = True
+                    batch_task.cancel()
+                    try:
+                        await batch_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
                 task = state.get("metrics_task")
                 if task is not None:
                     task.cancel()

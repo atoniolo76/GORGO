@@ -53,7 +53,16 @@ modal run proxy/workload.py --proxy-url https://... \
 
 ## Tuning Parameters
 
-The tuning script will present a TUI allowing you to adjust default parameters before running workload steps.
+The tuning script is now a lightweight client for the running proxy. It
+submits a batch tuning request to the proxy's embedded `/tuning/*` API; the
+proxy runs the workload locally against `http://127.0.0.1:8000` so the tuning
+metric does not include client-to-proxy tunnel latency. Start the proxy with
+the `GORGO-glm5-completions` and `GORGO-bench-results` volumes available (the
+default `proxy/modal_proxy.py::proxy` deployment does this) and set the active
+policy to `gorgo` before launching a run.
+
+The tuning script will present a TUI allowing you to adjust default parameters
+before starting the proxy-managed workload steps.
 ```bash
 modal run -q proxy/tuning.py::tune_interactive --proxy-url https://your-proxy.modal.run
 ```
@@ -73,6 +82,8 @@ modal run proxy/tuning.py::tune_cli --proxy-url https://your-proxy.modal.run \
 ```
 
 ## Notes
-- [ ] Do some smoke tests on the hyperparameter ranges in tuning.py
-- [ ] Validate on-the-fly parameter tuning for proxy and adjust window size + hop rate to suitable values
-- [ ] Test the TUI-based tuning utility for running tuning workloads and adjusting defaults + parameters manually
+- [*] Do some smoke tests on the hyperparameter ranges in tuning.py
+  - 0.001 < x < 0.1 is a good range
+- [*] Validate on-the-fly parameter tuning for proxy and adjust window size + hop rate to suitable values
+  - Program runs successfully but no validation with GORGO policy yet
+- [*] Test the TUI-based tuning utility for running tuning workloads and adjusting defaults + parameters manually

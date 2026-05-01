@@ -48,6 +48,7 @@ import time
 from datetime import datetime, timezone
 from typing import Iterator
 
+import httpx
 import modal
 
 from app import (
@@ -781,18 +782,7 @@ def _print_summary(stats: dict, fail_breakdown: dict[int, int]) -> None:
         )
 
 
-@app.function(
-    image=image,
-    region=REGION,
-    timeout=24 * 60 * 60,
-    volumes={
-        "/data": completions_volume,
-        "/lmsys": lmsys_chat_1m_volume,
-        "/datasets": hf_datasets_volume,
-        "/results": bench_results_volume,
-    },
-)
-def replay(
+async def run_replay_async(
     proxy_url: str,
     *,
     source: str = SOURCE_GLM5,
@@ -863,8 +853,6 @@ def replay(
         / ``throughput_rps`` / latency percentiles plus the resolved
         ``output_path`` of the saved JSON doc.
     """
-    import httpx
-
     proxy_url = proxy_url.rstrip("/")
     start_dt = _parse_iso(start_time)
     end_dt = _parse_iso(end_time)
@@ -929,240 +917,240 @@ def replay(
         f"offset={offset} limit={num_requests if num_requests is not None else 'all'}"
     )
 
-    async def amain() -> tuple[dict, list[dict], dict]:
-        timeout = httpx.Timeout(
-            connect=15.0, read=None, write=30.0, pool=10.0
-        )  # read=None so longer requests don't timeout
-        limits = httpx.Limits(
-            max_connections=concurrency
-            * 2,  # double the maximum concurrency so requests will never queue for connections
-            max_keepalive_connections=concurrency * 2,
-            keepalive_expiry=None,
+    timeout = httpx.Timeout(
+        connect=15.0, read=None, write=30.0, pool=10.0
+    )  # read=None so longer requests don't timeout
+    limits = httpx.Limits(
+        max_connections=concurrency
+        * 2,  # double the maximum concurrency so requests will never queue for connections
+        max_keepalive_connections=concurrency * 2,
+        keepalive_expiry=None,
+    )
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=concurrency * 2)
+    results: list[dict] = []
+    sent = 0
+    done = 0
+    t_start = time.perf_counter()
+    last_log = t_start
+
+    async with httpx.AsyncClient(
+        base_url=proxy_url,
+        http2=True,
+        timeout=timeout,
+        limits=limits,
+    ) as client:
+        # Snapshot the currently policy info and print to console
+        proxy_info = await _fetch_proxy_info(client)
+        _log(
+            f"  proxy: policy={proxy_info.get('policy')!r} "
+            f"model={proxy_info.get('served_model')!r} "
+            f"replicas={proxy_info.get('replica_count')}"
         )
+        if proxy_info.get("proxy_hyperparameters"):
+            _log(f"  proxy hyperparameters: {proxy_info['proxy_hyperparameters']}")
 
-        queue: asyncio.Queue = asyncio.Queue(maxsize=concurrency * 2)
-        results: list[dict] = []
-        sent = 0
-        done = 0
-        t_start = time.perf_counter()
-        last_log = t_start
-
-        async with httpx.AsyncClient(
-            base_url=proxy_url,
-            http2=True,
-            timeout=timeout,
-            limits=limits,
-        ) as client:
-            # Snapshot the currently policy info and print to console
-            proxy_info = await _fetch_proxy_info(client)
+        # Resolve the input-token filter cap. ``user_override=0``
+        # is the auto sentinel (matches the workload CLI default),
+        # so a missing flag still triggers auto-detection.
+        input_token_cap = _resolve_input_token_cap(
+            user_override=max_input_tokens,
+            context_length=proxy_info.get("context_length"),
+            max_tokens=max_tokens,
+        )
+        if input_token_cap is not None:
+            origin = (
+                "operator override"
+                if (max_input_tokens is not None and max_input_tokens > 0)
+                else (
+                    f"auto from context_length={proxy_info.get('context_length')} - "
+                    f"max_tokens={max_tokens or 0} - margin={CONTEXT_LENGTH_SAFETY_MARGIN_TOKENS}"
+                )
+            )
             _log(
-                f"  proxy: policy={proxy_info.get('policy')!r} "
-                f"model={proxy_info.get('served_model')!r} "
-                f"replicas={proxy_info.get('replica_count')}"
+                f"  input-token filter: cap={input_token_cap} ({origin}); "
+                f"rows above cap will be skipped before counting toward num_requests"
             )
-            if proxy_info.get("proxy_hyperparameters"):
-                _log(f"  proxy hyperparameters: {proxy_info['proxy_hyperparameters']}")
+        else:
+            ctx_len = proxy_info.get("context_length")
+            _log(
+                f"  input-token filter: disabled "
+                f"(context_length={ctx_len!r}, override={max_input_tokens!r}); "
+                f"overlong rows will hit upstream as 4xx -- pass --max-input-tokens N to filter"
+            )
+        config["input_token_cap"] = input_token_cap
+        config["context_length"] = proxy_info.get("context_length")
 
-            # Resolve the input-token filter cap. ``user_override=0``
-            # is the auto sentinel (matches the workload CLI default),
-            # so a missing flag still triggers auto-detection.
-            input_token_cap = _resolve_input_token_cap(
-                user_override=max_input_tokens,
-                context_length=proxy_info.get("context_length"),
-                max_tokens=max_tokens,
-            )
-            if input_token_cap is not None:
-                origin = (
-                    "operator override"
-                    if (max_input_tokens is not None and max_input_tokens > 0)
-                    else (
-                        f"auto from context_length={proxy_info.get('context_length')} - "
-                        f"max_tokens={max_tokens or 0} - margin={CONTEXT_LENGTH_SAFETY_MARGIN_TOKENS}"
+        progress_log: list[dict] = []
+        filter_stats: dict = {"filtered": 0, "max_filtered_tokens": 0}
+
+        async def worker() -> None:
+            nonlocal done, last_log
+            while True:
+                item = await queue.get()
+                if item is None:
+                    return
+                _, body = item
+                res = await _send_one(client, body)
+                results.append(res)
+                done += 1
+                # Emit a single-line failure record as soon as it
+                # happens. Useful when the proxy returns 4xx/5xx
+                # mid-run (e.g. SGLang chat-template validation
+                # rejecting a malformed conversation): without this,
+                # the only signal is a bumped ``fail`` counter on
+                # the next 5-second progress tick.
+                if not (200 <= res["status"] < 300):
+                    snippet = (res.get("error") or "")[:160]
+                    _log(
+                        f"  request fail status={res['status']} "
+                        f"input_tokens={res.get('input_tokens')} "
+                        f'error="{snippet}"'
                     )
-                )
-                _log(
-                    f"  input-token filter: cap={input_token_cap} ({origin}); "
-                    f"rows above cap will be skipped before counting toward num_requests"
-                )
-            else:
-                ctx_len = proxy_info.get("context_length")
-                _log(
-                    f"  input-token filter: disabled "
-                    f"(context_length={ctx_len!r}, override={max_input_tokens!r}); "
-                    f"overlong rows will hit upstream as 4xx -- pass --max-input-tokens N to filter"
-                )
-            config["input_token_cap"] = input_token_cap
-            config["context_length"] = proxy_info.get("context_length")
+                now = time.perf_counter()
+                if now - last_log >= 5.0:
+                    elapsed = now - t_start
+                    ok_n = sum(1 for r in results if 200 <= r["status"] < 300)
+                    rate = done / elapsed if elapsed > 0 else 0.0
+                    progress = {
+                        "ts": _ts(),
+                        "event": "progress",
+                        "elapsed_seconds": round(elapsed, 3),
+                        "sent": sent,
+                        "done": done,
+                        "ok": ok_n,
+                        "fail": done - ok_n,
+                        "rate_rps": round(rate, 2),
+                    }
+                    progress_log.append(progress)
+                    # Emit as a single-line JSON record so log scrapers
+                    # can grep ``"event": "progress"`` and parse with
+                    # ``jq``; the ``ts`` field is the wall-clock time
+                    # of the snapshot (paired with ``elapsed_seconds``
+                    # which is monotonic-clock since dispatch start).
+                    print(json.dumps(progress), flush=True)
+                    last_log = now
 
-            progress_log: list[dict] = []
-            filter_stats: dict = {"filtered": 0, "max_filtered_tokens": 0}
+        workers = [asyncio.create_task(worker()) for _ in range(concurrency)]
+        try:
+            # ``_iter_bodies`` wraps a per-source generator (parquet
+            # ``iter_batches`` for GLM5, Arrow-backed row iteration for
+            # HF), so rows are pulled lazily; combined with ``queue``
+            # (bounded at ``concurrency * 2``) the pipeline back-pressures
+            # from the workers all the way down to the dataset reader.
+            # Memory stays O(concurrency) regardless of dataset size.
+            for ts, body in _iter_bodies(
+                rows,
+                offset=offset,
+                num_requests=num_requests,
+                model_override=model,
+                stream_override=stream,
+                max_tokens_override=max_tokens,
+                max_input_tokens=input_token_cap,
+                filter_stats=filter_stats,
+            ):
+                await queue.put((ts, body))
+                sent += 1
+                # Yield periodically so embedded proxy runs don't monopolize
+                # uvicorn's event loop while scanning/filtering large rows.
+                if sent % max(1, concurrency) == 0:
+                    await asyncio.sleep(0)
+        finally:
+            for _ in range(concurrency):
+                await queue.put(None)
+            await asyncio.gather(*workers)
 
-            async def worker() -> None:
-                nonlocal done, last_log
-                while True:
-                    item = await queue.get()
-                    if item is None:
-                        return
-                    _, body = item
-                    res = await _send_one(client, body)
-                    results.append(res)
-                    done += 1
-                    # Emit a single-line failure record as soon as it
-                    # happens. Useful when the proxy returns 4xx/5xx
-                    # mid-run (e.g. SGLang chat-template validation
-                    # rejecting a malformed conversation): without this,
-                    # the only signal is a bumped ``fail`` counter on
-                    # the next 5-second progress tick.
-                    if not (200 <= res["status"] < 300):
-                        snippet = (res.get("error") or "")[:160]
-                        _log(
-                            f"  request fail status={res['status']} "
-                            f"input_tokens={res.get('input_tokens')} "
-                            f'error="{snippet}"'
-                        )
-                    now = time.perf_counter()
-                    if now - last_log >= 5.0:
-                        elapsed = now - t_start
-                        ok_n = sum(1 for r in results if 200 <= r["status"] < 300)
-                        rate = done / elapsed if elapsed > 0 else 0.0
-                        progress = {
-                            "ts": _ts(),
-                            "event": "progress",
-                            "elapsed_seconds": round(elapsed, 3),
-                            "sent": sent,
-                            "done": done,
-                            "ok": ok_n,
-                            "fail": done - ok_n,
-                            "rate_rps": round(rate, 2),
-                        }
-                        progress_log.append(progress)
-                        # Emit as a single-line JSON record so log scrapers
-                        # can grep ``"event": "progress"`` and parse with
-                        # ``jq``; the ``ts`` field is the wall-clock time
-                        # of the snapshot (paired with ``elapsed_seconds``
-                        # which is monotonic-clock since dispatch start).
-                        print(json.dumps(progress), flush=True)
-                        last_log = now
+    elapsed = max(time.perf_counter() - t_start, 1e-9)
+    ok_results = [r for r in results if 200 <= r["status"] < 300]
+    ok = len(ok_results)
+    fail = len(results) - ok
 
-            workers = [asyncio.create_task(worker()) for _ in range(concurrency)]
-            try:
-                # ``_iter_bodies`` wraps a per-source generator (parquet
-                # ``iter_batches`` for GLM5, Arrow-backed row iteration for
-                # HF), so rows are pulled lazily; combined with ``queue``
-                # (bounded at ``concurrency * 2``) the pipeline back-pressures
-                # from the workers all the way down to the dataset reader.
-                # Memory stays O(concurrency) regardless of dataset size.
-                for ts, body in _iter_bodies(
-                    rows,
-                    offset=offset,
-                    num_requests=num_requests,
-                    model_override=model,
-                    stream_override=stream,
-                    max_tokens_override=max_tokens,
-                    max_input_tokens=input_token_cap,
-                    filter_stats=filter_stats,
-                ):
-                    await queue.put((ts, body))
-                    sent += 1
-            finally:
-                for _ in range(concurrency):
-                    await queue.put(None)
-                await asyncio.gather(*workers)
+    # All per-request timings come back in nanoseconds; convert to s/ms
+    # at the boundary so display formatting stays cheap.
+    ttfts = [r["ttft_ns"] / NS_PER_S for r in ok_results if r["ttft_ns"] is not None]
+    totals = [r["total_ns"] / NS_PER_S for r in ok_results]
+    input_tokens = [
+        r["input_tokens"]
+        for r in ok_results
+        if r["input_tokens"] is not None and r["input_tokens"] > 0
+    ]
+    output_tokens = [r["output_tokens"] for r in ok_results if r["output_tokens"] > 0]
 
-        elapsed = max(time.perf_counter() - t_start, 1e-9)
-        ok_results = [r for r in results if 200 <= r["status"] < 300]
-        ok = len(ok_results)
-        fail = len(results) - ok
+    # Inter-token latency and decode rate are only meaningful on SSE
+    # responses with at least 2 emitted tokens (so we have a real decode
+    # window between TTFT and end-of-stream).
+    sse_decoded = [
+        r
+        for r in ok_results
+        if r["is_sse"] and r["ttft_ns"] is not None and r["output_tokens"] >= 2
+    ]
+    itls_ms = [
+        (r["total_ns"] - r["ttft_ns"]) / NS_PER_MS / (r["output_tokens"] - 1) for r in sse_decoded
+    ]
+    decode_rates = [
+        (r["output_tokens"] - 1) * NS_PER_S / max(r["total_ns"] - r["ttft_ns"], 1)
+        for r in sse_decoded
+    ]
 
-        # All per-request timings come back in nanoseconds; convert to s/ms
-        # at the boundary so display formatting stays cheap.
-        ttfts = [r["ttft_ns"] / NS_PER_S for r in ok_results if r["ttft_ns"] is not None]
-        totals = [r["total_ns"] / NS_PER_S for r in ok_results]
-        input_tokens = [
-            r["input_tokens"]
-            for r in ok_results
-            if r["input_tokens"] is not None and r["input_tokens"] > 0
-        ]
-        output_tokens = [r["output_tokens"] for r in ok_results if r["output_tokens"] > 0]
+    # Aggregate token throughput is the headline number for inference
+    # benchmarks: total tokens emitted (or consumed) by the server,
+    # divided by wall-clock dispatch time. Uses ok-only token totals so
+    # failed requests don't inflate or deflate the rate.
+    total_input_tokens = sum(input_tokens)
+    total_output_tokens = sum(output_tokens)
+    input_throughput = total_input_tokens / elapsed
+    output_throughput = total_output_tokens / elapsed
+    total_throughput = (total_input_tokens + total_output_tokens) / elapsed
 
-        # Inter-token latency and decode rate are only meaningful on SSE
-        # responses with at least 2 emitted tokens (so we have a real decode
-        # window between TTFT and end-of-stream).
-        sse_decoded = [
-            r
-            for r in ok_results
-            if r["is_sse"] and r["ttft_ns"] is not None and r["output_tokens"] >= 2
-        ]
-        itls_ms = [
-            (r["total_ns"] - r["ttft_ns"]) / NS_PER_MS / (r["output_tokens"] - 1)
-            for r in sse_decoded
-        ]
-        decode_rates = [
-            (r["output_tokens"] - 1) * NS_PER_S / max(r["total_ns"] - r["ttft_ns"], 1)
-            for r in sse_decoded
-        ]
+    # Per-status counts, useful for distinguishing "503 from queue
+    # overflow" vs "0 from upstream connection drops".
+    status_breakdown: dict[int, int] = {}
+    for r in results:
+        status_breakdown[r["status"]] = status_breakdown.get(r["status"], 0) + 1
+    fail_breakdown = {s: c for s, c in status_breakdown.items() if not 200 <= s < 300}
 
-        # Aggregate token throughput is the headline number for inference
-        # benchmarks: total tokens emitted (or consumed) by the server,
-        # divided by wall-clock dispatch time. Uses ok-only token totals so
-        # failed requests don't inflate or deflate the rate.
-        total_input_tokens = sum(input_tokens)
-        total_output_tokens = sum(output_tokens)
-        input_throughput = total_input_tokens / elapsed
-        output_throughput = total_output_tokens / elapsed
-        total_throughput = (total_input_tokens + total_output_tokens) / elapsed
+    ttft_s = _stats(ttfts)
+    total_s = _stats(totals)
+    itl_s = _stats(itls_ms)
+    decode_s = _stats(decode_rates)
+    in_tok_s = _stats([float(x) for x in input_tokens])
+    out_tok_s = _stats([float(x) for x in output_tokens])
 
-        # Per-status counts, useful for distinguishing "503 from queue
-        # overflow" vs "0 from upstream connection drops".
-        status_breakdown: dict[int, int] = {}
-        for r in results:
-            status_breakdown[r["status"]] = status_breakdown.get(r["status"], 0) + 1
-        fail_breakdown = {s: c for s, c in status_breakdown.items() if not 200 <= s < 300}
+    success_rate = (ok / len(results)) if results else 0.0
 
-        ttft_s = _stats(ttfts)
-        total_s = _stats(totals)
-        itl_s = _stats(itls_ms)
-        decode_s = _stats(decode_rates)
-        in_tok_s = _stats([float(x) for x in input_tokens])
-        out_tok_s = _stats([float(x) for x in output_tokens])
-
-        success_rate = (ok / len(results)) if results else 0.0
-
-        stats = {
-            "sent": sent,
-            "ok": ok,
-            "fail": fail,
-            "success_rate": success_rate,
-            "status_breakdown": status_breakdown,
-            "elapsed_seconds": elapsed,
-            "request_throughput_rps": len(results) / elapsed,
-            "input_token_throughput": input_throughput,
-            "output_token_throughput": output_throughput,
-            "total_token_throughput": total_throughput,
-            "total_input_tokens": total_input_tokens,
-            "total_output_tokens": total_output_tokens,
-            "ttft_seconds": ttft_s,
-            "request_e2e_seconds": total_s,
-            "itl_ms": itl_s,
-            "decode_tokens_per_second": decode_s,
-            "input_tokens": in_tok_s,
-            "output_tokens": out_tok_s,
+    stats = {
+        "sent": sent,
+        "ok": ok,
+        "fail": fail,
+        "success_rate": success_rate,
+        "status_breakdown": status_breakdown,
+        "elapsed_seconds": elapsed,
+        "request_throughput_rps": len(results) / elapsed,
+        "input_token_throughput": input_throughput,
+        "output_token_throughput": output_throughput,
+        "total_token_throughput": total_throughput,
+        "total_input_tokens": total_input_tokens,
+        "total_output_tokens": total_output_tokens,
+        "ttft_seconds": ttft_s,
+        "request_e2e_seconds": total_s,
+        "itl_ms": itl_s,
+        "decode_tokens_per_second": decode_s,
+        "input_tokens": in_tok_s,
+        "output_tokens": out_tok_s,
+    }
+    if filter_stats.get("filtered"):
+        stats["input_filtered"] = {
+            "count": filter_stats["filtered"],
+            "max_filtered_tokens": filter_stats["max_filtered_tokens"],
+            "cap": input_token_cap,
         }
-        if filter_stats.get("filtered"):
-            stats["input_filtered"] = {
-                "count": filter_stats["filtered"],
-                "max_filtered_tokens": filter_stats["max_filtered_tokens"],
-                "cap": input_token_cap,
-            }
-            _log(
-                f"  input-token filter: skipped {filter_stats['filtered']} "
-                f"row(s) over cap={input_token_cap} "
-                f"(largest={filter_stats['max_filtered_tokens']} approx tokens)"
-            )
-        _print_summary(stats, fail_breakdown)
-        return stats, results, proxy_info, progress_log
-
-    stats, raw_results, proxy_info, progress_log = asyncio.run(amain())
+        _log(
+            f"  input-token filter: skipped {filter_stats['filtered']} "
+            f"row(s) over cap={input_token_cap} "
+            f"(largest={filter_stats['max_filtered_tokens']} approx tokens)"
+        )
+    _print_summary(stats, fail_breakdown)
+    raw_results = results
     config["proxy"] = proxy_info
 
     # Resolve where to drop the JSON: auto-name under /results when the
@@ -1208,6 +1196,57 @@ def replay(
 
     stats["output_path"] = resolved_output_path
     return stats
+
+
+@app.function(
+    image=image,
+    region=REGION,
+    timeout=24 * 60 * 60,
+    volumes={
+        "/data": completions_volume,
+        "/lmsys": lmsys_chat_1m_volume,
+        "/datasets": hf_datasets_volume,
+        "/results": bench_results_volume,
+    },
+)
+def replay(
+    proxy_url: str,
+    *,
+    source: str = SOURCE_GLM5,
+    preset: str | None = None,
+    data_path: str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    offset: int = 0,
+    num_requests: int | None = None,
+    concurrency: int = 16,
+    model: str | None = DEFAULT_MODEL,
+    stream: bool | None = None,
+    max_tokens: int | None = None,
+    max_input_tokens: int | None = None,
+    output_path: str | None = None,
+    save_per_request: bool = True,
+) -> dict:
+    """Modal wrapper around :func:`run_replay_async`."""
+    return asyncio.run(
+        run_replay_async(
+            proxy_url=proxy_url,
+            source=source,
+            preset=preset,
+            data_path=data_path,
+            start_time=start_time,
+            end_time=end_time,
+            offset=offset,
+            num_requests=num_requests,
+            concurrency=concurrency,
+            model=model,
+            stream=stream,
+            max_tokens=max_tokens,
+            max_input_tokens=max_input_tokens,
+            output_path=output_path,
+            save_per_request=save_per_request,
+        )
+    )
 
 
 @app.local_entrypoint()
