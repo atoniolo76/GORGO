@@ -599,6 +599,31 @@ def proxy():
             "error": None,
             "stop_requested": False,
         },
+        "workload_run": {
+            "running": False,
+            "status": "idle",
+            "task": None,
+            "run_id": None,
+            "started_at": None,
+            "finished_at": None,
+            "config": None,
+            "stats": None,
+            "output_path": None,
+            "error": None,
+            "stop_requested": False,
+        },
+        "trace": {
+            "enabled": False,
+            "trace_id": None,
+            "sample_metrics": True,
+            "sample_requests": True,
+            "max_events": 200_000,
+            "started_at": None,
+            "stopped_at": None,
+            "dropped_metrics": 0,
+            "dropped_requests": 0,
+            "saved_paths": None,
+        },
     }
     endpoints_queued_tokens: dict[str, int] = {url: 0 for url in replica_urls}
 
@@ -608,6 +633,8 @@ def proxy():
     # ``target`` (chosen replica) and ``recorded_at_monotonic`` so /tune
     # consumers can do their own time-windowing if desired.
     samples: deque[dict] = deque(maxlen=MAX_REQUEST_SAMPLES)
+    metrics_trace_events: deque[dict] = deque(maxlen=state["trace"]["max_events"])
+    request_trace_events: deque[dict] = deque(maxlen=state["trace"]["max_events"])
 
     # Live radix trie of every prompt we've forwarded. Each node along a
     # sequence's insertion path is tagged with the replica URL that received
@@ -639,6 +666,8 @@ def proxy():
     live_metrics: dict[str, ReplicaSnapshot] = {}
     metrics_meta: dict = {
         "last_refresh_monotonic": 0.0,
+        "last_refresh_wall_ts": None,
+        "refresh_seq": 0,
         "last_refresh_errors": {},  # url -> str
     }
 
@@ -745,6 +774,79 @@ def proxy():
         )
         await send({"type": "http.response.body", "body": body})
 
+    def _now_wall_ts() -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def _trace_append(kind: str, event: dict) -> None:
+        tr = state["trace"]
+        if not tr["enabled"]:
+            return
+        if kind == "metrics":
+            if not tr["sample_metrics"]:
+                return
+            target = metrics_trace_events
+            dropped_key = "dropped_metrics"
+        elif kind == "request":
+            if not tr["sample_requests"]:
+                return
+            target = request_trace_events
+            dropped_key = "dropped_requests"
+        else:
+            return
+        if target.maxlen is not None and len(target) >= target.maxlen:
+            tr[dropped_key] += 1
+        target.append(event)
+
+    def _trace_status_payload() -> dict:
+        tr = state["trace"]
+        first_ts = None
+        last_ts = None
+        for buf in (metrics_trace_events, request_trace_events):
+            if not buf:
+                continue
+            b_first = buf[0].get("wall_ts")
+            b_last = buf[-1].get("wall_ts")
+            first_ts = b_first if first_ts is None else min(first_ts, b_first)
+            last_ts = b_last if last_ts is None else max(last_ts, b_last)
+        return {
+            **tr,
+            "metrics_events": len(metrics_trace_events),
+            "request_events": len(request_trace_events),
+            "first_event_ts": first_ts,
+            "last_event_ts": last_ts,
+        }
+
+    def _write_jsonl(path: str, rows: deque[dict]) -> None:
+        with open(path, "w") as f:
+            for row in rows:
+                f.write(json.dumps(row, separators=(",", ":")) + "\n")
+
+    def _save_trace_to_volume() -> dict:
+        tr = state["trace"]
+        trace_id = tr["trace_id"] or f"trace-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+        out_dir = os.path.join("/results", "proxy_traces", trace_id)
+        os.makedirs(out_dir, exist_ok=True)
+        metrics_path = os.path.join(out_dir, "metrics.jsonl")
+        requests_path = os.path.join(out_dir, "requests.jsonl")
+        manifest_path = os.path.join(out_dir, "manifest.json")
+        _write_jsonl(metrics_path, metrics_trace_events)
+        _write_jsonl(requests_path, request_trace_events)
+        manifest = {
+            "trace": _trace_status_payload(),
+            "metrics_path": metrics_path,
+            "requests_path": requests_path,
+        }
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2)
+        bench_results_volume.commit()
+        paths = {
+            "metrics_path": metrics_path,
+            "requests_path": requests_path,
+            "manifest_path": manifest_path,
+        }
+        tr["saved_paths"] = paths
+        return paths
+
     # ---------- Upstream client + metrics refresh ----------
 
     def _new_upstream_client() -> httpx.AsyncClient:
@@ -757,9 +859,10 @@ def proxy():
             limits=upstream_limits,
         )
 
-    async def _refresh_one(client: httpx.AsyncClient, url: str) -> None:
+    async def _refresh_one(client: httpx.AsyncClient, url: str, seq: int) -> None:
         """Scrape one replica's /metrics into ``live_metrics[url]``."""
         t0 = time.monotonic()
+        wall_ts = _now_wall_ts()
         try:
             # Override the client's generous default timeout -- if a replica
             # can't answer /metrics in 2s it's effectively down for routing
@@ -767,11 +870,32 @@ def proxy():
             resp = await client.get(f"{url}/metrics", timeout=METRICS_FETCH_TIMEOUT_SECONDS)
             resp.raise_for_status()
         except Exception as e:
+            latency = time.monotonic() - t0
             metrics_meta["last_refresh_errors"][url] = repr(e)
+            _trace_append(
+                "metrics",
+                {
+                    "kind": "metrics",
+                    "trace_id": state["trace"]["trace_id"],
+                    "seq": seq,
+                    "wall_ts": wall_ts,
+                    "monotonic_s": t0,
+                    "replica_url": url,
+                    "region": REGION,
+                    "scrape_latency_seconds": latency,
+                    "ok": False,
+                    "num_running_reqs": None,
+                    "num_queue_reqs": None,
+                    "num_used_tokens": None,
+                    "utilization": None,
+                    "gen_throughput": None,
+                    "error": repr(e),
+                },
+            )
             return
         latency = time.monotonic() - t0
         parsed = _parse_metrics_text(resp.text)
-        live_metrics[url] = ReplicaSnapshot(
+        snap = ReplicaSnapshot(
             num_running_reqs=int(parsed.get("sglang:num_running_reqs", 0)),
             num_queue_reqs=int(parsed.get("sglang:num_queue_reqs", 0)),
             num_used_tokens=int(parsed.get("sglang:num_used_tokens", 0)),
@@ -779,18 +903,42 @@ def proxy():
             gen_throughput=float(parsed.get("sglang:gen_throughput", 0.0)),
             utilization=float(parsed.get("sglang:utilization", 0.0)),
         )
+        live_metrics[url] = snap
         metrics_meta["last_refresh_errors"].pop(url, None)
+        _trace_append(
+            "metrics",
+            {
+                "kind": "metrics",
+                "trace_id": state["trace"]["trace_id"],
+                "seq": seq,
+                "wall_ts": wall_ts,
+                "monotonic_s": t0,
+                "replica_url": url,
+                "region": REGION,
+                "scrape_latency_seconds": latency,
+                "ok": True,
+                "num_running_reqs": snap.num_running_reqs,
+                "num_queue_reqs": snap.num_queue_reqs,
+                "num_used_tokens": snap.num_used_tokens,
+                "utilization": snap.utilization,
+                "gen_throughput": snap.gen_throughput,
+                "error": None,
+            },
+        )
 
     async def _refresh_all(client: httpx.AsyncClient | None) -> None:
         """One pass: refresh every registered replica in parallel."""
         await _sync_replicas_from_modal_dict_async()
         if client is None or not replica_urls:
             return
+        seq = metrics_meta["refresh_seq"] + 1
         await asyncio.gather(
-            *[_refresh_one(client, url) for url in replica_urls],
+            *[_refresh_one(client, url, seq) for url in replica_urls],
             return_exceptions=True,
         )
+        metrics_meta["refresh_seq"] = seq
         metrics_meta["last_refresh_monotonic"] = time.monotonic()
+        metrics_meta["last_refresh_wall_ts"] = _now_wall_ts()
 
     async def _metrics_refresh_loop() -> None:
         """Background task: refresh every ``METRICS_REFRESH_INTERVAL_SECONDS``.
@@ -1236,6 +1384,58 @@ def proxy():
             "preview": preview,
         }
 
+    async def _handle_post_trace_start(data) -> tuple[int, dict]:
+        nonlocal metrics_trace_events, request_trace_events
+        if not isinstance(data, dict):
+            return 400, {"error": "body must be a JSON object"}
+        tr = state["trace"]
+        trace_id = data.get("trace_id")
+        if trace_id is not None and not isinstance(trace_id, str):
+            return 400, {"error": "trace_id must be a string"}
+        try:
+            max_events = int(data.get("max_events", tr["max_events"]))
+        except (TypeError, ValueError):
+            return 400, {"error": "max_events must be an integer"}
+        if max_events <= 0:
+            return 400, {"error": "max_events must be positive"}
+
+        append = bool(data.get("append", False))
+        if not append or max_events != tr["max_events"]:
+            metrics_trace_events = deque(maxlen=max_events)
+            request_trace_events = deque(maxlen=max_events)
+
+        tr.update(
+            {
+                "enabled": True,
+                "trace_id": trace_id
+                or f"trace-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}",
+                "sample_metrics": bool(data.get("sample_metrics", True)),
+                "sample_requests": bool(data.get("sample_requests", True)),
+                "max_events": max_events,
+                "started_at": _now_wall_ts(),
+                "stopped_at": None,
+                "saved_paths": None,
+            }
+        )
+        if not append:
+            tr["dropped_metrics"] = 0
+            tr["dropped_requests"] = 0
+        _log(f"trace started id={tr['trace_id']} max_events={max_events}")
+        return 200, {"trace": _trace_status_payload()}
+
+    async def _handle_get_trace_status(_data) -> tuple[int, dict]:
+        return 200, {"trace": _trace_status_payload()}
+
+    async def _handle_post_trace_stop(_data) -> tuple[int, dict]:
+        state["trace"]["enabled"] = False
+        state["trace"]["stopped_at"] = _now_wall_ts()
+        _log(f"trace stopped id={state['trace']['trace_id']}")
+        return 200, {"trace": _trace_status_payload()}
+
+    async def _handle_post_trace_save(_data) -> tuple[int, dict]:
+        paths = _save_trace_to_volume()
+        return 200, {"trace": _trace_status_payload(), "paths": paths}
+
     def _batch_tuning_public_state() -> dict:
         bt = state["batch_tuning"]
         payload = {k: v for k, v in bt.items() if k != "task"}
@@ -1382,6 +1582,7 @@ def proxy():
                 finished_at=finished_at,
                 output_path=summary_path,
             )
+            summary["trace"] = _trace_status_payload()
             tmp_path = f"{summary_path}.tmp"
             with open(tmp_path, "w") as f:
                 json.dump(summary, f, indent=2)
@@ -1415,6 +1616,7 @@ def proxy():
                 stats = await run_replay_async(
                     proxy_url="http://127.0.0.1:8000",
                     output_path=trial_output,
+                    run_id=f"{run_id}-trial-{trial_idx:03d}",
                     **workload_kwargs,
                 )
                 score = score_fn(stats)
@@ -1550,6 +1752,131 @@ def proxy():
         task.cancel()
         return 202, {"batch_tuning": _batch_tuning_public_state()}
 
+    def _workload_public_state() -> dict:
+        wr = state["workload_run"]
+        return {k: v for k, v in wr.items() if k != "task"}
+
+    def _normalize_workload_config(data: dict) -> dict:
+        if not isinstance(data, dict):
+            raise ValueError("body must be a JSON object")
+        data_path = data.get("data_path") or data.get("trace_path")
+        if not isinstance(data_path, str) or not data_path:
+            raise ValueError("data_path or trace_path is required")
+        return {
+            "data_path": data_path,
+            "run_id": _parse_optional_str(data, "run_id", ""),
+            "concurrency": _parse_int(data, "concurrency", 16),
+            "model": _parse_optional_str(data, "model", ""),
+            "stream": _parse_optional_bool(data, "stream"),
+            "max_tokens": (_parse_int(data, "max_tokens", 0) or None),
+            "max_input_tokens": _parse_int(data, "max_input_tokens", 0),
+            "arrival_mode": _parse_optional_str(data, "arrival_mode", "open-loop"),
+            "time_scale": _parse_float(data, "time_scale", 1.0),
+            "output_path": _parse_optional_str(data, "output_path", ""),
+            "save_per_request": bool(data.get("save_per_request", True)),
+            "start_at_wall_time": _parse_optional_str(data, "start_at_wall_time", ""),
+        }
+
+    async def _run_workload(run_id: str, config: dict) -> None:
+        from proxy.workload import DEFAULT_MODEL, run_replay_async
+
+        wr = state["workload_run"]
+        try:
+            start_at = config.get("start_at_wall_time")
+            if start_at:
+                target = datetime.fromisoformat(start_at.replace("Z", "+00:00"))
+                if target.tzinfo is None:
+                    target = target.replace(tzinfo=timezone.utc)
+                now = datetime.now(timezone.utc)
+                delay = (target.astimezone(timezone.utc) - now).total_seconds()
+                if delay > 0:
+                    wr["status"] = "scheduled"
+                    _log(f"workload {run_id} scheduled for {start_at} ({delay:.3f}s)")
+                    await asyncio.sleep(delay)
+                    wr["status"] = "running"
+            _log(f"workload {run_id} started path={config['data_path']}")
+            output_path = config["output_path"] or f"/results/workload_runs/{run_id}.json"
+            stats = await run_replay_async(
+                proxy_url="http://127.0.0.1:8000",
+                source="mooncake",
+                data_path=config["data_path"],
+                concurrency=config["concurrency"],
+                model=config["model"] or DEFAULT_MODEL,
+                stream=config["stream"],
+                max_tokens=config["max_tokens"],
+                max_input_tokens=config["max_input_tokens"],
+                output_path=output_path,
+                save_per_request=config["save_per_request"],
+                run_id=run_id,
+                arrival_mode=config["arrival_mode"],
+                time_scale=config["time_scale"],
+            )
+            finished_at = datetime.now(timezone.utc)
+            wr["status"] = "succeeded"
+            wr["finished_at"] = finished_at.isoformat().replace("+00:00", "Z")
+            wr["stats"] = stats
+            wr["output_path"] = stats.get("output_path")
+            _log(f"workload {run_id} succeeded output={wr['output_path']}")
+        except asyncio.CancelledError:
+            finished_at = datetime.now(timezone.utc)
+            wr["status"] = "cancelled"
+            wr["finished_at"] = finished_at.isoformat().replace("+00:00", "Z")
+            wr["error"] = "cancelled"
+            _log(f"workload {run_id} cancelled")
+        except Exception as e:
+            finished_at = datetime.now(timezone.utc)
+            wr["status"] = "failed"
+            wr["finished_at"] = finished_at.isoformat().replace("+00:00", "Z")
+            wr["error"] = f"{type(e).__name__}: {e}"
+            _log(f"workload {run_id} failed: {wr['error']}")
+        finally:
+            wr["running"] = False
+            wr["task"] = None
+            wr["stop_requested"] = False
+
+    async def _handle_post_workload_start(data) -> tuple[int, dict]:
+        wr = state["workload_run"]
+        task = wr.get("task")
+        if task is not None and not task.done():
+            return 409, {"error": "workload already running", "workload": _workload_public_state()}
+        try:
+            config = _normalize_workload_config(data)
+        except ValueError as e:
+            return 400, {"error": str(e)}
+        run_id = (
+            config["run_id"]
+            or f"workload-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+        )
+        wr.update(
+            {
+                "running": True,
+                "status": "running",
+                "run_id": run_id,
+                "started_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "finished_at": None,
+                "config": config,
+                "stats": None,
+                "output_path": None,
+                "error": None,
+                "stop_requested": False,
+            }
+        )
+        task = asyncio.create_task(_run_workload(run_id, config))
+        wr["task"] = task
+        return 202, {"run_id": run_id, "status": "running", "workload": _workload_public_state()}
+
+    async def _handle_get_workload_status(_data) -> tuple[int, dict]:
+        return 200, {"workload": _workload_public_state()}
+
+    async def _handle_post_workload_stop(_data) -> tuple[int, dict]:
+        wr = state["workload_run"]
+        task = wr.get("task")
+        if task is None or task.done():
+            return 200, {"workload": _workload_public_state()}
+        wr["stop_requested"] = True
+        task.cancel()
+        return 202, {"workload": _workload_public_state()}
+
     # JSON route table. The dispatcher distinguishes 405 (method exists
     # for path but not this verb) from 404 (path unknown) by membership
     # checks, so adding a new (method, path) entry here is the only edit
@@ -1569,9 +1896,16 @@ def proxy():
         ("GET", "/samples"): _handle_get_samples,
         ("GET", "/tune"): _handle_get_tune,
         ("POST", "/tune"): _handle_post_tune,
+        ("POST", "/trace/start"): _handle_post_trace_start,
+        ("GET", "/trace/status"): _handle_get_trace_status,
+        ("POST", "/trace/stop"): _handle_post_trace_stop,
+        ("POST", "/trace/save"): _handle_post_trace_save,
         ("POST", "/tuning/start"): _handle_post_tuning_start,
         ("GET", "/tuning/status"): _handle_get_tuning_status,
         ("POST", "/tuning/stop"): _handle_post_tuning_stop,
+        ("POST", "/workload/start"): _handle_post_workload_start,
+        ("GET", "/workload/status"): _handle_get_workload_status,
+        ("POST", "/workload/stop"): _handle_post_workload_stop,
     }
 
     async def _dispatch_json(method: str, path: str, receive, send) -> bool:
@@ -1703,7 +2037,11 @@ def proxy():
             f"(apply={at['apply']})"
         )
 
-    async def _handle_chat_completions(receive, send) -> None:
+    async def _handle_chat_completions(scope, receive, send) -> None:
+        headers = {
+            k.decode("latin1").lower(): v.decode("latin1") for k, v in (scope.get("headers") or [])
+        }
+        request_id = headers.get("x-gorgo-request-id") or f"proxy-{uuid.uuid4().hex}"
         try:
             data = await _read_json_body(receive)
         except json.JSONDecodeError:
@@ -1720,6 +2058,31 @@ def proxy():
 
         token_ids = tokenize_input(messages)
         request_tokens = len(token_ids)
+        decision_monotonic = time.monotonic()
+        decision_wall_ts = _now_wall_ts()
+        metrics_seq_at_decision = metrics_meta.get("refresh_seq", 0)
+        last_refresh = metrics_meta.get("last_refresh_monotonic") or 0.0
+        metrics_age_seconds = (decision_monotonic - last_refresh) if last_refresh else None
+        cached_by_replica = (
+            radix_trie.cached_prefix_lengths(token_ids, replica_urls)
+            if token_ids and state["trace"]["enabled"] and state["trace"]["sample_requests"]
+            else {}
+        )
+        candidate_snapshot = None
+        if state["trace"]["enabled"] and state["trace"]["sample_requests"]:
+            candidate_snapshot = {}
+            for u in replica_urls:
+                snap = live_metrics.get(u)
+                candidate_snapshot[u] = {
+                    "latency_seconds": snap.latency if snap else None,
+                    "num_running_reqs": snap.num_running_reqs if snap else None,
+                    "num_queue_reqs": snap.num_queue_reqs if snap else None,
+                    "num_used_tokens": snap.num_used_tokens if snap else None,
+                    "utilization": snap.utilization if snap else None,
+                    "gen_throughput": snap.gen_throughput if snap else None,
+                    "queued_tokens": endpoints_queued_tokens.get(u, 0),
+                    "cached_prefix_tokens": cached_by_replica.get(u, 0),
+                }
 
         try:
             target = _select_endpoint(token_ids)
@@ -1730,11 +2093,39 @@ def proxy():
                 return
             target = random.choice(replica_urls)
 
+        request_trace_event = {
+            "kind": "request",
+            "trace_id": state["trace"]["trace_id"],
+            "request_id": request_id,
+            "wall_ts": decision_wall_ts,
+            "monotonic_s": decision_monotonic,
+            "policy": state["policy"],
+            "target": target,
+            "request_tokens": request_tokens,
+            "metrics_seq_at_decision": metrics_seq_at_decision,
+            "metrics_age_seconds": metrics_age_seconds,
+            "candidate_snapshot": candidate_snapshot,
+            "status": None,
+            "ttft_ns": None,
+            "total_ns": None,
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "error": None,
+        }
+
         endpoints_queued_tokens[target] = endpoints_queued_tokens.get(target, 0) + request_tokens
         client = state["upstream_client"]
         if client is None:
             # Race between startup and the first inbound request; defensive.
             await _send_json(send, 503, {"error": "upstream client not yet initialized"})
+            request_trace_event.update(
+                {
+                    "status": 503,
+                    "total_ns": 0,
+                    "error": "upstream client not yet initialized",
+                }
+            )
+            _trace_append("request", request_trace_event)
             if target in endpoints_queued_tokens:
                 endpoints_queued_tokens[target] = max(
                     0, endpoints_queued_tokens[target] - request_tokens
@@ -1759,6 +2150,12 @@ def proxy():
             "content-type": "application/json",
         }
         headers_sent = False
+        upstream_status = None
+        ttft_ns = None
+        total_ns = None
+        prompt_tokens = None
+        completion_tokens = None
+        output_tokens = 0
         # Captured before client.stream(...) so TTFT measured by the SSE
         # tee includes request-send + response-headers latency, matching
         # the contract in proxy/measure.py::consume_sse_stream.
@@ -1770,6 +2167,7 @@ def proxy():
                 content=upstream_body,
                 headers=upstream_headers,
             ) as upstream:
+                upstream_status = upstream.status_code
                 # At this point the request body has been sent upstream
                 # and the response headers have come back, so the replica
                 # has ingested the prompt and (at minimum) started
@@ -1844,11 +2242,15 @@ def proxy():
                     async for chunk in upstream.aiter_raw():
                         if chunk:
                             await _sink(chunk)
+                    total_ns = time.perf_counter_ns() - request_start_ns
                 await send({"type": "http.response.body", "body": b"", "more_body": False})
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            request_trace_event["error"] = f"{type(e).__name__}: {e}"
             if not headers_sent:
                 await _send_json(send, 502, {"error": f"upstream replica unreachable: {e}"})
+                upstream_status = 502
         except httpx.HTTPError as e:
+            request_trace_event["error"] = f"{type(e).__name__}: {e}"
             if headers_sent:
                 # Already committed to a status; best we can do is close
                 # the body cleanly so the client sees a truncated stream.
@@ -1859,7 +2261,22 @@ def proxy():
                     pass
             else:
                 await _send_json(send, 502, {"error": f"upstream stream error: {e}"})
+                upstream_status = 502
         finally:
+            request_trace_event.update(
+                {
+                    "status": upstream_status,
+                    "ttft_ns": ttft_ns,
+                    "total_ns": total_ns
+                    if total_ns is not None
+                    else time.perf_counter_ns() - request_start_ns,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": (
+                        completion_tokens if completion_tokens is not None else output_tokens
+                    ),
+                }
+            )
+            _trace_append("request", request_trace_event)
             # Only decrement if the replica is still registered; if it was
             # removed mid-request via /replicas POST, don't leak its key
             # back into the queue-tokens dict.
@@ -1900,6 +2317,14 @@ def proxy():
                         await batch_task
                     except (asyncio.CancelledError, Exception):
                         pass
+                workload_task = state["workload_run"].get("task")
+                if workload_task is not None:
+                    state["workload_run"]["stop_requested"] = True
+                    workload_task.cancel()
+                    try:
+                        await workload_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
                 task = state.get("metrics_task")
                 if task is not None:
                     task.cancel()
@@ -1930,7 +2355,7 @@ def proxy():
         method = scope["method"]
 
         if path == "/v1/chat/completions" and method == "POST":
-            await _handle_chat_completions(receive, send)
+            await _handle_chat_completions(scope, receive, send)
             return
 
         if await _dispatch_json(method, path, receive, send):

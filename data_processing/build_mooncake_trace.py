@@ -41,7 +41,11 @@ import modal
 
 from app import app, completions_volume
 
-image = modal.Image.debian_slim().pip_install("pyarrow", "tiktoken").add_local_python_source("app")
+image = (
+    modal.Image.debian_slim()
+    .pip_install("duckdb", "pyarrow", "tiktoken")
+    .add_local_python_source("app")
+)
 
 DEFAULT_BLOCK_SIZE = 512
 DEFAULT_DATA_DIR = "/data"
@@ -60,6 +64,17 @@ def build_mooncake_trace(
     end_time: str | None = None,
     block_size: int = DEFAULT_BLOCK_SIZE,
     data_dir: str = DEFAULT_DATA_DIR,
+    include_bodies: bool = False,
+    include_raw_bodies: bool = False,
+    time_scale: float = 1.0,
+    target_duration_ms: int = 0,
+    selection_mode: str = "chronological",
+    candidate_multiplier: int = 1,
+    top_token_hashes: int = 0,
+    max_input_tokens: int = 0,
+    max_total_tokens: int = 0,
+    min_input_tokens: int = 0,
+    output_sidecar_path: str | None = None,
 ) -> dict:
     """Walk GLM 5.1 parquet shards and emit a Mooncake FAST '25 trace JSONL.
 
@@ -78,6 +93,23 @@ def build_mooncake_trace(
             Mooncake uses 512 in their published traces.
         data_dir: Directory holding the GLM 5.1 ``llm_responses_*.parquet``
             shards. Defaults to the ``/data`` mount.
+        include_bodies: Include parsed request/response JSON objects so the
+            trace can be replayed against the proxy.
+        include_raw_bodies: Include raw request/response strings for exact
+            debugging/archival payloads.
+        time_scale: Multiply all relative timestamps by this factor.
+        target_duration_ms: Alternative to ``time_scale``; when positive,
+            compress/expand the selected trace to this total duration.
+        selection_mode: ``chronological`` (default), ``top-users``,
+            ``high-overlap``, ``mixed-overlap``, or ``token-hash-filter``.
+        candidate_multiplier: Scan up to ``num_requests * candidate_multiplier``
+            valid candidates before selecting the final trace.
+        top_token_hashes: For ``token-hash-filter``, keep requests from the
+            top-K token_hash values in the candidate pool. ``0`` picks a small
+            default based on candidate diversity.
+        max_input_tokens / max_total_tokens / min_input_tokens: Context-length
+            filters applied before selection. Positive values enable checks.
+        output_sidecar_path: Optional summary JSON path inside the volume.
 
     Returns:
         Dict with the resolved output path plus a few summary stats. The
@@ -86,10 +118,12 @@ def build_mooncake_trace(
     import hashlib
     import json
     import os
+    import statistics
     import time
+    from collections import Counter
     from datetime import datetime, timezone
 
-    import pyarrow.parquet as pq
+    import duckdb
     import tiktoken
 
     completions_volume.reload()
@@ -102,6 +136,21 @@ def build_mooncake_trace(
         raise SystemExit(f"--num-requests must be > 0 (got {num_requests})")
     if block_size <= 0:
         raise SystemExit(f"--block-size must be > 0 (got {block_size})")
+    if time_scale <= 0:
+        raise SystemExit(f"--time-scale must be > 0 (got {time_scale})")
+    if target_duration_ms < 0:
+        raise SystemExit(f"--target-duration-ms must be >= 0 (got {target_duration_ms})")
+    if candidate_multiplier <= 0:
+        raise SystemExit(f"--candidate-multiplier must be > 0 (got {candidate_multiplier})")
+    supported_modes = {
+        "chronological",
+        "top-users",
+        "high-overlap",
+        "mixed-overlap",
+        "token-hash-filter",
+    }
+    if selection_mode not in supported_modes:
+        raise SystemExit(f"--selection-mode must be one of {sorted(supported_modes)}")
 
     files = _select_files(data_dir, start_dt, end_dt)
     if not files:
@@ -115,6 +164,45 @@ def build_mooncake_trace(
             output_path if os.path.isabs(output_path) else os.path.join("/data", output_path)
         )
     os.makedirs(os.path.dirname(resolved_output_path), exist_ok=True)
+    if output_sidecar_path is None:
+        resolved_sidecar_path = resolved_output_path + ".summary.json"
+    else:
+        resolved_sidecar_path = (
+            output_sidecar_path
+            if os.path.isabs(output_sidecar_path)
+            else os.path.join("/data", output_sidecar_path)
+        )
+    os.makedirs(os.path.dirname(resolved_sidecar_path), exist_ok=True)
+    if os.path.exists(resolved_output_path) and os.path.exists(resolved_sidecar_path):
+        try:
+            with open(resolved_sidecar_path) as f:
+                existing = json.load(f)
+            print(f"[mooncake] reusing existing trace {resolved_output_path}", flush=True)
+            return {
+                "output_path": resolved_output_path,
+                "sidecar_path": resolved_sidecar_path,
+                "rows": existing.get("rows"),
+                "candidate_rows": existing.get("candidate_rows"),
+                "skipped_rows": existing.get("skipped_rows"),
+                "skipped_over_max_input": existing.get("skipped_over_max_input"),
+                "skipped_over_max_total": existing.get("skipped_over_max_total"),
+                "skipped_under_min_input": existing.get("skipped_under_min_input"),
+                "selection_mode": existing.get("selection_mode"),
+                "selected_token_hashes": existing.get("selected_token_hashes"),
+                "block_size": existing.get("block_size"),
+                "unique_blocks": existing.get("unique_blocks"),
+                "total_blocks": existing.get("total_blocks"),
+                "block_reuse_pct": existing.get("block_reuse_pct"),
+                "total_input_tokens": existing.get("total_input_tokens"),
+                "total_output_tokens": existing.get("total_output_tokens"),
+                "original_duration_ms": existing.get("original_duration_ms"),
+                "scaled_duration_ms": existing.get("scaled_duration_ms"),
+                "time_scale": existing.get("time_scale"),
+                "elapsed_seconds": 0.0,
+                "reused_existing": True,
+            }
+        except Exception:
+            pass
 
     enc = tiktoken.encoding_for_model("gpt-4o")
 
@@ -187,28 +275,72 @@ def build_mooncake_trace(
                 total += len(enc.encode(text, disallowed_special=()))
         return total
 
-    # First pass: walk parquets, tokenize, collect entries with absolute
-    # timestamps. We need everything in memory anyway because (a) the JSONL
-    # is sorted by timestamp before being relativized, and (b) ClickHouse
-    # rows in adjacent batches can drift slightly out of order.
+    def _parse_json_maybe(raw):
+        try:
+            return json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, ValueError):
+            return None
+
+    def _candidate_score(candidate: dict, block_freq: Counter, user_freq: Counter) -> float:
+        bids = candidate["hash_ids"]
+        if not bids:
+            overlap = 0.0
+        else:
+            # Normalize gently so huge prompts do not dominate purely by size,
+            # while still rewarding long reusable prefixes.
+            overlap = sum(max(0, block_freq[b] - 1) for b in bids) / (len(bids) ** 0.5)
+        if selection_mode == "chronological":
+            return 0.0
+        if selection_mode == "high-overlap":
+            return overlap
+        user = candidate.get("token_hash") or ""
+        user_score = float(user_freq.get(user, 0))
+        if selection_mode == "top-users":
+            return user_score
+        if selection_mode == "token-hash-filter":
+            return user_score
+        # mixed-overlap: keep the overlap signal but avoid selecting only one
+        # mega-user when cross-user system-prompt reuse is present.
+        return overlap + min(user_score, 25.0)
+
+    # First pass: walk parquets, tokenize, collect candidates with absolute
+    # timestamps. We scan more than we emit for overlap-based curation.
     print(
         f"[mooncake] walking {len(files)} parquet file(s) under {data_dir!r}; "
-        f"start={start_time} end={end_time or '-'} target={num_requests} rows",
+        f"start={start_time} end={end_time or '-'} target={num_requests} rows "
+        f"mode={selection_mode} candidates={num_requests * candidate_multiplier}",
         flush=True,
     )
     t0 = time.perf_counter()
-    entries: list[tuple[datetime, int, int, list[int]]] = []
+    target_candidates = max(num_requests, num_requests * candidate_multiplier)
+    candidates: list[dict] = []
     skipped_rows = 0
+    skipped_over_max_input = 0
+    skipped_over_max_total = 0
+    skipped_under_min_input = 0
+    con = duckdb.connect()
     for filename in files:
-        if len(entries) >= num_requests:
+        if len(candidates) >= target_candidates:
             break
         path = os.path.join(data_dir, filename)
-        pf = pq.ParquetFile(path)
-        for batch in pf.iter_batches(batch_size=2048, columns=["timestamp", "request", "response"]):
-            ts_col = batch.column("timestamp").to_pylist()
-            req_col = batch.column("request").to_pylist()
-            resp_col = batch.column("response").to_pylist()
-            for ts, request_raw, response_raw in zip(ts_col, req_col, resp_col):
+        cursor = con.execute(
+            """
+            SELECT
+                uuid,
+                timestamp,
+                request_metadata.token_hash AS token_hash,
+                request,
+                response
+            FROM read_parquet(?)
+            WHERE request NOT LIKE '%keep-alive%'
+            """,
+            [path],
+        )
+        while True:
+            chunk = cursor.fetchmany(2048)
+            if not chunk:
+                break
+            for uuid, ts, token_hash, request_raw, response_raw in chunk:
                 ts_dt = _to_naive_dt(ts)
                 if ts_dt is None:
                     skipped_rows += 1
@@ -217,11 +349,7 @@ def build_mooncake_trace(
                     continue
                 if end_dt is not None and ts_dt >= end_dt:
                     break
-                try:
-                    body = json.loads(request_raw) if isinstance(request_raw, str) else request_raw
-                except (TypeError, ValueError):
-                    skipped_rows += 1
-                    continue
+                body = _parse_json_maybe(request_raw)
                 if not isinstance(body, dict):
                     skipped_rows += 1
                     continue
@@ -234,55 +362,211 @@ def build_mooncake_trace(
                     skipped_rows += 1
                     continue
                 output_length = _response_token_count(response_raw)
-                entries.append((ts_dt, len(prompt_ids), output_length, prompt_ids))
-                if len(entries) >= num_requests:
+                input_length = len(prompt_ids)
+                if min_input_tokens > 0 and input_length < min_input_tokens:
+                    skipped_under_min_input += 1
+                    continue
+                if max_input_tokens > 0 and input_length > max_input_tokens:
+                    skipped_over_max_input += 1
+                    continue
+                if max_total_tokens > 0 and input_length + output_length > max_total_tokens:
+                    skipped_over_max_total += 1
+                    continue
+                response_body = _parse_json_maybe(response_raw)
+                block_ids = _block_ids(prompt_ids)
+                candidates.append(
+                    {
+                        "uuid": uuid,
+                        "ts_dt": ts_dt,
+                        "token_hash": token_hash or "",
+                        "input_length": input_length,
+                        "output_length": output_length,
+                        "hash_ids": block_ids,
+                        "request": body,
+                        "response": response_body,
+                        "request_raw": request_raw,
+                        "response_raw": response_raw,
+                    }
+                )
+                if len(candidates) >= target_candidates:
                     break
             else:
                 continue
             break
         print(
-            f"[mooncake]   {filename}: collected {len(entries)}/{num_requests} "
+            f"[mooncake]   {filename}: collected {len(candidates)}/{target_candidates} candidates "
             f"({time.perf_counter() - t0:.1f}s elapsed)",
             flush=True,
         )
+    con.close()
 
-    if not entries:
+    if not candidates:
         raise SystemExit(
             f"no rows matched start_time={start_time!r} end_time={end_time!r} under {data_dir!r}"
         )
 
-    # Adjacent parquet batches can interleave near boundaries; sort by
-    # timestamp so the emitted ``timestamp`` deltas are monotonic.
-    entries.sort(key=lambda e: e[0])
-    base_ts = entries[0][0]
+    block_freq = Counter()
+    user_freq = Counter()
+    for c in candidates:
+        block_freq.update(c["hash_ids"])
+        user_freq[c.get("token_hash") or ""] += 1
+    for c in candidates:
+        c["selection_score"] = _candidate_score(c, block_freq, user_freq)
+
+    selected_token_hashes: list[str] = []
+    if selection_mode == "chronological":
+        selected = sorted(candidates, key=lambda e: e["ts_dt"])[:num_requests]
+    elif selection_mode == "token-hash-filter":
+        # Pick active users, then preserve original timestamp order. This
+        # curates for intra-user KV reuse without fabricating request order or
+        # cherry-picking individual requests by overlap score.
+        k = top_token_hashes or max(1, min(20, len(user_freq)))
+        selected_token_hashes = [th for th, _ in user_freq.most_common(k)]
+        allowed = set(selected_token_hashes)
+        selected = [
+            c for c in sorted(candidates, key=lambda e: e["ts_dt"]) if c["token_hash"] in allowed
+        ]
+        selected = selected[:num_requests]
+    else:
+        selected = sorted(candidates, key=lambda e: e["selection_score"], reverse=True)[
+            :num_requests
+        ]
+        selected.sort(key=lambda e: e["ts_dt"])
+
+    if not selected:
+        raise SystemExit("selection produced no rows")
+
+    base_ts = selected[0]["ts_dt"]
+    original_duration_ms = int((selected[-1]["ts_dt"] - base_ts).total_seconds() * 1000)
+    effective_scale = (
+        (target_duration_ms / max(original_duration_ms, 1))
+        if target_duration_ms > 0
+        else time_scale
+    )
 
     total_input = 0
     total_output = 0
+    total_blocks = 0
+    selected_blocks: set[int] = set()
+    token_hash_counts = Counter(c.get("token_hash") or "" for c in selected)
+    token_hash_tokens = Counter()
     tmp_path = resolved_output_path + ".tmp"
     with open(tmp_path, "w") as f:
-        for ts_dt, input_length, output_length, prompt_ids in entries:
-            delta_ms = int((ts_dt - base_ts).total_seconds() * 1000)
+        for idx, c in enumerate(selected):
+            relative_ms = int((c["ts_dt"] - base_ts).total_seconds() * 1000)
+            delta_ms = int(relative_ms * effective_scale)
+            request_id = f"glm5_{base_ts.strftime('%Y%m%dT%H%M%S')}_{idx:06d}"
             row = {
                 "timestamp": delta_ms,
-                "input_length": input_length,
-                "output_length": output_length,
-                "hash_ids": _block_ids(prompt_ids),
+                "input_length": c["input_length"],
+                "output_length": c["output_length"],
+                "hash_ids": c["hash_ids"],
             }
+            if include_bodies or include_raw_bodies:
+                row.update(
+                    {
+                        "request_id": request_id,
+                        "source_timestamp": c["ts_dt"].isoformat(),
+                        "uuid": c["uuid"],
+                        "token_hash": c["token_hash"],
+                        "selection_score": c["selection_score"],
+                    }
+                )
+            if include_bodies:
+                row["request"] = c["request"]
+                row["response"] = c["response"]
+            if include_raw_bodies:
+                row["request_raw"] = c["request_raw"]
+                row["response_raw"] = c["response_raw"]
             f.write(json.dumps(row, separators=(",", ":")) + "\n")
-            total_input += input_length
-            total_output += output_length
+            total_input += c["input_length"]
+            total_output += c["output_length"]
+            total_blocks += len(c["hash_ids"])
+            selected_blocks.update(c["hash_ids"])
+            token_hash_tokens[c.get("token_hash") or ""] += c["input_length"]
     os.replace(tmp_path, resolved_output_path)
+
+    sidecar = {
+        "output_path": resolved_output_path,
+        "rows": len(selected),
+        "candidate_rows": len(candidates),
+        "skipped_rows": skipped_rows,
+        "skipped_over_max_input": skipped_over_max_input,
+        "skipped_over_max_total": skipped_over_max_total,
+        "skipped_under_min_input": skipped_under_min_input,
+        "selection_mode": selection_mode,
+        "candidate_multiplier": candidate_multiplier,
+        "top_token_hashes_requested": top_token_hashes,
+        "selected_token_hashes": selected_token_hashes,
+        "preserves_source_order": True,
+        "curation_note": (
+            "token-hash-filter preserves chronological order for top active users. "
+            "Future shared-prefix-filter mode could select cross-user repeated "
+            "system/harness prefixes by block-id frequency while still emitting "
+            "selected rows in source timestamp order."
+        ),
+        "start_time": start_time,
+        "end_time": end_time,
+        "base_timestamp": base_ts.isoformat(),
+        "original_duration_ms": original_duration_ms,
+        "scaled_duration_ms": int(original_duration_ms * effective_scale),
+        "time_scale": effective_scale,
+        "block_size": block_size,
+        "unique_blocks": len(selected_blocks),
+        "total_blocks": total_blocks,
+        "block_reuse_pct": (
+            100.0 * (total_blocks - len(selected_blocks)) / total_blocks if total_blocks else 0.0
+        ),
+        "total_input_tokens": total_input,
+        "total_output_tokens": total_output,
+        "include_bodies": include_bodies,
+        "include_raw_bodies": include_raw_bodies,
+        "context_filters": {
+            "min_input_tokens": min_input_tokens,
+            "max_input_tokens": max_input_tokens,
+            "max_total_tokens": max_total_tokens,
+        },
+        "token_hash_count": len(token_hash_counts),
+        "top_token_hashes": [
+            {
+                "token_hash": th,
+                "rows": count,
+                "input_tokens": token_hash_tokens[th],
+            }
+            for th, count in token_hash_counts.most_common(20)
+        ],
+        "selection_score": {
+            "avg": statistics.mean(c["selection_score"] for c in selected),
+            "max": max(c["selection_score"] for c in selected),
+        },
+        "elapsed_seconds": time.perf_counter() - t0,
+    }
+    sidecar_tmp_path = resolved_sidecar_path + ".tmp"
+    with open(sidecar_tmp_path, "w") as f:
+        json.dump(sidecar, f, indent=2)
+    os.replace(sidecar_tmp_path, resolved_sidecar_path)
     completions_volume.commit()
 
     summary = {
         "output_path": resolved_output_path,
-        "rows": len(entries),
+        "sidecar_path": resolved_sidecar_path,
+        "rows": len(selected),
+        "candidate_rows": len(candidates),
         "skipped_rows": skipped_rows,
+        "skipped_over_max_input": skipped_over_max_input,
+        "skipped_over_max_total": skipped_over_max_total,
+        "skipped_under_min_input": skipped_under_min_input,
+        "selection_mode": selection_mode,
+        "selected_token_hashes": selected_token_hashes,
         "block_size": block_size,
-        "unique_blocks": len(hash_to_id),
+        "unique_blocks": len(selected_blocks),
+        "total_blocks": total_blocks,
+        "block_reuse_pct": sidecar["block_reuse_pct"],
         "total_input_tokens": total_input,
         "total_output_tokens": total_output,
-        "duration_ms": int((entries[-1][0] - base_ts).total_seconds() * 1000),
+        "original_duration_ms": original_duration_ms,
+        "scaled_duration_ms": sidecar["scaled_duration_ms"],
+        "time_scale": effective_scale,
         "elapsed_seconds": time.perf_counter() - t0,
     }
     print(
@@ -397,6 +681,17 @@ def main(
     end_time: str = "",
     block_size: int = DEFAULT_BLOCK_SIZE,
     data_dir: str = DEFAULT_DATA_DIR,
+    include_bodies: bool = False,
+    include_raw_bodies: bool = False,
+    time_scale: float = 1.0,
+    target_duration_ms: int = 0,
+    selection_mode: str = "chronological",
+    candidate_multiplier: int = 1,
+    top_token_hashes: int = 0,
+    max_input_tokens: int = 0,
+    max_total_tokens: int = 0,
+    min_input_tokens: int = 0,
+    output_sidecar_path: str = "",
 ):
     """CLI wrapper for ``build_mooncake_trace``. Empty-string sentinels map
     to ``None`` because Modal local_entrypoints don't accept ``Optional``
@@ -408,4 +703,15 @@ def main(
         end_time=end_time or None,
         block_size=block_size,
         data_dir=data_dir,
+        include_bodies=include_bodies,
+        include_raw_bodies=include_raw_bodies,
+        time_scale=time_scale,
+        target_duration_ms=target_duration_ms,
+        selection_mode=selection_mode,
+        candidate_multiplier=candidate_multiplier,
+        top_token_hashes=top_token_hashes,
+        max_input_tokens=max_input_tokens,
+        max_total_tokens=max_total_tokens,
+        min_input_tokens=min_input_tokens,
+        output_sidecar_path=output_sidecar_path or None,
     )

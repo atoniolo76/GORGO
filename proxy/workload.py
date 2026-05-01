@@ -45,6 +45,7 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Iterator
 
@@ -109,7 +110,8 @@ _VALID_ROLES = frozenset({"system", "user", "assistant", "tool", "function"})
 # ``--source`` choices.
 SOURCE_GLM5 = "glm5"
 SOURCE_HF = "hf"
-SUPPORTED_SOURCES = (SOURCE_GLM5, SOURCE_HF)
+SOURCE_MOONCAKE = "mooncake"
+SUPPORTED_SOURCES = (SOURCE_GLM5, SOURCE_HF, SOURCE_MOONCAKE)
 
 # Defaults wired up to volumes mounted on ``replay``. Match the layouts used
 # by ``data_processing/build_hf_prefix_trie.py``.
@@ -376,6 +378,42 @@ def _iter_hf_rows(data_path: str) -> RowSource:
         yield None, {"messages": msgs}
 
 
+def _iter_mooncake_rows(data_path: str) -> RowSource:
+    """Yield replayable request bodies from a body-included Mooncake JSONL trace.
+
+    Rows without a parsed ``request`` object are skipped because body-free
+    Mooncake traces are simulation-only. ``timestamp`` is carried through as a
+    private field consumed by ``run_replay_async`` when ``arrival_mode`` is
+    ``open-loop``.
+    """
+    path = data_path if os.path.isabs(data_path) else os.path.join("/data", data_path)
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            body = row.get("request")
+            if not isinstance(body, dict):
+                raw = row.get("request_raw")
+                if isinstance(raw, str):
+                    try:
+                        body = json.loads(raw)
+                    except json.JSONDecodeError:
+                        body = None
+            if not isinstance(body, dict):
+                continue
+            body = dict(body)
+            if row.get("request_id"):
+                body["_gorgo_request_id"] = str(row["request_id"])
+            if isinstance(row.get("timestamp"), int | float):
+                body["_gorgo_scheduled_delay_ms"] = float(row["timestamp"])
+            yield None, body
+
+
 def _build_row_source(
     *,
     source: str,
@@ -407,6 +445,15 @@ def _build_row_source(
         if start_dt is not None or end_dt is not None:
             _log("note: --start-time / --end-time ignored for --source hf (no per-row timestamps)")
         return _iter_hf_rows(path), path
+    if source == SOURCE_MOONCAKE:
+        if preset:
+            raise SystemExit(f"--preset is only valid with --source hf (got {preset!r})")
+        if not data_path:
+            raise SystemExit("--source mooncake requires --data-path")
+        path = data_path if os.path.isabs(data_path) else os.path.join("/data", data_path)
+        if start_dt is not None or end_dt is not None:
+            _log("note: --start-time / --end-time ignored for --source mooncake")
+        return _iter_mooncake_rows(path), path
     raise SystemExit(f"unknown --source {source!r}; expected one of {list(SUPPORTED_SOURCES)}")
 
 
@@ -618,7 +665,13 @@ class _NonStreamingResponse(Exception):
     correctly and is treated as a failed request."""
 
 
-async def _send_one(client, body: dict) -> dict:
+async def _send_one(
+    client,
+    body: dict,
+    request_id: str | None = None,
+    scheduled_delay_ms: float | None = None,
+    sent_delay_ms: float | None = None,
+) -> dict:
     """Send one chat-completions request and capture streaming-aware timings.
 
     Always expects an SSE response. Non-streaming replies cannot produce a
@@ -638,7 +691,10 @@ async def _send_one(client, body: dict) -> dict:
             "POST",
             "/v1/chat/completions",
             json=body,
-            headers={"accept-encoding": "identity"},
+            headers={
+                "accept-encoding": "identity",
+                **({"x-gorgo-request-id": request_id} if request_id else {}),
+            },
         ) as resp:
             is_sse = resp.headers.get("content-type", "").startswith("text/event-stream")
             if not is_sse:
@@ -663,6 +719,9 @@ async def _send_one(client, body: dict) -> dict:
                         "output_tokens": 0,
                         "is_sse": False,
                         "error": f"upstream_error: {snippet}" if snippet else "upstream_error",
+                        "request_id": request_id,
+                        "scheduled_delay_ms": scheduled_delay_ms,
+                        "sent_delay_ms": sent_delay_ms,
                     }
                 raise _NonStreamingResponse(
                     f"upstream returned content-type "
@@ -686,6 +745,9 @@ async def _send_one(client, body: dict) -> dict:
                 "output_tokens": final_output_tokens,
                 "is_sse": True,
                 "error": None,
+                "request_id": request_id,
+                "scheduled_delay_ms": scheduled_delay_ms,
+                "sent_delay_ms": sent_delay_ms,
             }
     except _NonStreamingResponse as e:
         return {
@@ -698,6 +760,9 @@ async def _send_one(client, body: dict) -> dict:
             ),
             "is_sse": False,
             "error": f"non_streaming_response: {e}",
+            "request_id": request_id,
+            "scheduled_delay_ms": scheduled_delay_ms,
+            "sent_delay_ms": sent_delay_ms,
         }
     except Exception as e:
         # Captures httpx.HTTPError plus anything raised while we were
@@ -713,6 +778,9 @@ async def _send_one(client, body: dict) -> dict:
             ),
             "is_sse": False,
             "error": f"{type(e).__name__}: {e}",
+            "request_id": request_id,
+            "scheduled_delay_ms": scheduled_delay_ms,
+            "sent_delay_ms": sent_delay_ms,
         }
 
 
@@ -799,6 +867,9 @@ async def run_replay_async(
     max_input_tokens: int | None = None,
     output_path: str | None = None,
     save_per_request: bool = True,
+    run_id: str | None = None,
+    arrival_mode: str = "bounded",
+    time_scale: float = 1.0,
 ) -> dict:
     """Replay chat-completions traffic against the GORGO proxy.
 
@@ -847,6 +918,11 @@ async def run_replay_async(
         save_per_request: Include the per-request rows (status, timings in
             ns, token counts) alongside the aggregate stats. Set to
             ``False`` for tiny output files when only the summary matters.
+        arrival_mode: ``"bounded"`` preserves the historical concurrency
+            behavior; ``"open-loop"`` honors Mooncake row timestamps as
+            scheduled arrivals.
+        time_scale: Additional multiplier applied to Mooncake timestamps at
+            replay time.
 
     Returns:
         Summary dict with ``sent`` / ``ok`` / ``fail`` / ``elapsed_seconds``
@@ -854,6 +930,10 @@ async def run_replay_async(
         ``output_path`` of the saved JSON doc.
     """
     proxy_url = proxy_url.rstrip("/")
+    if arrival_mode not in ("bounded", "open-loop"):
+        raise SystemExit("--arrival-mode must be 'bounded' or 'open-loop'")
+    if time_scale <= 0:
+        raise SystemExit("--time-scale must be > 0")
     start_dt = _parse_iso(start_time)
     end_dt = _parse_iso(end_time)
 
@@ -861,7 +941,9 @@ async def run_replay_async(
     # each result file is self-describing (no need to cross-reference the
     # CLI that produced it).
     run_started_at = datetime.now(timezone.utc)
+    run_id = run_id or f"replay-{run_started_at.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
     config = {
+        "run_id": run_id,
         "proxy_url": proxy_url,
         "source": source,
         "preset": preset,
@@ -875,6 +957,8 @@ async def run_replay_async(
         "stream": stream,
         "max_tokens": max_tokens,
         "max_input_tokens": max_input_tokens,
+        "arrival_mode": arrival_mode,
+        "time_scale": time_scale,
         "region": REGION,
         "run_started_at": run_started_at.isoformat().replace("+00:00", "Z"),
     }
@@ -883,7 +967,7 @@ async def run_replay_async(
     # Modal volumes are eventually consistent; ``reload()`` is a single
     # round-trip and cheap relative to the replay run. The other volumes
     # don't need refreshing because we only read from one per run.
-    if source == SOURCE_GLM5:
+    if source in (SOURCE_GLM5, SOURCE_MOONCAKE):
         completions_volume.reload()
     elif source == SOURCE_HF:
         # Both LMSYS and WildChat datasets are read-only here; reload both
@@ -990,8 +1074,14 @@ async def run_replay_async(
                 item = await queue.get()
                 if item is None:
                     return
-                _, body = item
-                res = await _send_one(client, body)
+                _, body, request_id, scheduled_delay_ms, sent_delay_ms = item
+                res = await _send_one(
+                    client,
+                    body,
+                    request_id=request_id,
+                    scheduled_delay_ms=scheduled_delay_ms,
+                    sent_delay_ms=sent_delay_ms,
+                )
                 results.append(res)
                 done += 1
                 # Emit a single-line failure record as soon as it
@@ -1049,7 +1139,20 @@ async def run_replay_async(
                 max_input_tokens=input_token_cap,
                 filter_stats=filter_stats,
             ):
-                await queue.put((ts, body))
+                embedded_request_id = body.pop("_gorgo_request_id", None)
+                raw_delay_ms = body.pop("_gorgo_scheduled_delay_ms", None)
+                scheduled_delay_ms = (
+                    float(raw_delay_ms) * time_scale
+                    if raw_delay_ms is not None and arrival_mode == "open-loop"
+                    else None
+                )
+                if scheduled_delay_ms is not None:
+                    sleep_for = (t_start + scheduled_delay_ms / 1000.0) - time.perf_counter()
+                    if sleep_for > 0:
+                        await asyncio.sleep(sleep_for)
+                request_id = embedded_request_id or f"{run_id}-{sent:06d}"
+                sent_delay_ms = (time.perf_counter() - t_start) * 1000.0
+                await queue.put((ts, body, request_id, scheduled_delay_ms, sent_delay_ms))
                 sent += 1
                 # Yield periodically so embedded proxy runs don't monopolize
                 # uvicorn's event loop while scanning/filtering large rows.
@@ -1165,11 +1268,24 @@ async def run_replay_async(
         )
     os.makedirs(os.path.dirname(resolved_output_path), exist_ok=True)
 
+    trace_status = None
+    try:
+        async with httpx.AsyncClient(
+            base_url=proxy_url, timeout=httpx.Timeout(10.0)
+        ) as trace_client:
+            r = await trace_client.get("/trace/status")
+            if r.status_code < 400:
+                trace_status = r.json().get("trace")
+    except Exception:
+        trace_status = None
+
     output_doc: dict = {
         "config": config,
         "stats": stats,
         "progress": progress_log,
     }
+    if trace_status is not None:
+        output_doc["trace"] = trace_status
     if save_per_request:
         # Keep nanosecond ints as-is (JSON-friendly and lossless); analysis
         # code can divide by 1e9 / 1e6 at read time. ``error`` is None on
@@ -1183,6 +1299,9 @@ async def run_replay_async(
                 "output_tokens": r["output_tokens"],
                 "is_sse": r["is_sse"],
                 "error": r.get("error"),
+                "request_id": r.get("request_id"),
+                "scheduled_delay_ms": r.get("scheduled_delay_ms"),
+                "sent_delay_ms": r.get("sent_delay_ms"),
             }
             for r in raw_results
         ]
@@ -1226,6 +1345,9 @@ def replay(
     max_input_tokens: int | None = None,
     output_path: str | None = None,
     save_per_request: bool = True,
+    run_id: str | None = None,
+    arrival_mode: str = "bounded",
+    time_scale: float = 1.0,
 ) -> dict:
     """Modal wrapper around :func:`run_replay_async`."""
     return asyncio.run(
@@ -1245,6 +1367,9 @@ def replay(
             max_input_tokens=max_input_tokens,
             output_path=output_path,
             save_per_request=save_per_request,
+            run_id=run_id,
+            arrival_mode=arrival_mode,
+            time_scale=time_scale,
         )
     )
 
@@ -1264,6 +1389,9 @@ def main(
     stream: str = "",
     max_tokens: int = 0,
     max_input_tokens: int = 0,
+    run_id: str = "",
+    arrival_mode: str = "bounded",
+    time_scale: float = 1.0,
     output_path: str = "",
     save_per_request: bool = True,
 ):
@@ -1301,6 +1429,9 @@ def main(
         stream=stream_arg,
         max_tokens=max_tokens or None,
         max_input_tokens=max_input_tokens,
+        run_id=run_id or None,
+        arrival_mode=arrival_mode,
+        time_scale=time_scale,
         output_path=output_path or None,
         save_per_request=save_per_request,
     )
