@@ -44,6 +44,10 @@ def _parse_stream_flag(stream: str) -> bool | None:
 def _dispatch_tune(
     *,
     proxy_url: str,
+    source: str,
+    data_path: str,
+    arrival_mode: str,
+    time_scale: float,
     start_time: str,
     end_time: str,
     offset: int,
@@ -74,6 +78,10 @@ def _dispatch_tune(
 
     base_url = proxy_url.rstrip("/")
     payload = {
+        "source": source or "glm5",
+        "data_path": data_path or None,
+        "arrival_mode": arrival_mode or "bounded",
+        "time_scale": time_scale,
         "start_time": start_time or None,
         "end_time": end_time or None,
         "offset": offset,
@@ -142,6 +150,32 @@ _TUNE_TUI_SPEC: list[tuple[str, list[dict]]] = [
     (
         "Workload (mirrors proxy/workload.py)",
         [
+            {
+                "name": "source",
+                "kind": "choice",
+                "default": "glm5",
+                "help": "Workload source",
+                "choices": ["glm5", "hf", "mooncake"],
+            },
+            {
+                "name": "data_path",
+                "kind": "str",
+                "default": "",
+                "help": "Dataset/trace path; required for source=mooncake",
+            },
+            {
+                "name": "arrival_mode",
+                "kind": "choice",
+                "default": "bounded",
+                "help": "bounded or open-loop",
+                "choices": ["bounded", "open-loop"],
+            },
+            {
+                "name": "time_scale",
+                "kind": "float",
+                "default": 1.0,
+                "help": "Replay-time timestamp multiplier for Mooncake traces",
+            },
             {
                 "name": "start_time",
                 "kind": "str",
@@ -386,6 +420,10 @@ def _run_tui(initial_proxy_url: str = "") -> dict:
 @app.local_entrypoint()
 def tune_cli(
     proxy_url: str,
+    source: str = "glm5",
+    data_path: str = "",
+    arrival_mode: str = "bounded",
+    time_scale: float = 1.0,
     start_time: str = "",
     end_time: str = "",
     offset: int = 0,
@@ -415,6 +453,10 @@ def tune_cli(
     """Start a proxy-embedded tuning run and optionally poll until completion."""
     _dispatch_tune(
         proxy_url=proxy_url,
+        source=source,
+        data_path=data_path,
+        arrival_mode=arrival_mode,
+        time_scale=time_scale,
         start_time=start_time,
         end_time=end_time,
         offset=offset,

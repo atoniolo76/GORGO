@@ -63,8 +63,9 @@ async def _get_json(client: httpx.AsyncClient, path: str) -> dict:
 
 async def run_one_policy(global_spec: dict, policy_spec: dict) -> dict:
     name = policy_spec["name"]
+    label = policy_spec.get("label") or name
     proxy_url = policy_spec["proxy_url"].rstrip("/")
-    run_id = f"{global_spec.get('run_id', 'policy_matrix')}_{_slug(name)}"
+    run_id = f"{global_spec.get('run_id', 'policy_matrix')}_{_slug(label)}"
     trace_id = policy_spec.get("trace_id") or run_id
     output_path = global_spec.get(
         "output_path_template", "/results/workload_runs/{run_id}.json"
@@ -122,6 +123,7 @@ async def run_one_policy(global_spec: dict, policy_spec: dict) -> dict:
 
     return {
         "policy": name,
+        "label": label,
         "proxy_url": proxy_url,
         "run_id": run_id,
         "trace_id": trace_id,
@@ -153,7 +155,7 @@ async def main_async(spec: dict) -> dict:
         "run_id": spec.get("run_id"),
         "trace_path": spec.get("trace_path"),
         "start_at_wall_time": spec.get("start_at_wall_time"),
-        "policies": [p.get("name") for p in spec["policies"]],
+        "policies": [p.get("label") or p.get("name") for p in spec["policies"]],
         "results": normalized,
     }
     out_path = Path(

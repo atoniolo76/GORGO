@@ -1498,6 +1498,10 @@ def proxy():
             }
         )
         return {
+            "source": _parse_optional_str(data, "source", "glm5") or "glm5",
+            "data_path": _parse_optional_str(data, "data_path", ""),
+            "arrival_mode": _parse_optional_str(data, "arrival_mode", "bounded") or "bounded",
+            "time_scale": _parse_float(data, "time_scale", 1.0),
             "start_time": _parse_optional_str(data, "start_time"),
             "end_time": _parse_optional_str(data, "end_time"),
             "offset": _parse_int(data, "offset", 0),
@@ -1538,6 +1542,8 @@ def proxy():
         bt["output_path"] = summary_path
 
         workload_kwargs = {
+            "source": config["source"],
+            "data_path": config["data_path"] or None,
             "start_time": config["start_time"] or None,
             "end_time": config["end_time"] or None,
             "offset": config["offset"],
@@ -1547,6 +1553,8 @@ def proxy():
             "stream": config["stream"],
             "max_tokens": config["max_tokens"],
             "max_input_tokens": config["max_input_tokens"],
+            "arrival_mode": config["arrival_mode"],
+            "time_scale": config["time_scale"],
             "save_per_request": False,
         }
         metric = config["metric"]
