@@ -169,6 +169,11 @@ paths:
     get:
       tags: [control-plane, observability]
       summary: List the currently registered replica endpoints
+      description: |
+        Read-only. Returns this proxy's in-memory `replica_urls` plus a
+        snapshot of the global `GORGO-replicas` Modal Dict (informational --
+        in matrix mode the local pin is authoritative and may differ from
+        the Dict).
       responses:
         '200':
           description: Registered replica URLs.
@@ -179,16 +184,22 @@ paths:
       tags: [control-plane]
       summary: Replace the replica set
       description: |
-        Fully replaces the replica set. Accepts either a bare JSON array of
-        URLs or an object wrapping one under `replicas` (or `endpoints`).
-        Each URL must start with `http://` or `https://`; trailing slashes
-        and duplicates are normalized away.
+        Fully replaces the replica set on this proxy. Accepts either a bare
+        JSON array of URLs or an object wrapping one under `replicas` (or
+        `endpoints`). Each URL must start with `http://` or `https://`;
+        trailing slashes and duplicates are normalized away.
 
         Removed replicas have their queue-token counters and live-metric
         snapshots cleared. Newly added replicas start with a zero queue-token
         counter; they become eligible for non-random policies once the next
         background refresh populates their metrics (<=
         `refresh_interval_seconds`, default 1s).
+
+        Affects only this proxy's local state -- the global `GORGO-replicas`
+        Modal Dict is left untouched. (Earlier versions cleared and
+        rewrote the global Dict here; in matrix experiments where N proxies
+        each pinned their own per-policy URLs concurrently, that mutation
+        clobbered sibling proxies' pins via GET /replicas re-sync.)
       requestBody:
         required: true
         content:
