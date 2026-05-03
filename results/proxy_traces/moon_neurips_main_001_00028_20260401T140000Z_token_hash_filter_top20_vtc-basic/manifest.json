@@ -1,0 +1,20 @@
+{
+  "trace": {
+    "enabled": false,
+    "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc-basic",
+    "sample_metrics": true,
+    "sample_requests": true,
+    "max_events": 200000,
+    "started_at": "2026-05-02T18:18:58.305229Z",
+    "stopped_at": "2026-05-02T19:01:11.692402Z",
+    "dropped_metrics": 0,
+    "dropped_requests": 0,
+    "saved_paths": null,
+    "metrics_events": 249,
+    "request_events": 525,
+    "first_event_ts": "2026-05-02T18:19:18.127605Z",
+    "last_event_ts": "2026-05-02T19:01:01.039199Z"
+  },
+  "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc-basic/metrics.jsonl",
+  "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc-basic/requests.jsonl"
+}

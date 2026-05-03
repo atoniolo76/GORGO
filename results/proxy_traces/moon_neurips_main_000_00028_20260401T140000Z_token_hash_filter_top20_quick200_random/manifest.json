@@ -1,0 +1,20 @@
+{
+  "trace": {
+    "enabled": false,
+    "trace_id": "moon_neurips_main_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_random",
+    "sample_metrics": true,
+    "sample_requests": true,
+    "max_events": 200000,
+    "started_at": "2026-05-03T02:41:19.418757Z",
+    "stopped_at": "2026-05-03T02:58:19.858346Z",
+    "dropped_metrics": 0,
+    "dropped_requests": 0,
+    "saved_paths": null,
+    "metrics_events": 99,
+    "request_events": 200,
+    "first_event_ts": "2026-05-03T02:41:26.235696Z",
+    "last_event_ts": "2026-05-03T02:57:59.279325Z"
+  },
+  "metrics_path": "/results/proxy_traces/moon_neurips_main_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_random/metrics.jsonl",
+  "requests_path": "/results/proxy_traces/moon_neurips_main_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_random/requests.jsonl"
+}

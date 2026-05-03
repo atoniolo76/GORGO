@@ -1,0 +1,1263 @@
+{
+  "base_run_id": "moon_neurips_main",
+  "sweep_manifest_path": null,
+  "start_index": 1,
+  "top_k": 1,
+  "results": [
+    {
+      "ok": true,
+      "index": 1,
+      "trace_path": "/data/mooncake_traces/sweeps/glm5_day1_30m_topusers_v3/token-hash-filter_n1000_w30m_cand20_top10_20_maxin28000_scale0.1_56a49d2b3a/with_bodies/00028_20260401T140000Z_token_hash_filter_top20.jsonl",
+      "source_trace": "/data/mooncake_traces/sweeps/glm5_day1_30m_topusers_v3/token-hash-filter_n1000_w30m_cand20_top10_20_maxin28000_scale0.1_56a49d2b3a/00028_20260401T140000Z_token_hash_filter_top20.jsonl",
+      "matrix_manifest_path": "/results/policy_matrix_sweep/neurips_main/neurips_main_v1_20260503_010754/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20.json",
+      "manifest": {
+        "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20",
+        "trace_path": "/data/mooncake_traces/sweeps/glm5_day1_30m_topusers_v3/token-hash-filter_n1000_w30m_cand20_top10_20_maxin28000_scale0.1_56a49d2b3a/with_bodies/00028_20260401T140000Z_token_hash_filter_top20.jsonl",
+        "start_at_wall_time": "2026-05-03T01:12:03.863408Z",
+        "policies": [
+          "random",
+          "least-request",
+          "power-of-two",
+          "least-load",
+          "least-latency",
+          "prefix-cache",
+          "simple-session-affinity",
+          "vtc",
+          "gorgo-tuned"
+        ],
+        "results": [
+          {
+            "policy": "random",
+            "label": "random",
+            "proxy_url": "https://ta-01kqnp7sq2awab65kznzatxzxj-8000-efsyhejg90gyq7e80c992oiee.w.modal.host",
+            "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random",
+            "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random",
+            "auto_tune": null,
+            "workload": {
+              "running": false,
+              "status": "succeeded",
+              "phase": "done",
+              "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random",
+              "started_at": "2026-05-03T01:11:34.190866Z",
+              "finished_at": "2026-05-03T01:55:24.959994Z",
+              "config": {
+                "data_path": "/data/mooncake_traces/sweeps/glm5_day1_30m_topusers_v3/token-hash-filter_n1000_w30m_cand20_top10_20_maxin28000_scale0.1_56a49d2b3a/with_bodies/00028_20260401T140000Z_token_hash_filter_top20.jsonl",
+                "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random",
+                "concurrency": 16,
+                "model": "",
+                "stream": true,
+                "max_tokens": 128,
+                "max_input_tokens": 0,
+                "arrival_mode": "open-loop",
+                "time_scale": 5.0,
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random.json",
+                "save_per_request": true,
+                "start_at_wall_time": "2026-05-03T01:12:03.863408Z"
+              },
+              "stats": {
+                "sent": 1000,
+                "ok": 855,
+                "fail": 145,
+                "success_rate": 0.855,
+                "status_breakdown": {
+                  "200": 855,
+                  "400": 144,
+                  "502": 1
+                },
+                "elapsed_seconds": 2597.217275599,
+                "request_throughput_rps": 0.38502747128438397,
+                "input_token_throughput": 2676.5346377871892,
+                "output_token_throughput": 180.72765971870572,
+                "total_token_throughput": 2857.262297505895,
+                "total_input_tokens": 6951542,
+                "total_output_tokens": 469389,
+                "ttft_seconds": {
+                  "avg": 0.5557799687040935,
+                  "min": 0.146062358,
+                  "max": 5.46899594,
+                  "p50": 0.456393795,
+                  "p95": 1.095703767,
+                  "p99": 3.960246953,
+                  "n": 855
+                },
+                "request_e2e_seconds": {
+                  "avg": 46.47196011849825,
+                  "min": 2.786250146,
+                  "max": 958.440040194,
+                  "p50": 11.078585587,
+                  "p95": 452.209193868,
+                  "p99": 682.323868776,
+                  "n": 855
+                },
+                "itl_ms": {
+                  "avg": 88.58914064505493,
+                  "min": 67.4839119661017,
+                  "max": 381.3634512125984,
+                  "p50": 86.35675525196851,
+                  "p95": 112.7662224673913,
+                  "p99": 122.6808522519685,
+                  "n": 855
+                },
+                "decode_tokens_per_second": {
+                  "avg": 11.533483967524006,
+                  "min": 2.6221705221629397,
+                  "max": 14.818346637970793,
+                  "p50": 11.579870006489214,
+                  "p95": 13.772834535730238,
+                  "p99": 14.140632547388648,
+                  "n": 855
+                },
+                "input_tokens": {
+                  "avg": 8130.458479532163,
+                  "min": 14.0,
+                  "max": 29280.0,
+                  "p50": 4616.0,
+                  "p95": 23984.0,
+                  "p99": 26110.0,
+                  "n": 855
+                },
+                "output_tokens": {
+                  "avg": 548.9929824561403,
+                  "min": 27.0,
+                  "max": 9780.0,
+                  "p50": 128.0,
+                  "p95": 5479.0,
+                  "p99": 8069.0,
+                  "n": 855
+                },
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random.json"
+              },
+              "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random.json",
+              "error": null,
+              "stop_requested": false
+            },
+            "trace": {
+              "trace": {
+                "enabled": false,
+                "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random",
+                "sample_metrics": true,
+                "sample_requests": true,
+                "max_events": 200000,
+                "started_at": "2026-05-03T01:11:34.141423Z",
+                "stopped_at": "2026-05-03T01:55:35.824801Z",
+                "dropped_metrics": 0,
+                "dropped_requests": 0,
+                "saved_paths": {
+                  "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random/metrics.jsonl",
+                  "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random/requests.jsonl",
+                  "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random/manifest.json"
+                },
+                "metrics_events": 258,
+                "request_events": 1000,
+                "first_event_ts": "2026-05-03T01:12:00.043941Z",
+                "last_event_ts": "2026-05-03T01:55:25.597722Z"
+              },
+              "paths": {
+                "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random/metrics.jsonl",
+                "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random/requests.jsonl",
+                "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_random/manifest.json"
+              }
+            },
+            "elapsed_seconds": 2645.598554611206
+          },
+          {
+            "policy": "least-request",
+            "label": "least-request",
+            "proxy_url": "https://ta-01kqnp7sxzqam23ngswh3hc0x0-8000-8szjcvwqygpufmjnpdg72tg9h.w.modal.host",
+            "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request",
+            "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request",
+            "auto_tune": null,
+            "workload": {
+              "running": false,
+              "status": "succeeded",
+              "phase": "done",
+              "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request",
+              "started_at": "2026-05-03T01:11:34.190469Z",
+              "finished_at": "2026-05-03T01:56:08.647342Z",
+              "config": {
+                "data_path": "/data/mooncake_traces/sweeps/glm5_day1_30m_topusers_v3/token-hash-filter_n1000_w30m_cand20_top10_20_maxin28000_scale0.1_56a49d2b3a/with_bodies/00028_20260401T140000Z_token_hash_filter_top20.jsonl",
+                "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request",
+                "concurrency": 16,
+                "model": "",
+                "stream": true,
+                "max_tokens": 128,
+                "max_input_tokens": 0,
+                "arrival_mode": "open-loop",
+                "time_scale": 5.0,
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request.json",
+                "save_per_request": true,
+                "start_at_wall_time": "2026-05-03T01:12:03.863408Z"
+              },
+              "stats": {
+                "sent": 1000,
+                "ok": 855,
+                "fail": 145,
+                "success_rate": 0.855,
+                "status_breakdown": {
+                  "200": 855,
+                  "400": 144,
+                  "502": 1
+                },
+                "elapsed_seconds": 2640.915256687,
+                "request_throughput_rps": 0.3786566030348469,
+                "input_token_throughput": 2627.8783396882495,
+                "output_token_throughput": 181.91950642244362,
+                "total_token_throughput": 2809.797846110693,
+                "total_input_tokens": 6940004,
+                "total_output_tokens": 480434,
+                "ttft_seconds": {
+                  "avg": 0.6292269718561403,
+                  "min": 0.137160526,
+                  "max": 14.492852624,
+                  "p50": 0.476076069,
+                  "p95": 1.140749504,
+                  "p99": 4.767591684,
+                  "n": 855
+                },
+                "request_e2e_seconds": {
+                  "avg": 47.60137732999649,
+                  "min": 2.272691052,
+                  "max": 1227.162231229,
+                  "p50": 11.959503322,
+                  "p95": 478.961878759,
+                  "p99": 682.404675133,
+                  "n": 855
+                },
+                "itl_ms": {
+                  "avg": 93.0213397739049,
+                  "min": 51.23653896874805,
+                  "max": 153.93959862204724,
+                  "p50": 91.2932975984252,
+                  "p95": 115.1734120551181,
+                  "p99": 120.32278921311476,
+                  "n": 855
+                },
+                "decode_tokens_per_second": {
+                  "avg": 10.942426985773302,
+                  "min": 6.496054354768078,
+                  "max": 19.517321429731123,
+                  "p50": 10.953706638999202,
+                  "p95": 13.355510587226918,
+                  "p99": 14.087528297598679,
+                  "n": 855
+                },
+                "input_tokens": {
+                  "avg": 8116.963742690058,
+                  "min": 14.0,
+                  "max": 29280.0,
+                  "p50": 4616.0,
+                  "p95": 23984.0,
+                  "p99": 26110.0,
+                  "n": 855
+                },
+                "output_tokens": {
+                  "avg": 561.9111111111112,
+                  "min": 28.0,
+                  "max": 16000.0,
+                  "p50": 128.0,
+                  "p95": 5780.0,
+                  "p99": 8099.0,
+                  "n": 855
+                },
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request.json"
+              },
+              "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request.json",
+              "error": null,
+              "stop_requested": false
+            },
+            "trace": {
+              "trace": {
+                "enabled": false,
+                "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request",
+                "sample_metrics": true,
+                "sample_requests": true,
+                "max_events": 200000,
+                "started_at": "2026-05-03T01:11:34.133487Z",
+                "stopped_at": "2026-05-03T01:56:45.628197Z",
+                "dropped_metrics": 0,
+                "dropped_requests": 0,
+                "saved_paths": {
+                  "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request/metrics.jsonl",
+                  "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request/requests.jsonl",
+                  "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request/manifest.json"
+                },
+                "metrics_events": 267,
+                "request_events": 1000,
+                "first_event_ts": "2026-05-03T01:12:00.206290Z",
+                "last_event_ts": "2026-05-03T01:56:34.312588Z"
+              },
+              "paths": {
+                "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request/metrics.jsonl",
+                "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request/requests.jsonl",
+                "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-request/manifest.json"
+              }
+            },
+            "elapsed_seconds": 2715.4040110111237
+          },
+          {
+            "policy": "power-of-two",
+            "label": "power-of-two",
+            "proxy_url": "https://ta-01kqnp7t3pyvd4y28fm4pta8q7-8000-sbpq5bsdz6zyimrb89yecv0mh.w.modal.host",
+            "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two",
+            "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two",
+            "auto_tune": null,
+            "workload": {
+              "running": false,
+              "status": "succeeded",
+              "phase": "done",
+              "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two",
+              "started_at": "2026-05-03T01:11:34.186600Z",
+              "finished_at": "2026-05-03T01:55:40.069548Z",
+              "config": {
+                "data_path": "/data/mooncake_traces/sweeps/glm5_day1_30m_topusers_v3/token-hash-filter_n1000_w30m_cand20_top10_20_maxin28000_scale0.1_56a49d2b3a/with_bodies/00028_20260401T140000Z_token_hash_filter_top20.jsonl",
+                "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two",
+                "concurrency": 16,
+                "model": "",
+                "stream": true,
+                "max_tokens": 128,
+                "max_input_tokens": 0,
+                "arrival_mode": "open-loop",
+                "time_scale": 5.0,
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two.json",
+                "save_per_request": true,
+                "start_at_wall_time": "2026-05-03T01:12:03.863408Z"
+              },
+              "stats": {
+                "sent": 1000,
+                "ok": 854,
+                "fail": 146,
+                "success_rate": 0.854,
+                "status_breakdown": {
+                  "200": 854,
+                  "400": 144,
+                  "0": 1,
+                  "502": 1
+                },
+                "elapsed_seconds": 2612.291252875,
+                "request_throughput_rps": 0.382805707020392,
+                "input_token_throughput": 2649.8320171541873,
+                "output_token_throughput": 181.55134864002622,
+                "total_token_throughput": 2831.3833657942137,
+                "total_input_tokens": 6922133,
+                "total_output_tokens": 474265,
+                "ttft_seconds": {
+                  "avg": 0.5882635328817329,
+                  "min": 0.142134329,
+                  "max": 19.007069564,
+                  "p50": 0.468289325,
+                  "p95": 1.114181612,
+                  "p99": 3.772881041,
+                  "n": 854
+                },
+                "request_e2e_seconds": {
+                  "avg": 47.85185049045433,
+                  "min": 1.039106731,
+                  "max": 1180.934399704,
+                  "p50": 11.43777035,
+                  "p95": 432.497697177,
+                  "p99": 704.146638708,
+                  "n": 854
+                },
+                "itl_ms": {
+                  "avg": 92.54580874820593,
+                  "min": 8.158070567567568,
+                  "max": 332.5920209411765,
+                  "p50": 88.64648884745763,
+                  "p95": 117.73372807874016,
+                  "p99": 168.95174881102363,
+                  "n": 854
+                },
+                "decode_tokens_per_second": {
+                  "avg": 11.261757448175988,
+                  "min": 3.0066866822907454,
+                  "max": 122.57800318319173,
+                  "p50": 11.289716218360446,
+                  "p95": 13.539129341839176,
+                  "p99": 14.103108019343336,
+                  "n": 854
+                },
+                "input_tokens": {
+                  "avg": 8105.542154566745,
+                  "min": 14.0,
+                  "max": 29280.0,
+                  "p50": 4616.0,
+                  "p95": 23984.0,
+                  "p99": 26110.0,
+                  "n": 854
+                },
+                "output_tokens": {
+                  "avg": 555.3454332552693,
+                  "min": 6.0,
+                  "max": 14075.0,
+                  "p50": 128.0,
+                  "p95": 5744.0,
+                  "p99": 8347.0,
+                  "n": 854
+                },
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two.json"
+              },
+              "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two.json",
+              "error": null,
+              "stop_requested": false
+            },
+            "trace": {
+              "trace": {
+                "enabled": false,
+                "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two",
+                "sample_metrics": true,
+                "sample_requests": true,
+                "max_events": 200000,
+                "started_at": "2026-05-03T01:11:34.123893Z",
+                "stopped_at": "2026-05-03T01:56:35.859006Z",
+                "dropped_metrics": 0,
+                "dropped_requests": 0,
+                "saved_paths": {
+                  "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two/metrics.jsonl",
+                  "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two/requests.jsonl",
+                  "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two/manifest.json"
+                },
+                "metrics_events": 261,
+                "request_events": 999,
+                "first_event_ts": "2026-05-03T01:12:00.529985Z",
+                "last_event_ts": "2026-05-03T01:56:06.010388Z"
+              },
+              "paths": {
+                "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two/metrics.jsonl",
+                "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two/requests.jsonl",
+                "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_power-of-two/manifest.json"
+              }
+            },
+            "elapsed_seconds": 2705.5959992408752
+          },
+          {
+            "policy": "least-load",
+            "label": "least-load",
+            "proxy_url": "https://ta-01kqnp7thpz1q9s4btrnncqaa3-8000-a9cmaurlcoab9l7oq2z67vm9j.w.modal.host",
+            "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load",
+            "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load",
+            "auto_tune": null,
+            "workload": {
+              "running": false,
+              "status": "succeeded",
+              "phase": "done",
+              "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load",
+              "started_at": "2026-05-03T01:11:34.181922Z",
+              "finished_at": "2026-05-03T01:55:39.821073Z",
+              "config": {
+                "data_path": "/data/mooncake_traces/sweeps/glm5_day1_30m_topusers_v3/token-hash-filter_n1000_w30m_cand20_top10_20_maxin28000_scale0.1_56a49d2b3a/with_bodies/00028_20260401T140000Z_token_hash_filter_top20.jsonl",
+                "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load",
+                "concurrency": 16,
+                "model": "",
+                "stream": true,
+                "max_tokens": 128,
+                "max_input_tokens": 0,
+                "arrival_mode": "open-loop",
+                "time_scale": 5.0,
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load.json",
+                "save_per_request": true,
+                "start_at_wall_time": "2026-05-03T01:12:03.863408Z"
+              },
+              "stats": {
+                "sent": 1000,
+                "ok": 855,
+                "fail": 145,
+                "success_rate": 0.855,
+                "status_breakdown": {
+                  "200": 855,
+                  "400": 143,
+                  "502": 2
+                },
+                "elapsed_seconds": 2612.030935186,
+                "request_throughput_rps": 0.38284385783079977,
+                "input_token_throughput": 2663.1744311652456,
+                "output_token_throughput": 191.0903861345184,
+                "total_token_throughput": 2854.2648172997638,
+                "total_input_tokens": 6956294,
+                "total_output_tokens": 499134,
+                "ttft_seconds": {
+                  "avg": 0.5364288510690058,
+                  "min": 0.133417212,
+                  "max": 5.618140717,
+                  "p50": 0.440664896,
+                  "p95": 1.042042391,
+                  "p99": 3.635508942,
+                  "n": 855
+                },
+                "request_e2e_seconds": {
+                  "avg": 48.53687369581404,
+                  "min": 0.850311335,
+                  "max": 1343.640117712,
+                  "p50": 11.245991699,
+                  "p95": 487.022827666,
+                  "p99": 726.849134073,
+                  "n": 855
+                },
+                "itl_ms": {
+                  "avg": 82.06611894504154,
+                  "min": 7.881230141732284,
+                  "max": 163.4006419767442,
+                  "p50": 87.56882809933775,
+                  "p95": 113.33920341732284,
+                  "p99": 125.76176718897638,
+                  "n": 855
+                },
+                "decode_tokens_per_second": {
+                  "avg": 16.93172021960915,
+                  "min": 6.11992699601709,
+                  "max": 126.88374555957344,
+                  "p50": 11.41958870187921,
+                  "p95": 58.76563320507923,
+                  "p99": 87.9170438864542,
+                  "n": 855
+                },
+                "input_tokens": {
+                  "avg": 8136.016374269006,
+                  "min": 14.0,
+                  "max": 29280.0,
+                  "p50": 4616.0,
+                  "p95": 23984.0,
+                  "p99": 26110.0,
+                  "n": 855
+                },
+                "output_tokens": {
+                  "avg": 583.7824561403509,
+                  "min": 31.0,
+                  "max": 16000.0,
+                  "p50": 128.0,
+                  "p95": 5877.0,
+                  "p99": 7963.0,
+                  "n": 855
+                },
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load.json"
+              },
+              "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load.json",
+              "error": null,
+              "stop_requested": false
+            },
+            "trace": {
+              "trace": {
+                "enabled": false,
+                "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load",
+                "sample_metrics": true,
+                "sample_requests": true,
+                "max_events": 200000,
+                "started_at": "2026-05-03T01:11:34.128121Z",
+                "stopped_at": "2026-05-03T01:55:39.839686Z",
+                "dropped_metrics": 0,
+                "dropped_requests": 0,
+                "saved_paths": {
+                  "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load/metrics.jsonl",
+                  "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load/requests.jsonl",
+                  "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load/manifest.json"
+                },
+                "metrics_events": 258,
+                "request_events": 1000,
+                "first_event_ts": "2026-05-03T01:12:00.601810Z",
+                "last_event_ts": "2026-05-03T01:55:08.613995Z"
+              },
+              "paths": {
+                "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load/metrics.jsonl",
+                "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load/requests.jsonl",
+                "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-load/manifest.json"
+              }
+            },
+            "elapsed_seconds": 2649.4593217372894
+          },
+          {
+            "policy": "least-latency",
+            "label": "least-latency",
+            "proxy_url": "https://ta-01kqnp7tr56mk8p62erddtwtn5-8000-mrjua6qxvukqk4j4xhi7d5ref.w.modal.host",
+            "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency",
+            "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency",
+            "auto_tune": null,
+            "workload": {
+              "running": false,
+              "status": "succeeded",
+              "phase": "done",
+              "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency",
+              "started_at": "2026-05-03T01:11:34.144943Z",
+              "finished_at": "2026-05-03T01:53:31.362017Z",
+              "config": {
+                "data_path": "/data/mooncake_traces/sweeps/glm5_day1_30m_topusers_v3/token-hash-filter_n1000_w30m_cand20_top10_20_maxin28000_scale0.1_56a49d2b3a/with_bodies/00028_20260401T140000Z_token_hash_filter_top20.jsonl",
+                "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency",
+                "concurrency": 16,
+                "model": "",
+                "stream": true,
+                "max_tokens": 128,
+                "max_input_tokens": 0,
+                "arrival_mode": "open-loop",
+                "time_scale": 5.0,
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency.json",
+                "save_per_request": true,
+                "start_at_wall_time": "2026-05-03T01:12:03.863408Z"
+              },
+              "stats": {
+                "sent": 1000,
+                "ok": 856,
+                "fail": 144,
+                "success_rate": 0.856,
+                "status_breakdown": {
+                  "200": 856,
+                  "400": 144
+                },
+                "elapsed_seconds": 2483.405179096,
+                "request_throughput_rps": 0.4026729139559966,
+                "input_token_throughput": 2801.7425664436983,
+                "output_token_throughput": 187.77080917973473,
+                "total_token_throughput": 2989.513375623433,
+                "total_input_tokens": 6957862,
+                "total_output_tokens": 466311,
+                "ttft_seconds": {
+                  "avg": 0.444384714171729,
+                  "min": 0.134582726,
+                  "max": 4.613845335,
+                  "p50": 0.350471272,
+                  "p95": 1.001303354,
+                  "p99": 3.652293157,
+                  "n": 856
+                },
+                "request_e2e_seconds": {
+                  "avg": 44.176812637536216,
+                  "min": 1.785098821,
+                  "max": 918.820497794,
+                  "p50": 10.552742854,
+                  "p95": 417.04262315,
+                  "p99": 654.28146612,
+                  "n": 856
+                },
+                "itl_ms": {
+                  "avg": 84.60269129925983,
+                  "min": 69.57275201574804,
+                  "max": 165.9813986062992,
+                  "p50": 81.5040035984252,
+                  "p95": 106.71514699152542,
+                  "p99": 121.67665709565217,
+                  "n": 856
+                },
+                "decode_tokens_per_second": {
+                  "avg": 12.006574087597203,
+                  "min": 6.024771500883405,
+                  "max": 14.37344320911219,
+                  "p50": 12.278269579289622,
+                  "p95": 13.761827615612088,
+                  "p99": 14.140764601223175,
+                  "n": 856
+                },
+                "input_tokens": {
+                  "avg": 8128.343457943925,
+                  "min": 14.0,
+                  "max": 29280.0,
+                  "p50": 4616.0,
+                  "p95": 23984.0,
+                  "p99": 26110.0,
+                  "n": 856
+                },
+                "output_tokens": {
+                  "avg": 544.7558411214953,
+                  "min": 21.0,
+                  "max": 11568.0,
+                  "p50": 128.0,
+                  "p95": 5377.0,
+                  "p99": 7961.0,
+                  "n": 856
+                },
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency.json"
+              },
+              "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency.json",
+              "error": null,
+              "stop_requested": false
+            },
+            "trace": {
+              "trace": {
+                "enabled": false,
+                "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency",
+                "sample_metrics": true,
+                "sample_requests": true,
+                "max_events": 200000,
+                "started_at": "2026-05-03T01:11:34.077824Z",
+                "stopped_at": "2026-05-03T01:53:35.733712Z",
+                "dropped_metrics": 0,
+                "dropped_requests": 0,
+                "saved_paths": {
+                  "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency/metrics.jsonl",
+                  "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency/requests.jsonl",
+                  "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency/manifest.json"
+                },
+                "metrics_events": 246,
+                "request_events": 1000,
+                "first_event_ts": "2026-05-03T01:12:00.806767Z",
+                "last_event_ts": "2026-05-03T01:53:13.125583Z"
+              },
+              "paths": {
+                "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency/metrics.jsonl",
+                "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency/requests.jsonl",
+                "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_least-latency/manifest.json"
+              }
+            },
+            "elapsed_seconds": 2525.721366405487
+          },
+          {
+            "policy": "prefix-cache",
+            "label": "prefix-cache",
+            "proxy_url": "https://ta-01kqnp7ta64nxcgzy65v04y7n9-8000-wookkbiksjdhz2wvjr3ok28vs.w.modal.host",
+            "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache",
+            "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache",
+            "auto_tune": null,
+            "workload": {
+              "running": false,
+              "status": "succeeded",
+              "phase": "done",
+              "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache",
+              "started_at": "2026-05-03T01:11:34.279888Z",
+              "finished_at": "2026-05-03T01:55:58.735601Z",
+              "config": {
+                "data_path": "/data/mooncake_traces/sweeps/glm5_day1_30m_topusers_v3/token-hash-filter_n1000_w30m_cand20_top10_20_maxin28000_scale0.1_56a49d2b3a/with_bodies/00028_20260401T140000Z_token_hash_filter_top20.jsonl",
+                "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache",
+                "concurrency": 16,
+                "model": "",
+                "stream": true,
+                "max_tokens": 128,
+                "max_input_tokens": 0,
+                "arrival_mode": "open-loop",
+                "time_scale": 5.0,
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache.json",
+                "save_per_request": true,
+                "start_at_wall_time": "2026-05-03T01:12:03.863408Z"
+              },
+              "stats": {
+                "sent": 1000,
+                "ok": 856,
+                "fail": 144,
+                "success_rate": 0.856,
+                "status_breakdown": {
+                  "200": 856,
+                  "400": 144
+                },
+                "elapsed_seconds": 2630.9973930839997,
+                "request_throughput_rps": 0.38008399500077844,
+                "input_token_throughput": 2644.571985624106,
+                "output_token_throughput": 187.22101408949342,
+                "total_token_throughput": 2831.7929997136,
+                "total_input_tokens": 6957862,
+                "total_output_tokens": 492578,
+                "ttft_seconds": {
+                  "avg": 0.6173422003014019,
+                  "min": 0.144484357,
+                  "max": 5.792346637,
+                  "p50": 0.482765277,
+                  "p95": 1.269678843,
+                  "p99": 4.345430147,
+                  "n": 856
+                },
+                "request_e2e_seconds": {
+                  "avg": 48.741269463448596,
+                  "min": 1.133749332,
+                  "max": 1275.192838524,
+                  "p50": 11.776597185,
+                  "p95": 443.219230647,
+                  "p99": 683.892861772,
+                  "n": 856
+                },
+                "itl_ms": {
+                  "avg": 89.51421467769717,
+                  "min": 5.725410039370079,
+                  "max": 149.67272390625,
+                  "p50": 90.43080900000001,
+                  "p95": 115.70662948031496,
+                  "p99": 124.03957176377953,
+                  "n": 856
+                },
+                "decode_tokens_per_second": {
+                  "avg": 13.792589787007243,
+                  "min": 6.681244076418136,
+                  "max": 174.65997948157823,
+                  "p50": 11.072514449171559,
+                  "p95": 29.566431866958773,
+                  "p99": 80.03211414571247,
+                  "n": 856
+                },
+                "input_tokens": {
+                  "avg": 8128.343457943925,
+                  "min": 14.0,
+                  "max": 29280.0,
+                  "p50": 4616.0,
+                  "p95": 23984.0,
+                  "p99": 26110.0,
+                  "n": 856
+                },
+                "output_tokens": {
+                  "avg": 575.4415887850467,
+                  "min": 27.0,
+                  "max": 16000.0,
+                  "p50": 128.0,
+                  "p95": 5145.0,
+                  "p99": 8594.0,
+                  "n": 856
+                },
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache.json"
+              },
+              "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache.json",
+              "error": null,
+              "stop_requested": false
+            },
+            "trace": {
+              "trace": {
+                "enabled": false,
+                "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache",
+                "sample_metrics": true,
+                "sample_requests": true,
+                "max_events": 200000,
+                "started_at": "2026-05-03T01:11:34.257257Z",
+                "stopped_at": "2026-05-03T01:56:35.793554Z",
+                "dropped_metrics": 0,
+                "dropped_requests": 0,
+                "saved_paths": {
+                  "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache/metrics.jsonl",
+                  "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache/requests.jsonl",
+                  "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache/manifest.json"
+                },
+                "metrics_events": 267,
+                "request_events": 1000,
+                "first_event_ts": "2026-05-03T01:12:01.085871Z",
+                "last_event_ts": "2026-05-03T01:56:31.286786Z"
+              },
+              "paths": {
+                "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache/metrics.jsonl",
+                "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache/requests.jsonl",
+                "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_prefix-cache/manifest.json"
+              }
+            },
+            "elapsed_seconds": 2705.300159931183
+          },
+          {
+            "policy": "simple-session-affinity",
+            "label": "simple-session-affinity",
+            "proxy_url": "https://ta-01kqnp7v2hme7v8p4aje4t85hb-8000-zywp0vms1y97lwp6qkf99qhal.w.modal.host",
+            "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity",
+            "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity",
+            "auto_tune": null,
+            "workload": {
+              "running": false,
+              "status": "succeeded",
+              "phase": "done",
+              "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity",
+              "started_at": "2026-05-03T01:11:34.208488Z",
+              "finished_at": "2026-05-03T01:56:37.254597Z",
+              "config": {
+                "data_path": "/data/mooncake_traces/sweeps/glm5_day1_30m_topusers_v3/token-hash-filter_n1000_w30m_cand20_top10_20_maxin28000_scale0.1_56a49d2b3a/with_bodies/00028_20260401T140000Z_token_hash_filter_top20.jsonl",
+                "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity",
+                "concurrency": 16,
+                "model": "",
+                "stream": true,
+                "max_tokens": 128,
+                "max_input_tokens": 0,
+                "arrival_mode": "open-loop",
+                "time_scale": 5.0,
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity.json",
+                "save_per_request": true,
+                "start_at_wall_time": "2026-05-03T01:12:03.863408Z"
+              },
+              "stats": {
+                "sent": 1000,
+                "ok": 852,
+                "fail": 148,
+                "success_rate": 0.852,
+                "status_breakdown": {
+                  "200": 852,
+                  "400": 143,
+                  "502": 5
+                },
+                "elapsed_seconds": 2669.6913265059998,
+                "request_throughput_rps": 0.37457513910747336,
+                "input_token_throughput": 2604.838593494367,
+                "output_token_throughput": 197.75095148956484,
+                "total_token_throughput": 2802.5895449839322,
+                "total_input_tokens": 6954115,
+                "total_output_tokens": 527934,
+                "ttft_seconds": {
+                  "avg": 0.5609592335011737,
+                  "min": 0.129732895,
+                  "max": 5.522200914,
+                  "p50": 0.465426566,
+                  "p95": 0.9898453,
+                  "p99": 4.205415707,
+                  "n": 852
+                },
+                "request_e2e_seconds": {
+                  "avg": 49.01945962879812,
+                  "min": 1.049219482,
+                  "max": 1297.237787459,
+                  "p50": 10.900123295,
+                  "p95": 483.447472313,
+                  "p99": 710.952491088,
+                  "n": 852
+                },
+                "itl_ms": {
+                  "avg": 84.05200244225767,
+                  "min": 6.347177571428571,
+                  "max": 133.63234872580645,
+                  "p50": 85.06483948148148,
+                  "p95": 112.22448417647058,
+                  "p99": 122.24354322522522,
+                  "n": 852
+                },
+                "decode_tokens_per_second": {
+                  "avg": 14.88306917794339,
+                  "min": 7.483218019701578,
+                  "max": 157.55034245480044,
+                  "p50": 11.756470264172638,
+                  "p95": 19.94653879379317,
+                  "p99": 96.5357409816022,
+                  "n": 852
+                },
+                "input_tokens": {
+                  "avg": 8162.106807511737,
+                  "min": 14.0,
+                  "max": 29280.0,
+                  "p50": 4616.0,
+                  "p95": 23984.0,
+                  "p99": 26110.0,
+                  "n": 852
+                },
+                "output_tokens": {
+                  "avg": 619.6408450704225,
+                  "min": 6.0,
+                  "max": 16000.0,
+                  "p50": 128.0,
+                  "p95": 5821.0,
+                  "p99": 8721.0,
+                  "n": 852
+                },
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity.json"
+              },
+              "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity.json",
+              "error": null,
+              "stop_requested": false
+            },
+            "trace": {
+              "trace": {
+                "enabled": false,
+                "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity",
+                "sample_metrics": true,
+                "sample_requests": true,
+                "max_events": 200000,
+                "started_at": "2026-05-03T01:11:34.152149Z",
+                "stopped_at": "2026-05-03T01:56:37.269425Z",
+                "dropped_metrics": 0,
+                "dropped_requests": 0,
+                "saved_paths": {
+                  "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity/metrics.jsonl",
+                  "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity/requests.jsonl",
+                  "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity/manifest.json"
+                },
+                "metrics_events": 267,
+                "request_events": 1000,
+                "first_event_ts": "2026-05-03T01:12:01.360133Z",
+                "last_event_ts": "2026-05-03T01:56:30.675151Z"
+              },
+              "paths": {
+                "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity/metrics.jsonl",
+                "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity/requests.jsonl",
+                "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_simple-session-affinity/manifest.json"
+              }
+            },
+            "elapsed_seconds": 2707.029884815216
+          },
+          {
+            "policy": "vtc",
+            "label": "vtc",
+            "proxy_url": "https://ta-01kqnp7tx3js3ask523qkmdeew-8000-z63ojxatemqndkq8508mdtv77.w.modal.host",
+            "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc",
+            "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc",
+            "auto_tune": null,
+            "workload": {
+              "running": false,
+              "status": "succeeded",
+              "phase": "done",
+              "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc",
+              "started_at": "2026-05-03T01:11:34.188003Z",
+              "finished_at": "2026-05-03T01:56:17.282388Z",
+              "config": {
+                "data_path": "/data/mooncake_traces/sweeps/glm5_day1_30m_topusers_v3/token-hash-filter_n1000_w30m_cand20_top10_20_maxin28000_scale0.1_56a49d2b3a/with_bodies/00028_20260401T140000Z_token_hash_filter_top20.jsonl",
+                "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc",
+                "concurrency": 16,
+                "model": "",
+                "stream": true,
+                "max_tokens": 128,
+                "max_input_tokens": 0,
+                "arrival_mode": "open-loop",
+                "time_scale": 5.0,
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc.json",
+                "save_per_request": true,
+                "start_at_wall_time": "2026-05-03T01:12:03.863408Z"
+              },
+              "stats": {
+                "sent": 1000,
+                "ok": 856,
+                "fail": 144,
+                "success_rate": 0.856,
+                "status_breakdown": {
+                  "200": 856,
+                  "400": 144
+                },
+                "elapsed_seconds": 2649.333011383,
+                "request_throughput_rps": 0.3774534932767783,
+                "input_token_throughput": 2626.269317637751,
+                "output_token_throughput": 183.9489403204917,
+                "total_token_throughput": 2810.2182579582427,
+                "total_input_tokens": 6957862,
+                "total_output_tokens": 487342,
+                "ttft_seconds": {
+                  "avg": 0.586134487739486,
+                  "min": 0.145056698,
+                  "max": 5.616298165,
+                  "p50": 0.481404362,
+                  "p95": 1.132931346,
+                  "p99": 4.056184721,
+                  "n": 856
+                },
+                "request_e2e_seconds": {
+                  "avg": 48.07360858947197,
+                  "min": 2.419332087,
+                  "max": 1310.809573448,
+                  "p50": 11.782995623,
+                  "p95": 459.856082246,
+                  "p99": 669.872149767,
+                  "n": 856
+                },
+                "itl_ms": {
+                  "avg": 92.44687096992587,
+                  "min": 51.091886091693226,
+                  "max": 153.92907706299212,
+                  "p50": 91.06132106299214,
+                  "p95": 112.58906574452554,
+                  "p99": 123.44920896850394,
+                  "n": 856
+                },
+                "decode_tokens_per_second": {
+                  "avg": 10.9938185337314,
+                  "min": 6.496498381464158,
+                  "max": 19.57257945430566,
+                  "p50": 10.983352510632928,
+                  "p95": 13.190158576705041,
+                  "p99": 14.090592985124411,
+                  "n": 856
+                },
+                "input_tokens": {
+                  "avg": 8128.343457943925,
+                  "min": 14.0,
+                  "max": 29280.0,
+                  "p50": 4616.0,
+                  "p95": 23984.0,
+                  "p99": 26110.0,
+                  "n": 856
+                },
+                "output_tokens": {
+                  "avg": 569.3247663551402,
+                  "min": 24.0,
+                  "max": 16000.0,
+                  "p50": 128.0,
+                  "p95": 5849.0,
+                  "p99": 8105.0,
+                  "n": 856
+                },
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc.json"
+              },
+              "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc.json",
+              "error": null,
+              "stop_requested": false
+            },
+            "trace": {
+              "trace": {
+                "enabled": false,
+                "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc",
+                "sample_metrics": true,
+                "sample_requests": true,
+                "max_events": 200000,
+                "started_at": "2026-05-03T01:11:34.130115Z",
+                "stopped_at": "2026-05-03T01:56:35.859816Z",
+                "dropped_metrics": 0,
+                "dropped_requests": 0,
+                "saved_paths": {
+                  "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc/metrics.jsonl",
+                  "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc/requests.jsonl",
+                  "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc/manifest.json"
+                },
+                "metrics_events": 267,
+                "request_events": 1000,
+                "first_event_ts": "2026-05-03T01:12:01.584378Z",
+                "last_event_ts": "2026-05-03T01:56:32.190681Z"
+              },
+              "paths": {
+                "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc/metrics.jsonl",
+                "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc/requests.jsonl",
+                "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_vtc/manifest.json"
+              }
+            },
+            "elapsed_seconds": 2705.4638578891754
+          },
+          {
+            "policy": "gorgo",
+            "label": "gorgo-tuned",
+            "proxy_url": "https://ta-01kqnp7vjj1de0a9ayys4p4995-8000-ntg7nwvfxazl0j3s8hd45ds6p.w.modal.host",
+            "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned",
+            "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned",
+            "auto_tune": {
+              "config": {
+                "enabled": true,
+                "window_size": 200,
+                "hop_size": 50,
+                "apply": true
+              },
+              "hyperparameters": {
+                "defaults": {
+                  "t_prefill": 3.801888860595026e-05,
+                  "queued_tokens_weight": 0.08869073213513515
+                },
+                "per_target": {
+                  "https://ta-01kqnp2vtepvc516hvbnybjkd6-8000-6m0zbfpf8cr6qjo4zpv9xva8l.w.modal.host": {
+                    "t_prefill": 4.303831372556286e-05,
+                    "queued_tokens_weight": 0.09284811559375
+                  },
+                  "https://ta-01kqnp29xav3tkfxax0pj2th78-8000-ew87fe3ti2gtg5ch7532qysjt.w.modal.host": {
+                    "t_prefill": 3.346050025017782e-05,
+                    "queued_tokens_weight": 0.0822660965625
+                  },
+                  "https://ta-01kqnp3avgnmferhm0vw1cjgtt-8000-m1mpct67qv7002fx7cmlm2ipt.w.modal.host": {
+                    "t_prefill": 6.478261063421687e-05,
+                    "queued_tokens_weight": 0.10965851181642511
+                  }
+                }
+              }
+            },
+            "workload": {
+              "running": false,
+              "status": "succeeded",
+              "phase": "done",
+              "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned",
+              "started_at": "2026-05-03T01:11:34.254343Z",
+              "finished_at": "2026-05-03T01:56:33.874390Z",
+              "config": {
+                "data_path": "/data/mooncake_traces/sweeps/glm5_day1_30m_topusers_v3/token-hash-filter_n1000_w30m_cand20_top10_20_maxin28000_scale0.1_56a49d2b3a/with_bodies/00028_20260401T140000Z_token_hash_filter_top20.jsonl",
+                "run_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned",
+                "concurrency": 16,
+                "model": "",
+                "stream": true,
+                "max_tokens": 128,
+                "max_input_tokens": 0,
+                "arrival_mode": "open-loop",
+                "time_scale": 5.0,
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned.json",
+                "save_per_request": true,
+                "start_at_wall_time": "2026-05-03T01:12:03.863408Z"
+              },
+              "stats": {
+                "sent": 1000,
+                "ok": 856,
+                "fail": 144,
+                "success_rate": 0.856,
+                "status_breakdown": {
+                  "200": 856,
+                  "400": 144
+                },
+                "elapsed_seconds": 2665.999046849,
+                "request_throughput_rps": 0.3750939075473117,
+                "input_token_throughput": 2609.8516457549536,
+                "output_token_throughput": 186.6808619411291,
+                "total_token_throughput": 2796.5325076960826,
+                "total_input_tokens": 6957862,
+                "total_output_tokens": 497691,
+                "ttft_seconds": {
+                  "avg": 0.5590277113084112,
+                  "min": 0.147698472,
+                  "max": 4.834897226,
+                  "p50": 0.481547037,
+                  "p95": 1.024974733,
+                  "p99": 3.269571637,
+                  "n": 856
+                },
+                "request_e2e_seconds": {
+                  "avg": 47.894351363421734,
+                  "min": 3.061452333,
+                  "max": 777.199532296,
+                  "p50": 11.687919059,
+                  "p95": 466.69303313,
+                  "p99": 697.603325646,
+                  "n": 856
+                },
+                "itl_ms": {
+                  "avg": 91.40908760658888,
+                  "min": 36.91472994643415,
+                  "max": 160.7846739714286,
+                  "p50": 89.16737592913385,
+                  "p95": 113.43892085263157,
+                  "p99": 124.41994813043478,
+                  "n": 856
+                },
+                "decode_tokens_per_second": {
+                  "avg": 11.1250698906793,
+                  "min": 6.219498260000203,
+                  "max": 27.089457283070193,
+                  "p50": 11.215806382452174,
+                  "p95": 13.16056831884034,
+                  "p99": 13.759759646642806,
+                  "n": 856
+                },
+                "input_tokens": {
+                  "avg": 8128.343457943925,
+                  "min": 14.0,
+                  "max": 29280.0,
+                  "p50": 4616.0,
+                  "p95": 23984.0,
+                  "p99": 26110.0,
+                  "n": 856
+                },
+                "output_tokens": {
+                  "avg": 581.4147196261682,
+                  "min": 21.0,
+                  "max": 16000.0,
+                  "p50": 128.0,
+                  "p95": 5715.0,
+                  "p99": 8526.0,
+                  "n": 856
+                },
+                "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned.json"
+              },
+              "output_path": "/results/workload_runs/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned.json",
+              "error": null,
+              "stop_requested": false
+            },
+            "trace": {
+              "trace": {
+                "enabled": false,
+                "trace_id": "moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned",
+                "sample_metrics": true,
+                "sample_requests": true,
+                "max_events": 200000,
+                "started_at": "2026-05-03T01:11:34.204631Z",
+                "stopped_at": "2026-05-03T01:56:35.769122Z",
+                "dropped_metrics": 0,
+                "dropped_requests": 0,
+                "saved_paths": {
+                  "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned/metrics.jsonl",
+                  "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned/requests.jsonl",
+                  "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned/manifest.json"
+                },
+                "metrics_events": 267,
+                "request_events": 1000,
+                "first_event_ts": "2026-05-03T01:12:01.721217Z",
+                "last_event_ts": "2026-05-03T01:56:33.876295Z"
+              },
+              "paths": {
+                "metrics_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned/metrics.jsonl",
+                "requests_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned/requests.jsonl",
+                "manifest_path": "/results/proxy_traces/moon_neurips_main_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned/manifest.json"
+              }
+            },
+            "elapsed_seconds": 2705.459863424301
+          }
+        ]
+      }
+    }
+  ]
+}

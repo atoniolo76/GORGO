@@ -851,7 +851,20 @@ components:
           description: SGLang `sglang:num_used_tokens` (KV-cache occupancy).
         latency_seconds:
           type: number
-          description: Wall-clock time of the last `/metrics` scrape for this replica.
+          description: |
+            Wall-clock time of the last `/metrics` scrape for this replica.
+            Includes SGLang's Prometheus handler time, so it inflates under
+            load and is a noisy upper bound on pure network RTT. Prefer
+            `network_rtt_seconds` for network-leg estimates.
+        network_rtt_seconds:
+          oneOf:
+            - type: number
+            - type: 'null'
+          description: |
+            EWMA-smoothed RTT of a dedicated lightweight probe (`GET /` to
+            the replica's base URL) issued in parallel with each metrics
+            scrape. Isolates pure network RTT from SGLang load. `null` until
+            the first probe completes a successful round-trip (cold start).
         gen_throughput:
           type: number
           description: SGLang `sglang:gen_throughput` (generation tokens/sec).

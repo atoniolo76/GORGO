@@ -43,9 +43,15 @@ def normalize_policy(name: str) -> str:
 class ReplicaSnapshot:
     """Per-replica metrics from a single SGLang ``/metrics`` scrape.
 
-    ``latency`` is the wall-clock RTT of the scrape itself, used by
-    GORGO scoring as a stand-in for the irreducible network leg of any
-    request to that replica.
+    ``latency`` is the wall-clock RTT of the scrape itself; it includes
+    SGLang's Prometheus handler time and serialization, so it's a noisy
+    upper bound on pure network RTT (and inflates under load).
+
+    ``network_rtt`` is the EWMA-smoothed RTT of a dedicated lightweight
+    probe to the replica's base URL; preferred over ``latency`` when
+    subtracting the irreducible network leg from TTFT samples. ``0.0``
+    means the probe hasn't completed a successful round-trip yet
+    (cold start) -- callers should fall back to ``latency`` in that case.
     """
 
     __slots__ = (
@@ -53,6 +59,7 @@ class ReplicaSnapshot:
         "num_queue_reqs",
         "num_used_tokens",
         "latency",
+        "network_rtt",
         "gen_throughput",
         "utilization",
     )
@@ -64,6 +71,7 @@ class ReplicaSnapshot:
         num_queue_reqs: int,
         num_used_tokens: int,
         latency: float,
+        network_rtt: float = 0.0,
         gen_throughput: float = 0.0,
         utilization: float = 0.0,
     ):
@@ -71,6 +79,7 @@ class ReplicaSnapshot:
         self.num_queue_reqs = num_queue_reqs
         self.num_used_tokens = num_used_tokens
         self.latency = latency
+        self.network_rtt = network_rtt
         self.gen_throughput = gen_throughput
         self.utilization = utilization
 

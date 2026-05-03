@@ -1,0 +1,72 @@
+{
+  "run_id": "moon_neurips_main",
+  "trace_path": "",
+  "start_delay_seconds": 30,
+  "concurrency": 32,
+  "stream": true,
+  "max_tokens": 128,
+  "max_input_tokens": 24000,
+  "arrival_mode": "open-loop",
+  "time_scale": 10.0,
+  "poll_interval_seconds": 60,
+  "fleet_regions": [
+    "CANADA-2",
+    "sines-2",
+    "us-west4"
+  ],
+  "manifest_path": "results/policy_matrix/moon_neurips_main.json",
+  "policies": [
+    {
+      "name": "random",
+      "proxy_url": "https://REPLACE_RANDOM_PROXY.modal.host"
+    },
+    {
+      "name": "least-request",
+      "proxy_url": "https://REPLACE_LEAST_REQUEST_PROXY.modal.host"
+    },
+    {
+      "name": "power-of-two",
+      "proxy_url": "https://REPLACE_POWER_OF_TWO_PROXY.modal.host"
+    },
+    {
+      "name": "least-load",
+      "proxy_url": "https://REPLACE_LEAST_LOAD_PROXY.modal.host"
+    },
+    {
+      "name": "prefix-cache",
+      "proxy_url": "https://REPLACE_PREFIX_CACHE_PROXY.modal.host"
+    },
+    {
+      "name": "simple-session-affinity",
+      "proxy_url": "https://REPLACE_SIMPLE_SESSION_AFFINITY_PROXY.modal.host"
+    },
+    {
+      "name": "vtc",
+      "proxy_url": "https://REPLACE_VTC_PROXY.modal.host"
+    },
+    {
+      "name": "gorgo",
+      "label": "gorgo-static",
+      "proxy_url": "https://REPLACE_GORGO_STATIC_PROXY.modal.host",
+      "hyperparameters": {
+        "t_prefill": 0.07,
+        "queued_tokens_weight": 0.06
+      }
+    },
+    {
+      "name": "gorgo",
+      "label": "gorgo-autotuned",
+      "proxy_url": "https://REPLACE_GORGO_AUTOTUNED_PROXY.modal.host",
+      "hyperparameters": {
+        "t_prefill": 0.07,
+        "queued_tokens_weight": 0.06
+      },
+      "auto_tune": {
+        "enabled": true,
+        "window_size": 200,
+        "hop_size": 50,
+        "apply": true
+      }
+    }
+  ]
+}

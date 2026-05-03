@@ -672,6 +672,12 @@ def proxy(registry_key: str = ""):
         "refresh_seq": 0,
         "last_refresh_errors": {},  # url -> str
     }
+    # EWMA-smoothed pure-network RTT per replica, refreshed by ``_probe_rtt``
+    # alongside the metrics scrape. Kept outside ``ReplicaSnapshot`` so the
+    # smoothed value survives across snapshots even when a single probe fails.
+    network_rtt_ewma: dict[str, float] = {}
+    NETWORK_RTT_EWMA_ALPHA = 0.3
+    NETWORK_RTT_PROBE_TIMEOUT_SECONDS = 2.0
 
     def _registry_from_items(items) -> dict[str, str]:
         registry: dict[str, str] = {}
@@ -866,17 +872,53 @@ def proxy(registry_key: str = ""):
             limits=upstream_limits,
         )
 
+    async def _probe_rtt(client: httpx.AsyncClient, url: str) -> float | None:
+        """Lightweight RTT probe to a replica's base URL.
+
+        Issues a ``GET /`` and times the round-trip. SGLang typically
+        404s the root path (no router for ``/``), which is fine here --
+        we want pure HTTP RTT, not a useful response. Returns ``None``
+        on failure so the caller skips the EWMA update for this tick.
+
+        Reuses the upstream ``client``'s connection pool, so steady-state
+        we measure data RTT (no TCP/TLS handshake), matching what real
+        chat-completions requests pay.
+        """
+        t0 = time.monotonic()
+        try:
+            await client.get(url + "/", timeout=NETWORK_RTT_PROBE_TIMEOUT_SECONDS)
+        except Exception:
+            return None
+        return time.monotonic() - t0
+
     async def _refresh_one(client: httpx.AsyncClient, url: str, seq: int) -> None:
-        """Scrape one replica's /metrics into ``live_metrics[url]``."""
+        """Scrape one replica's /metrics + probe its RTT into ``live_metrics[url]``."""
         t0 = time.monotonic()
         wall_ts = _now_wall_ts()
+        # Run the metrics scrape and the lightweight RTT probe concurrently.
+        # The probe is independent of /metrics handler load (which is what
+        # makes ``snap.latency`` a noisy stand-in for pure network RTT).
+        scrape_task = asyncio.create_task(
+            client.get(f"{url}/metrics", timeout=METRICS_FETCH_TIMEOUT_SECONDS)
+        )
+        probe_task = asyncio.create_task(_probe_rtt(client, url))
         try:
-            # Override the client's generous default timeout -- if a replica
-            # can't answer /metrics in 2s it's effectively down for routing
-            # purposes and we'd rather fall back than block the refresh loop.
-            resp = await client.get(f"{url}/metrics", timeout=METRICS_FETCH_TIMEOUT_SECONDS)
+            resp = await scrape_task
             resp.raise_for_status()
         except Exception as e:
+            # Cancel the in-flight probe defensively if the scrape failed
+            # before it completed (we still record whatever the probe got).
+            try:
+                rtt = await probe_task
+            except Exception:
+                rtt = None
+            if rtt is not None:
+                prev = network_rtt_ewma.get(url)
+                network_rtt_ewma[url] = (
+                    rtt
+                    if prev is None
+                    else NETWORK_RTT_EWMA_ALPHA * rtt + (1 - NETWORK_RTT_EWMA_ALPHA) * prev
+                )
             latency = time.monotonic() - t0
             metrics_meta["last_refresh_errors"][url] = repr(e)
             _trace_append(
@@ -890,6 +932,7 @@ def proxy(registry_key: str = ""):
                     "replica_url": url,
                     "region": REGION,
                     "scrape_latency_seconds": latency,
+                    "network_rtt_seconds": network_rtt_ewma.get(url),
                     "ok": False,
                     "num_running_reqs": None,
                     "num_queue_reqs": None,
@@ -901,12 +944,24 @@ def proxy(registry_key: str = ""):
             )
             return
         latency = time.monotonic() - t0
+        try:
+            rtt = await probe_task
+        except Exception:
+            rtt = None
+        if rtt is not None:
+            prev = network_rtt_ewma.get(url)
+            network_rtt_ewma[url] = (
+                rtt
+                if prev is None
+                else NETWORK_RTT_EWMA_ALPHA * rtt + (1 - NETWORK_RTT_EWMA_ALPHA) * prev
+            )
         parsed = _parse_metrics_text(resp.text)
         snap = ReplicaSnapshot(
             num_running_reqs=int(parsed.get("sglang:num_running_reqs", 0)),
             num_queue_reqs=int(parsed.get("sglang:num_queue_reqs", 0)),
             num_used_tokens=int(parsed.get("sglang:num_used_tokens", 0)),
             latency=latency,
+            network_rtt=network_rtt_ewma.get(url, 0.0),
             gen_throughput=float(parsed.get("sglang:gen_throughput", 0.0)),
             utilization=float(parsed.get("sglang:utilization", 0.0)),
         )
@@ -923,6 +978,7 @@ def proxy(registry_key: str = ""):
                 "replica_url": url,
                 "region": REGION,
                 "scrape_latency_seconds": latency,
+                "network_rtt_seconds": snap.network_rtt,
                 "ok": True,
                 "num_running_reqs": snap.num_running_reqs,
                 "num_queue_reqs": snap.num_queue_reqs,
@@ -1168,6 +1224,7 @@ def proxy(registry_key: str = ""):
                     "num_queue_reqs": m.num_queue_reqs,
                     "num_used_tokens": m.num_used_tokens,
                     "latency_seconds": m.latency,
+                    "network_rtt_seconds": m.network_rtt or None,
                     "gen_throughput": m.gen_throughput,
                     "utilization": m.utilization,
                 }
@@ -1969,12 +2026,17 @@ def proxy(registry_key: str = ""):
         silently when token counts are missing (calibrate-style safeguard
         against corrupted per-token rates).
 
-        ``ping_seconds`` reuses the most recent /metrics scrape latency
-        for ``target`` as a stand-in for the irreducible RTT subtracted
-        from TTFT -- same role ``ping_once`` plays in
-        ``proxy/calibrate.py``. If no metrics snapshot exists yet
-        (cold start), we record ``ping=0`` so the prefill rate is a
-        slight overestimate rather than negative.
+        ``ping_seconds`` is the irreducible RTT subtracted from TTFT
+        before fitting the prefill rate. Source order:
+          1. ``snap.network_rtt`` (EWMA-smoothed dedicated probe of the
+             replica's base URL; preferred -- isolates pure network RTT
+             from SGLang's /metrics handler load).
+          2. ``snap.latency`` (scrape RTT; fallback when the probe
+             hasn't completed a successful round-trip yet, e.g. cold
+             start). Inflates under load, hence only a fallback.
+          3. ``0.0`` (no snapshot at all -- prefill rate becomes a
+             slight overestimate rather than negative).
+        Same role ``ping_once`` plays in ``proxy/calibrate.py``.
         """
         if (
             ttft_ns is None
@@ -1986,7 +2048,12 @@ def proxy(registry_key: str = ""):
             return
 
         snap = live_metrics.get(target)
-        ping_rtt_s = snap.latency if snap is not None else 0.0
+        if snap is None:
+            ping_rtt_s = 0.0
+        elif snap.network_rtt > 0.0:
+            ping_rtt_s = snap.network_rtt
+        else:
+            ping_rtt_s = snap.latency
 
         ttft_s = ttft_ns / NS_PER_S
         total_s = total_ns / NS_PER_S

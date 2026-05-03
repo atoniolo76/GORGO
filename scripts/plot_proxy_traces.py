@@ -49,8 +49,11 @@ def _maybe_local(path: str, root: Path | None) -> Path:
     p = Path(path)
     if p.exists():
         return p
-    if root is not None and p.is_absolute():
-        candidate = root / str(p).lstrip("/")
+    if root is None or not p.is_absolute():
+        return p
+    parts = p.parts[1:]
+    for i in range(len(parts)):
+        candidate = root.joinpath(*parts[i:])
         if candidate.exists():
             return candidate
     return p
@@ -109,10 +112,22 @@ def _plot_single(metrics_path: Path, requests_path: Path, out: Path) -> None:
     fig.savefig(out, dpi=180)
 
 
+def _iter_policy_results(manifest: dict):
+    """Yield per-policy result dicts from either an aggregate sweep manifest
+    (``results[].manifest.results[]``) or a per-trace matrix manifest
+    (``results[]`` directly)."""
+    for result in manifest.get("results", []):
+        nested = result.get("manifest")
+        if isinstance(nested, dict) and "results" in nested:
+            yield from _iter_policy_results(nested)
+            continue
+        yield result
+
+
 def _load_policy_traces(matrix_manifest_path: Path, local_trace_root: Path | None) -> list[dict]:
     manifest = json.loads(matrix_manifest_path.read_text())
     out = []
-    for result in manifest.get("results", []):
+    for result in _iter_policy_results(manifest):
         if result.get("error"):
             continue
         label = result.get("label") or result.get("policy") or result.get("run_id")

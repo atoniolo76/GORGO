@@ -1,0 +1,20 @@
+{
+  "trace": {
+    "enabled": false,
+    "trace_id": "moon_smoke_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned",
+    "sample_metrics": true,
+    "sample_requests": true,
+    "max_events": 200000,
+    "started_at": "2026-05-02T23:18:18.463826Z",
+    "stopped_at": "2026-05-02T23:26:18.826584Z",
+    "dropped_metrics": 0,
+    "dropped_requests": 0,
+    "saved_paths": null,
+    "metrics_events": 16,
+    "request_events": 1000,
+    "first_event_ts": "2026-05-02T23:18:35.280398Z",
+    "last_event_ts": "2026-05-02T23:26:18.234292Z"
+  },
+  "metrics_path": "/results/proxy_traces/moon_smoke_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned/metrics.jsonl",
+  "requests_path": "/results/proxy_traces/moon_smoke_001_00028_20260401T140000Z_token_hash_filter_top20_gorgo-tuned/requests.jsonl"
+}
