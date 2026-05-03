@@ -19,7 +19,7 @@ sglang_image = (
     .entrypoint(
         []  # silence chatty logs on container start
     )
-    .add_local_python_source("app", copy=True)
+    .add_local_python_source("app", "engine", copy=True)
 )
 
 REGION = os.getenv("REGION", "us-east")
@@ -77,7 +77,7 @@ sglang_image = sglang_image.run_commands(
 
 @app.function(
     image=sglang_image,
-    timeout=3600,
+    timeout=24 * 60 * 60,
     region=REGION,
     gpu=GPU,
     min_containers=int(MIN_CONTAINERS),

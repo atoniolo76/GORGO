@@ -1,42 +1,8 @@
-"""Replay chat-completions traffic against the GORGO proxy.
+"""Pure async replay core for GORGO workloads.
 
-Runs as a Modal function pinned to the same region as the proxy (and the
-engine). Three data sources are supported via the ``--source`` flag:
-
-- ``glm5`` (default): the GLM 5.1 ClickHouse export. Parquet shards under
-  ``GORGO-glm5-completions`` (mounted at ``/data``) with ``timestamp`` plus a
-  JSON ``request`` column. Supports ISO ``--start-time`` / ``--end-time``
-  filtering against the row timestamps.
-- ``hf``: any Hugging Face ``save_to_disk`` chat dataset (LMSYS-Chat-1M,
-  WildChat-4.8M, etc.). Reads the first non-empty among the ``conversation``
-  / ``messages`` / ``conversations`` columns and assembles an OpenAI-style
-  chat body. ``--preset lmsys`` or ``--preset wildchat`` fills in default
-  disk paths under the mounted dataset volumes; ``--data-path`` overrides.
-  HF rows have no native timestamp, so ``--start-time`` / ``--end-time`` are
-  ignored for this source.
-
-Sources stream rows lazily and feed a bounded asyncio queue, so memory stays
-``O(concurrency)`` regardless of dataset size. The inter-request gap from the
-original timeline is *not* preserved -- the ``concurrency`` knob alone
-determines how fast the dataset is consumed.
-
-Usage::
-
-    # GLM 5.1 (default source).
-    modal run proxy/workload.py --proxy-url https://...modal.host \\
-        --start-time 2026-04-01T12:00:00 \\
-        --end-time   2026-04-01T13:00:00 \\
-        --concurrency 32
-
-    # LMSYS-Chat-1M.
-    modal run proxy/workload.py --proxy-url https://... \\
-        --source hf --preset lmsys --num-requests 1000
-
-    # WildChat-4.8M from a custom path.
-    modal run proxy/workload.py --proxy-url https://... \\
-        --source hf --data-path /datasets/datasets/allenai__WildChat-4.8M
-
-All knobs are also kwargs on ``replay`` for programmatic invocation.
+No Modal decorators live here; this module is safe to import from the
+long-running proxy process. ``proxy/workload.py`` wraps these helpers in Modal
+entrypoints/functions.
 """
 
 from __future__ import annotations
@@ -50,10 +16,8 @@ from datetime import datetime, timezone
 from typing import Iterator
 
 import httpx
-import modal
 
 from app import (
-    app,
     bench_results_volume,
     completions_volume,
     hf_datasets_volume,
@@ -81,12 +45,6 @@ def _log(message: str) -> None:
 # in order to minimize the variable latency of crossing regions. REGION strings
 # can also contain a zone like 1.
 REGION = os.getenv("REGION", "us-east-1")
-
-image = (
-    modal.Image.debian_slim()
-    .pip_install("httpx[http2]", "pyarrow", "datasets>=3.0", "tiktoken")
-    .add_local_python_source("app", "proxy")
-)
 
 # Auto-detected context_length, plus a constant safety margin for chat
 # template tokens / role markers that the gpt-4o tokenizer doesn't see
@@ -1315,123 +1273,3 @@ async def run_replay_async(
 
     stats["output_path"] = resolved_output_path
     return stats
-
-
-@app.function(
-    image=image,
-    region=REGION,
-    timeout=24 * 60 * 60,
-    volumes={
-        "/data": completions_volume,
-        "/lmsys": lmsys_chat_1m_volume,
-        "/datasets": hf_datasets_volume,
-        "/results": bench_results_volume,
-    },
-)
-def replay(
-    proxy_url: str,
-    *,
-    source: str = SOURCE_GLM5,
-    preset: str | None = None,
-    data_path: str | None = None,
-    start_time: str | None = None,
-    end_time: str | None = None,
-    offset: int = 0,
-    num_requests: int | None = None,
-    concurrency: int = 16,
-    model: str | None = DEFAULT_MODEL,
-    stream: bool | None = None,
-    max_tokens: int | None = None,
-    max_input_tokens: int | None = None,
-    output_path: str | None = None,
-    save_per_request: bool = True,
-    run_id: str | None = None,
-    arrival_mode: str = "bounded",
-    time_scale: float = 1.0,
-) -> dict:
-    """Modal wrapper around :func:`run_replay_async`."""
-    return asyncio.run(
-        run_replay_async(
-            proxy_url=proxy_url,
-            source=source,
-            preset=preset,
-            data_path=data_path,
-            start_time=start_time,
-            end_time=end_time,
-            offset=offset,
-            num_requests=num_requests,
-            concurrency=concurrency,
-            model=model,
-            stream=stream,
-            max_tokens=max_tokens,
-            max_input_tokens=max_input_tokens,
-            output_path=output_path,
-            save_per_request=save_per_request,
-            run_id=run_id,
-            arrival_mode=arrival_mode,
-            time_scale=time_scale,
-        )
-    )
-
-
-@app.local_entrypoint()
-def main(
-    proxy_url: str,
-    source: str = SOURCE_GLM5,
-    preset: str = "",
-    data_path: str = "",
-    start_time: str = "",
-    end_time: str = "",
-    offset: int = 0,
-    num_requests: int = 0,
-    concurrency: int = 16,
-    model: str = DEFAULT_MODEL,
-    stream: str = "",
-    max_tokens: int = 0,
-    max_input_tokens: int = 0,
-    run_id: str = "",
-    arrival_mode: str = "bounded",
-    time_scale: float = 1.0,
-    output_path: str = "",
-    save_per_request: bool = True,
-):
-    """CLI wrapper for ``replay``. Sentinel values map to ``None`` because
-    Modal local_entrypoints don't accept ``Optional`` natively:
-
-      empty string for preset / data_path / start_time / end_time /
-        model / stream / output_path
-      0 for num_requests / max_tokens
-      0 for max_input_tokens (= auto-detect from /get_server_info);
-        positive = explicit cap; negative = disable filter
-    """
-    stream_arg: bool | None
-    s = stream.strip().lower()
-    if s == "":
-        stream_arg = None
-    elif s in ("1", "true", "yes"):
-        stream_arg = True
-    elif s in ("0", "false", "no"):
-        stream_arg = False
-    else:
-        raise SystemExit(f"invalid --stream={stream!r}; expected true/false")
-
-    replay.remote(
-        proxy_url=proxy_url,
-        source=source,
-        preset=preset or None,
-        data_path=data_path or None,
-        start_time=start_time or None,
-        end_time=end_time or None,
-        offset=offset,
-        num_requests=num_requests or None,
-        concurrency=concurrency,
-        model=model or None,
-        stream=stream_arg,
-        max_tokens=max_tokens or None,
-        max_input_tokens=max_input_tokens,
-        run_id=run_id or None,
-        arrival_mode=arrival_mode,
-        time_scale=time_scale,
-        output_path=output_path or None,
-        save_per_request=save_per_request,
-    )

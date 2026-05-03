@@ -106,6 +106,7 @@ def _dispatch_tune(
         "queued_tokens_weight_min": queued_tokens_weight_min,
         "queued_tokens_weight_max": queued_tokens_weight_max,
     }
+    payload = {k: v for k, v in payload.items() if v is not None}
     with httpx.Client(base_url=base_url, timeout=httpx.Timeout(30.0)) as client:
         r = client.post("/tuning/start", json=payload)
         if r.status_code >= 400:

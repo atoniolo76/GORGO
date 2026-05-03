@@ -80,6 +80,7 @@ from app import (
     completions_volume,
     hf_datasets_volume,
     lmsys_chat_1m_volume,
+    proxies,
     replicas,
 )
 from proxy.measure import (
@@ -530,7 +531,7 @@ def _parse_metrics_text(text: str) -> dict[str, float]:
         "/results": bench_results_volume,
     },
 )
-def proxy():
+def proxy(registry_key: str = ""):
     import time
 
     import httpx
@@ -602,6 +603,7 @@ def proxy():
         "workload_run": {
             "running": False,
             "status": "idle",
+            "phase": "idle",
             "task": None,
             "run_id": None,
             "started_at": None,
@@ -740,7 +742,12 @@ def proxy():
             source="/replicas",
         )
 
-    _sync_replicas_from_modal_dict()
+    # Experiment proxies are configured explicitly by the controller with
+    # POST /replicas. Do not ingest every URL in the global replica registry on
+    # startup, otherwise a one-fleet smoke proxy can temporarily see unrelated
+    # replicas before the controller narrows it back down.
+    if not registry_key:
+        _sync_replicas_from_modal_dict()
 
     # ---------- ASGI helpers ----------
 
@@ -928,7 +935,8 @@ def proxy():
 
     async def _refresh_all(client: httpx.AsyncClient | None) -> None:
         """One pass: refresh every registered replica in parallel."""
-        await _sync_replicas_from_modal_dict_async()
+        if not replica_urls:
+            await _sync_replicas_from_modal_dict_async()
         if client is None or not replica_urls:
             return
         seq = metrics_meta["refresh_seq"] + 1
@@ -1525,7 +1533,7 @@ def proxy():
         }
 
     async def _run_batch_tuning(run_id: str, config: dict) -> None:
-        from proxy.workload import DEFAULT_MODEL, run_replay_async
+        from proxy.workload_core import DEFAULT_MODEL, run_replay_async
 
         bt = state["batch_tuning"]
         run_started_at = datetime.now(timezone.utc)
@@ -1786,7 +1794,7 @@ def proxy():
         }
 
     async def _run_workload(run_id: str, config: dict) -> None:
-        from proxy.workload import DEFAULT_MODEL, run_replay_async
+        from proxy.workload_core import DEFAULT_MODEL, run_replay_async
 
         wr = state["workload_run"]
         try:
@@ -1799,11 +1807,14 @@ def proxy():
                 delay = (target.astimezone(timezone.utc) - now).total_seconds()
                 if delay > 0:
                     wr["status"] = "scheduled"
+                    wr["phase"] = "waiting-start-at-wall-time"
                     _log(f"workload {run_id} scheduled for {start_at} ({delay:.3f}s)")
                     await asyncio.sleep(delay)
                     wr["status"] = "running"
+                    wr["phase"] = "starting"
             _log(f"workload {run_id} started path={config['data_path']}")
             output_path = config["output_path"] or f"/results/workload_runs/{run_id}.json"
+            wr["phase"] = "replay-running"
             stats = await run_replay_async(
                 proxy_url="http://127.0.0.1:8000",
                 source="mooncake",
@@ -1821,6 +1832,7 @@ def proxy():
             )
             finished_at = datetime.now(timezone.utc)
             wr["status"] = "succeeded"
+            wr["phase"] = "done"
             wr["finished_at"] = finished_at.isoformat().replace("+00:00", "Z")
             wr["stats"] = stats
             wr["output_path"] = stats.get("output_path")
@@ -1828,12 +1840,14 @@ def proxy():
         except asyncio.CancelledError:
             finished_at = datetime.now(timezone.utc)
             wr["status"] = "cancelled"
+            wr["phase"] = "cancelled"
             wr["finished_at"] = finished_at.isoformat().replace("+00:00", "Z")
             wr["error"] = "cancelled"
             _log(f"workload {run_id} cancelled")
         except Exception as e:
             finished_at = datetime.now(timezone.utc)
             wr["status"] = "failed"
+            wr["phase"] = "failed"
             wr["finished_at"] = finished_at.isoformat().replace("+00:00", "Z")
             wr["error"] = f"{type(e).__name__}: {e}"
             _log(f"workload {run_id} failed: {wr['error']}")
@@ -1859,6 +1873,7 @@ def proxy():
             {
                 "running": True,
                 "status": "running",
+                "phase": "starting",
                 "run_id": run_id,
                 "started_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "finished_at": None,
@@ -2380,6 +2395,9 @@ def proxy():
 
     with modal.forward(8000) as tunnel:
         _log(f"proxy listening at {tunnel.url}")
+        if registry_key:
+            proxies[registry_key] = tunnel.url
+            _log(f"proxy registered in modal dict key={registry_key!r}")
         # TODO: replace uvicorn with a faster reverse-proxy (e.g. nginx, envoy, or Rust-based)
         uvicorn.run(
             asgi_app,
@@ -2387,3 +2405,5 @@ def proxy():
             port=8000,
             log_config=_UVICORN_LOG_CONFIG,
         )
+        if registry_key and proxies.get(registry_key) == tunnel.url:
+            proxies[registry_key] = ""

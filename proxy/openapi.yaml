@@ -30,6 +30,10 @@ tags:
     description: Passthrough to upstream replicas
   - name: debug
     description: Diagnostic endpoints intended for development / inspection
+  - name: tracing
+    description: Runtime trace capture and artifact export
+  - name: workload
+    description: Proxy-local workload replay controls
 
 paths:
   /policy:
@@ -372,6 +376,172 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /trace/start:
+    post:
+      tags: [tracing]
+      summary: Start bounded metrics/request tracing
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TraceStartRequest' }
+            examples:
+              start:
+                value: { trace_id: moon_seed0_gorgo, max_events: 200000 }
+      responses:
+        '200':
+          description: Trace capture started.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TraceStatusResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /trace/status:
+    get:
+      tags: [tracing, observability]
+      summary: Get current trace buffer status
+      responses:
+        '200':
+          description: Trace buffer status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TraceStatusResponse' }
+
+  /trace/stop:
+    post:
+      tags: [tracing]
+      summary: Stop trace capture
+      responses:
+        '200':
+          description: Trace capture stopped.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TraceStatusResponse' }
+
+  /trace/save:
+    post:
+      tags: [tracing]
+      summary: Save trace buffers to the benchmark results volume
+      description: |
+        Writes JSONL trace artifacts under
+        `/results/proxy_traces/<trace_id>/` on the `GORGO-bench-results`
+        volume.
+      responses:
+        '200':
+          description: Trace artifacts written and the volume committed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TraceSaveResponse' }
+
+  /tuning/start:
+    post:
+      tags: [control-plane, workload]
+      summary: Start proxy-embedded batch GORGO tuning
+      description: |
+        Starts an asyncio background task inside the proxy. Each candidate
+        hyperparameter setting is evaluated by running `proxy/workload.py`
+        logic locally against `http://127.0.0.1:8000`, removing
+        client-to-proxy tunnel latency from the tuning metric. Supports
+        `source: mooncake` with a body-included Mooncake FAST '25 JSONL trace.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BatchTuningStartRequest' }
+      responses:
+        '202':
+          description: Tuning run accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BatchTuningStatusResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: Another batch tuning run is active or live auto-tune is enabled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /tuning/status:
+    get:
+      tags: [observability, workload]
+      summary: Get proxy-embedded batch tuning status
+      responses:
+        '200':
+          description: Batch tuning status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BatchTuningStatusResponse' }
+
+  /tuning/stop:
+    post:
+      tags: [control-plane, workload]
+      summary: Cancel active proxy-embedded batch tuning
+      responses:
+        '202':
+          description: Cancellation requested.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BatchTuningStatusResponse' }
+        '200':
+          description: No active tuning run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BatchTuningStatusResponse' }
+
+  /workload/start:
+    post:
+      tags: [workload]
+      summary: Start a proxy-local workload replay
+      description: |
+        Starts an asyncio background workload task inside the proxy and replays
+        requests through `http://127.0.0.1:8000`. This is intended for policy
+        matrix experiments where each proxy/fleet receives the same Mooncake
+        trace and optional `start_at_wall_time`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkloadStartRequest' }
+      responses:
+        '202':
+          description: Workload accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkloadStatusResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: A workload is already active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /workload/status:
+    get:
+      tags: [workload, observability]
+      summary: Get proxy-local workload status
+      responses:
+        '200':
+          description: Workload status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkloadStatusResponse' }
+
+  /workload/stop:
+    post:
+      tags: [workload]
+      summary: Cancel an active proxy-local workload
+      responses:
+        '202':
+          description: Cancellation requested.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkloadStatusResponse' }
+        '200':
+          description: No active workload.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkloadStatusResponse' }
 
   /v1/chat/completions:
     post:
@@ -799,6 +969,232 @@ components:
             `state["hyperparameters"]` is not mutated -- useful for
             shadow-mode comparison against the current settings.
       additionalProperties: false
+
+    TraceStartRequest:
+      type: object
+      properties:
+        trace_id:
+          type: string
+          description: Optional stable trace id used in output paths.
+        sample_metrics:
+          type: boolean
+          default: true
+        sample_requests:
+          type: boolean
+          default: true
+        max_events:
+          type: integer
+          minimum: 1
+          default: 200000
+        append:
+          type: boolean
+          default: false
+      additionalProperties: false
+
+    TraceStatus:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        trace_id:
+          oneOf:
+            - type: string
+            - type: 'null'
+        sample_metrics: { type: boolean }
+        sample_requests: { type: boolean }
+        max_events: { type: integer }
+        started_at:
+          oneOf:
+            - type: string
+            - type: 'null'
+        stopped_at:
+          oneOf:
+            - type: string
+            - type: 'null'
+        dropped_metrics: { type: integer }
+        dropped_requests: { type: integer }
+        saved_paths:
+          oneOf:
+            - $ref: '#/components/schemas/TracePaths'
+            - type: 'null'
+        metrics_events: { type: integer }
+        request_events: { type: integer }
+        first_event_ts:
+          oneOf:
+            - type: string
+            - type: 'null'
+        last_event_ts:
+          oneOf:
+            - type: string
+            - type: 'null'
+
+    TracePaths:
+      type: object
+      required: [metrics_path, requests_path, manifest_path]
+      properties:
+        metrics_path: { type: string }
+        requests_path: { type: string }
+        manifest_path: { type: string }
+
+    TraceStatusResponse:
+      type: object
+      required: [trace]
+      properties:
+        trace: { $ref: '#/components/schemas/TraceStatus' }
+
+    TraceSaveResponse:
+      type: object
+      required: [trace, paths]
+      properties:
+        trace: { $ref: '#/components/schemas/TraceStatus' }
+        paths: { $ref: '#/components/schemas/TracePaths' }
+
+    WorkloadSource:
+      type: string
+      enum: [glm5, hf, mooncake]
+
+    ArrivalMode:
+      type: string
+      enum: [bounded, open-loop]
+
+    WorkloadStartRequest:
+      type: object
+      required: [data_path]
+      properties:
+        data_path:
+          type: string
+          description: "For `source: mooncake`, path to a body-included Mooncake JSONL trace under `/data`."
+        run_id: { type: string }
+        concurrency:
+          type: integer
+          minimum: 1
+          default: 16
+        model:
+          type: string
+        stream:
+          oneOf:
+            - type: boolean
+            - type: 'null'
+        max_tokens:
+          type: integer
+          minimum: 0
+        max_input_tokens:
+          type: integer
+          description: 0 = auto, negative = disable, positive = explicit cap.
+        arrival_mode:
+          $ref: '#/components/schemas/ArrivalMode'
+        time_scale:
+          type: number
+          default: 1.0
+        output_path:
+          type: string
+          description: Defaults to `/results/workload_runs/<run_id>.json`.
+        save_per_request:
+          type: boolean
+          default: true
+        start_at_wall_time:
+          type: string
+          description: Optional UTC ISO timestamp; proxy waits until this time before replaying the trace.
+      additionalProperties: false
+
+    WorkloadStatus:
+      type: object
+      properties:
+        running: { type: boolean }
+        status:
+          type: string
+          enum: [idle, scheduled, running, succeeded, failed, cancelled]
+        phase:
+          type: string
+          description: |
+            Finer-grained progress signal layered on top of `status`.
+            `idle` before any run; `waiting-start-at-wall-time` while sleeping
+            until `start_at_wall_time`; `starting` between scheduled and the
+            first dispatched request; `replay-running` once requests are in
+            flight; `done`/`cancelled`/`failed` mirror the terminal `status`.
+          enum:
+            - idle
+            - waiting-start-at-wall-time
+            - starting
+            - replay-running
+            - done
+            - cancelled
+            - failed
+        run_id:
+          oneOf:
+            - type: string
+            - type: 'null'
+        started_at:
+          oneOf:
+            - type: string
+            - type: 'null'
+        finished_at:
+          oneOf:
+            - type: string
+            - type: 'null'
+        config:
+          oneOf:
+            - type: object
+            - type: 'null'
+        stats:
+          oneOf:
+            - type: object
+            - type: 'null'
+        output_path:
+          oneOf:
+            - type: string
+            - type: 'null'
+        error:
+          oneOf:
+            - type: string
+            - type: 'null'
+
+    WorkloadStatusResponse:
+      type: object
+      required: [workload]
+      properties:
+        workload: { $ref: '#/components/schemas/WorkloadStatus' }
+
+    BatchTuningStartRequest:
+      allOf:
+        - $ref: '#/components/schemas/WorkloadStartRequest'
+        - type: object
+          properties:
+            metric:
+              type: string
+              enum:
+                - output_throughput
+                - total_throughput
+                - request_throughput
+                - neg_p95_ttft
+                - neg_p99_ttft
+                - neg_p95_e2e
+                - neg_avg_itl
+            algorithm:
+              type: string
+              enum: [hill-climb, gaussian-es]
+            max_steps: { type: integer, minimum: 0 }
+            initial_step: { type: number }
+            min_step: { type: number }
+            sigma: { type: number }
+            sigma_min: { type: number }
+            seed: { type: integer }
+            relative_tolerance: { type: number }
+            output_dir: { type: string }
+            t_prefill_min: { type: number }
+            t_prefill_max: { type: number }
+            queued_tokens_weight_min: { type: number }
+            queued_tokens_weight_max: { type: number }
+
+    BatchTuningStatusResponse:
+      type: object
+      required: [batch_tuning]
+      properties:
+        run_id: { type: string }
+        status: { type: string }
+        status_url: { type: string }
+        batch_tuning:
+          type: object
+          additionalProperties: true
 
     AutoTuneStatus:
       type: object

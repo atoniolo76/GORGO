@@ -6,6 +6,9 @@ app = modal.App(name="GORGO")
 replicas = modal.Dict.from_name(
     "GORGO-replicas", create_if_missing=True, environment_name=ENVIRONMENT_NAME
 )
+proxies = modal.Dict.from_name(
+    "GORGO-proxies", create_if_missing=True, environment_name=ENVIRONMENT_NAME
+)
 completions_volume = modal.Volume.from_name(
     "GORGO-glm5-completions", create_if_missing=True, environment_name=ENVIRONMENT_NAME
 )
