@@ -3,9 +3,17 @@
 The GORGO policy scores each replica by a closed-form cost model and
 picks the minimum::
 
-    score(u) = latency(u)
+    score(u) = network_rtt(u)
              + t_prefill(u)            * effective_prefill_tokens(u)
              + queued_tokens_weight(u) * (queued_tokens(u) + used_tokens(u))
+
+``network_rtt`` is the EWMA-smoothed RTT of a dedicated lightweight
+probe (``snap.network_rtt`` populated by ``proxy/modal_proxy.py``); when
+the probe hasn't completed yet it falls back to ``snap.latency`` (the
+``/metrics`` scrape RTT, which is a noisy upper bound on RTT).
+Critically, the same value is subtracted from observed TTFT before
+fitting ``t_prefill`` in ``_record_request_sample``, so the network leg
+is accounted for once -- not double-counted, not ignored.
 
 ``t_prefill`` and ``queued_tokens_weight`` have units of seconds-per-
 token in this scoring function and can be calibrated either offline
@@ -252,7 +260,13 @@ def route_gorgo(ctx: RouteContext) -> str:
         queue_cost = (ctx.endpoints_queued_tokens.get(u, 0) + snap.num_used_tokens) * eff[
             "queued_tokens_weight"
         ]
-        scores[u] = snap.latency + prefill_cost + queue_cost
+        # Use the dedicated lightweight RTT probe when available; fall back
+        # to scrape latency for cold-start (no probe completed yet). Same
+        # source as ``_record_request_sample``'s subtraction so the network
+        # leg is accounted for symmetrically: subtract once when fitting
+        # ``t_prefill``, add back once when scoring routes.
+        rtt = snap.network_rtt if snap.network_rtt > 0.0 else snap.latency
+        scores[u] = rtt + prefill_cost + queue_cost
     if not scores:
         return route_random(ctx.replica_urls)
     return min(scores, key=scores.get)
