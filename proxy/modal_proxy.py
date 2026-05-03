@@ -731,11 +731,23 @@ def proxy(registry_key: str = ""):
         )
         return registry, added, removed
 
-    async def _sync_replicas_from_modal_dict_async() -> tuple[dict[str, str], list[str], list[str]]:
+    async def _read_registry_async() -> dict[str, str]:
+        """Read the global ``replicas`` modal Dict without mutating local state.
+
+        Used by ``GET /replicas`` so callers can observe the registry
+        contents for debugging without triggering a sync that would
+        clobber a controller-set ``replica_urls`` (matrix mode pins its
+        per-policy 3-replica list via POST /replicas; a concurrent GET
+        that re-synced from the global Dict would replace the pin with
+        whatever the last writer left there).
+        """
         items = []
         async for item in replicas.items.aio():
             items.append(item)
-        registry = _registry_from_items(items)
+        return _registry_from_items(items)
+
+    async def _sync_replicas_from_modal_dict_async() -> tuple[dict[str, str], list[str], list[str]]:
+        registry = await _read_registry_async()
         added, removed = _replace_replica_urls(
             _active_urls_from_registry(registry),
             source="modal dict",
@@ -991,7 +1003,13 @@ def proxy(registry_key: str = ""):
 
     async def _refresh_all(client: httpx.AsyncClient | None) -> None:
         """One pass: refresh every registered replica in parallel."""
-        if not replica_urls:
+        # Auto-discover from the global Dict only when this proxy isn't
+        # under explicit controller control. Matrix-mode proxies
+        # (``registry_key`` set) pin their 3-replica list via POST
+        # /replicas; auto-discovering would re-read every engine in the
+        # global Dict and re-introduce the cross-policy clobber. Same
+        # gate as the synchronous startup prime at module load time.
+        if not replica_urls and not registry_key:
             await _sync_replicas_from_modal_dict_async()
         if client is None or not replica_urls:
             return
@@ -1132,7 +1150,14 @@ def proxy(registry_key: str = ""):
         return 200, _policy_payload(include_supported=False)
 
     async def _handle_get_replicas(_data) -> tuple[int, dict]:
-        registry, _, _ = await _sync_replicas_from_modal_dict_async()
+        # Read-only: never mutate ``replica_urls`` from a GET. Used by
+        # controllers (e.g. experiments/policy_matrix_app.py) to poll
+        # readiness; if this re-synced from the global modal Dict it
+        # would race against concurrent POST /replicas calls from sibling
+        # proxies and clobber the per-policy pin -- the bug that made
+        # all 9 matrix proxies converge on whichever 3 URLs the last
+        # POST landed.
+        registry = await _read_registry_async()
         return 200, {
             "replicas": list(replica_urls),
             "count": len(replica_urls),
@@ -1173,16 +1198,23 @@ def proxy(registry_key: str = ""):
                 "invalid": invalid,
             }
 
-        await replicas.clear.aio()
-        for idx, url in enumerate(normalized):
-            await replicas.put.aio(f"manual-{idx}", url)
+        # Update local state only. Do NOT mutate the global ``replicas``
+        # modal Dict here: that Dict is shared across every proxy in the
+        # environment, and the matrix experiment runs N proxies in
+        # parallel each calling POST /replicas with their own per-policy
+        # URLs. Writing back to the shared Dict caused each call to
+        # clobber the previous one, and any sibling proxy that
+        # subsequently re-synced (via the now-fixed GET /replicas)
+        # would adopt whichever URLs the last writer left -- collapsing
+        # all N policies onto the same 3 backends.
         added, removed = _sync_replicas_from_manual_urls(normalized)
+        registry = await _read_registry_async()
 
         _log(f"replicas updated: +{len(added)} -{len(removed)} (total={len(replica_urls)})")
         return 200, {
             "replicas": list(replica_urls),
             "count": len(replica_urls),
-            "registry": {f"manual-{idx}": url for idx, url in enumerate(normalized)},
+            "registry": registry,
             "added": added,
             "removed": removed,
         }
