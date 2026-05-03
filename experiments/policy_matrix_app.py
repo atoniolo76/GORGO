@@ -278,6 +278,316 @@ def _label(policy: dict) -> str:
     return policy.get("label") or policy["name"]
 
 
+def _homogeneity_config(spec: dict) -> dict:
+    """Resolve the optional pre-flight replica homogeneity check config.
+
+    Disabled by default to preserve existing behavior. When enabled, the
+    controller hits each replica directly (bypassing the proxy/policy)
+    with N small streaming chat-completions and records per-replica
+    TTFT. This catches the Modal-cold-start variance that was the
+    confound behind the spurious least-request advantage in
+    ``moon_neurips_main_000_quick200`` -- one of three shared backends
+    happened to be ~10x faster than the others, and the policy that
+    accidentally herded onto it looked like a winner.
+
+    Knobs:
+      ``enabled``: master switch (default ``False``).
+      ``warmup_requests_per_replica``: per-replica request count.
+        First ``warmup_requests`` of those are discarded as warm-up;
+        the remainder are kept for stats.
+      ``warmup_requests``: how many of the first per-replica requests
+        to discard. Must be < ``warmup_requests_per_replica``. The
+        engine's own ``wait_ready`` already issues one warmup chat
+        before declaring ready, but the *first* probe here pays
+        TCP/TLS handshake on the controller -> tunnel route, so a
+        discard >= 1 is recommended; the default 2 leaves a safety
+        margin for any first-batch CUDA-graph capture SGLang does.
+      ``max_tokens``: cap on output tokens per probe (small to keep
+        the check fast; we only care about TTFT).
+      ``max_ttft_ratio``: per-pool max-P50 / min-P50 TTFT ratio above
+        which ``on_violation`` fires. ``0`` disables the gate (still
+        records stats in the manifest).
+      ``on_violation``: ``"warn"`` (default; logs and continues) or
+        ``"abort"`` (raises ``RuntimeError``). Use ``"abort"`` when
+        you want a clean fail-fast for paper-grade comparisons.
+      ``request_timeout_seconds``: per-probe upstream timeout.
+    """
+    cfg = dict(spec.get("replica_homogeneity_check") or {})
+    out = {
+        "enabled": bool(cfg.get("enabled", False)),
+        "warmup_requests_per_replica": int(cfg.get("warmup_requests_per_replica", 6)),
+        "warmup_requests": int(cfg.get("warmup_requests", 2)),
+        "max_tokens": int(cfg.get("max_tokens", 16)),
+        "max_ttft_ratio": float(cfg.get("max_ttft_ratio", 0.0)),
+        "on_violation": str(cfg.get("on_violation", "warn")).lower(),
+        "request_timeout_seconds": float(cfg.get("request_timeout_seconds", 60.0)),
+    }
+    if out["on_violation"] not in ("warn", "abort"):
+        raise ValueError(
+            f"replica_homogeneity_check.on_violation must be 'warn' or 'abort', "
+            f"got {out['on_violation']!r}"
+        )
+    if out["warmup_requests"] >= out["warmup_requests_per_replica"]:
+        raise ValueError(
+            "replica_homogeneity_check.warmup_requests must be strictly less than "
+            "warmup_requests_per_replica (otherwise no measurement requests remain)"
+        )
+    return out
+
+
+async def _measure_replica_ttft(
+    client: httpx.AsyncClient,
+    replica_url: str,
+    *,
+    total_requests: int,
+    warmup_requests: int,
+    max_tokens: int,
+    request_timeout_seconds: float,
+) -> dict:
+    """Send ``total_requests`` short streaming chats directly to a
+    replica and return TTFT stats over the post-warmup tail.
+
+    Sequential per-replica (concurrency=1) so warm-up effects show up
+    cleanly in the discarded prefix instead of contaminating the
+    measurement window. Hits ``{replica_url}/v1/chat/completions``
+    directly -- no proxy, no policy, no metrics interaction -- so the
+    measurement is independent of any routing logic under test.
+    """
+    body = {
+        "model": HF_REPO_ID,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": max_tokens,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    payload = json.dumps(body).encode()
+    headers = {"accept-encoding": "identity", "content-type": "application/json"}
+    measurement_ttfts_ms: list[float] = []
+    measurement_total_ms: list[float] = []
+    error_count = 0
+    last_error: str | None = None
+    for i in range(total_requests):
+        started_ns = time.perf_counter_ns()
+        ttft_ns: int | None = None
+        try:
+            async with client.stream(
+                "POST",
+                f"{replica_url.rstrip('/')}/v1/chat/completions",
+                content=payload,
+                headers=headers,
+                timeout=request_timeout_seconds,
+            ) as resp:
+                if resp.status_code != 200:
+                    error_count += 1
+                    last_error = f"status={resp.status_code}"
+                    await resp.aread()
+                    continue
+                buffer = bytearray()
+                buffer_first_chunk_ns: int | None = None
+                async for chunk in resp.aiter_raw():
+                    chunk_ns = time.perf_counter_ns()
+                    if not buffer:
+                        buffer_first_chunk_ns = chunk_ns
+                    buffer.extend(chunk)
+                    while True:
+                        idx = buffer.find(b"\n\n")
+                        if idx < 0:
+                            break
+                        event = bytes(buffer[:idx])
+                        del buffer[: idx + 2]
+                        event_arrival_ns = buffer_first_chunk_ns
+                        buffer_first_chunk_ns = chunk_ns if buffer else None
+                        if ttft_ns is not None:
+                            continue
+                        for line in event.split(b"\n"):
+                            if not line.startswith(b"data:"):
+                                continue
+                            data = line[len(b"data:") :].strip()
+                            if not data or data == b"[DONE]":
+                                continue
+                            try:
+                                obj = json.loads(data)
+                            except json.JSONDecodeError:
+                                continue
+                            choices = obj.get("choices") or []
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta") or {}
+                            if delta.get("content"):
+                                ttft_ns = (event_arrival_ns or chunk_ns) - started_ns
+                                break
+                    if ttft_ns is not None:
+                        break
+                # Drain the rest so the connection returns to the pool.
+                async for _ in resp.aiter_raw():
+                    pass
+        except Exception as e:
+            error_count += 1
+            last_error = f"{type(e).__name__}: {e}"
+            continue
+        total_ns = time.perf_counter_ns() - started_ns
+        if i < warmup_requests:
+            continue
+        if ttft_ns is None:
+            error_count += 1
+            last_error = "no content event received"
+            continue
+        measurement_ttfts_ms.append(ttft_ns / 1e6)
+        measurement_total_ms.append(total_ns / 1e6)
+
+    def _percentile(xs: list[float], p: float) -> float | None:
+        if not xs:
+            return None
+        s = sorted(xs)
+        k = max(0, min(len(s) - 1, int(round(p * (len(s) - 1)))))
+        return s[k]
+
+    return {
+        "replica_url": replica_url,
+        "requests_total": total_requests,
+        "warmup_discarded": warmup_requests,
+        "measured_n": len(measurement_ttfts_ms),
+        "errors": error_count,
+        "last_error": last_error,
+        "ttft_ms_p50": _percentile(measurement_ttfts_ms, 0.50),
+        "ttft_ms_p95": _percentile(measurement_ttfts_ms, 0.95),
+        "ttft_ms_max": max(measurement_ttfts_ms) if measurement_ttfts_ms else None,
+        "total_ms_p50": _percentile(measurement_total_ms, 0.50),
+    }
+
+
+async def _check_replica_homogeneity(fleet_manifest: dict, cfg: dict) -> dict:
+    """Pre-flight per-pool TTFT measurement and homogeneity gate.
+
+    Hits each replica directly so the result is independent of the
+    routing policy that will later run against the same pool. Returns
+    a manifest the caller can stash inside ``fleet_manifest``; raises
+    ``RuntimeError`` when ``on_violation == "abort"`` and any pool's
+    P50 TTFT spread exceeds ``max_ttft_ratio``.
+
+    What this catches: level-shift heterogeneity -- one replica is
+    routinely slower than its siblings (cold/wrong-tier instance,
+    noisy neighbor, model still loading after ``wait_ready`` returned).
+    This was the confound behind the spurious least-request advantage
+    in ``moon_neurips_main_000_quick200``, where one of three shared
+    backends was ~10x faster than the others.
+
+    What this does NOT catch: prefill-shape heterogeneity. The probe
+    uses a tiny ``"ping"`` prompt (TTFT dominated by RTT + minimal
+    prefill), while real Mooncake-replay workloads carry up to 24k
+    input tokens (TTFT dominated by full-prompt prefill). A replica
+    that's CUDA-graph-warm for tiny prompts but not for 24k can pass
+    this gate and still skew the workload. "Ratio green" means
+    "replicas are equivalent at the probe shape," not "end-to-end TTFT
+    will be uniform."
+
+    On abort: this raises mid-experiment with the engine fleet still
+    spawned. They idle until Modal's ``scaledown_window`` expires
+    (set in each ``engine_*`` decorator) -- not a regression vs the
+    success path, which also doesn't tear them down, but worth knowing
+    when you're paying for GPUs.
+    """
+    if not cfg["enabled"]:
+        return {"enabled": False}
+    print(
+        f"[homogeneity] checking {sum(len(p['replica_urls']) for p in fleet_manifest['fleets'])} "
+        f"replicas across {len(fleet_manifest['fleets'])} pools "
+        f"(probes={cfg['warmup_requests_per_replica']}, "
+        f"warmup_discarded={cfg['warmup_requests']})",
+        flush=True,
+    )
+    started = time.time()
+    pools_report: list[dict] = []
+    violations: list[str] = []
+    async with httpx.AsyncClient() as client:
+        for pool in fleet_manifest["fleets"]:
+            label = pool["label"]
+            replica_urls = pool["replica_urls"]
+            per_replica = await asyncio.gather(
+                *[
+                    _measure_replica_ttft(
+                        client,
+                        url,
+                        total_requests=cfg["warmup_requests_per_replica"],
+                        warmup_requests=cfg["warmup_requests"],
+                        max_tokens=cfg["max_tokens"],
+                        request_timeout_seconds=cfg["request_timeout_seconds"],
+                    )
+                    for url in replica_urls
+                ]
+            )
+            valid_p50s = [r["ttft_ms_p50"] for r in per_replica if r["ttft_ms_p50"] is not None]
+            ratio: float | None = None
+            if len(valid_p50s) >= 2:
+                lo = min(valid_p50s)
+                hi = max(valid_p50s)
+                if lo > 0:
+                    ratio = hi / lo
+            measured_ns = sorted({r["measured_n"] for r in per_replica})
+            uneven_sample = len(measured_ns) > 1
+            pool_report = {
+                "label": label,
+                "policy": pool["policy"],
+                "replica_count": len(replica_urls),
+                "replicas": per_replica,
+                "ttft_ms_p50_min": min(valid_p50s) if valid_p50s else None,
+                "ttft_ms_p50_max": max(valid_p50s) if valid_p50s else None,
+                "max_ttft_ratio_observed": ratio,
+                "uneven_sample_sizes": uneven_sample,
+            }
+            pools_report.append(pool_report)
+            print(
+                f"[homogeneity] pool={label!r} "
+                f"per_replica_p50_ms="
+                f"{[round(r['ttft_ms_p50']) if r['ttft_ms_p50'] else None for r in per_replica]} "
+                f"ratio={ratio if ratio is not None else 'n/a'}",
+                flush=True,
+            )
+            if uneven_sample:
+                # Per-replica error counts diverged, so the ratio is
+                # comparing an unequal number of samples per replica.
+                # Surface it so the operator knows the gate verdict
+                # rests on noisier-than-expected stats.
+                print(
+                    f"[homogeneity][warn] pool {label!r} uneven measurement counts "
+                    f"per replica: {measured_ns} (some probes failed)",
+                    flush=True,
+                )
+            if cfg["max_ttft_ratio"] > 0 and ratio is not None and ratio > cfg["max_ttft_ratio"]:
+                violations.append(
+                    f"pool {label!r} ratio={ratio:.2f} > max_ttft_ratio={cfg['max_ttft_ratio']}"
+                )
+    elapsed = time.time() - started
+    print(
+        f"[homogeneity] done in {elapsed:.1f}s "
+        f"violations={len(violations)} action={cfg['on_violation']!r}",
+        flush=True,
+    )
+    report = {
+        "enabled": True,
+        "config": cfg,
+        "elapsed_seconds": round(elapsed, 2),
+        "pools": pools_report,
+        "violations": violations,
+    }
+    if violations:
+        if cfg["on_violation"] == "abort":
+            print(
+                f"[homogeneity][abort] {len(fleet_manifest['fleets'])} pools spawned; "
+                "engine fleet will idle until each engine_* function's scaledown_window "
+                "expires (no controller-side teardown today; matches the success path)",
+                flush=True,
+            )
+            raise RuntimeError(
+                "replica homogeneity check failed: "
+                + "; ".join(violations)
+                + ". Set replica_homogeneity_check.on_violation='warn' to ignore."
+            )
+        for v in violations:
+            print(f"[homogeneity][warn] {v}", flush=True)
+    return report
+
+
 async def _wait_for_keys(dct, keys: list[str], timeout_s: float) -> dict[str, str]:
     deadline = time.time() + timeout_s
     pending = set(keys)
@@ -649,6 +959,10 @@ async def _run_policy_matrix_experiment(
                 "replica_urls": policy_replica_urls,
             }
         )
+
+    homogeneity_cfg = _homogeneity_config(base_spec)
+    homogeneity_report = await _check_replica_homogeneity(fleet_manifest, homogeneity_cfg)
+    fleet_manifest["homogeneity_check"] = homogeneity_report
 
     matrix = await _run_sweep_matrix(
         base_spec=launched_spec,
