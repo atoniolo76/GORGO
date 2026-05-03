@@ -11,6 +11,17 @@ in :mod:`policy.base`; the GORGO policy lives in :mod:`policy.gorgo`.
 Each ``route_*`` function below is exported via the
 :data:`AIBRIX_POLICIES` list at the bottom, which
 :mod:`policy.base` composes into the final ``POLICY_REGISTRY``.
+
+Every ``route_*`` function returns a :class:`RouteDecision`. Most
+return ``RouteDecision(target=url)`` with no fallback reason. Policies
+with internal preconditions that can't be met (e.g. ``power-of-two``
+needs >= 2 candidates, ``simple-session-affinity`` needs token ids) set
+``fallback_reason`` to a short kebab-case string when they bail out to
+``random.choice`` -- this is propagated by ``proxy/modal_proxy.py``
+into the trace's ``effective_policy`` field as
+``"random-fallback:internal:<policy-name>:<reason>"`` so post-hoc
+analysis can tell apart "policy fired" from "policy bailed out and
+rolled dice."
 """
 
 from __future__ import annotations
@@ -19,7 +30,7 @@ import random
 import statistics
 from typing import TYPE_CHECKING, Callable
 
-from policy.base import PolicyDef, ReplicaSnapshot, route_random
+from policy.base import PolicyDef, ReplicaSnapshot, RouteDecision, route_random
 
 if TYPE_CHECKING:
     from utils.radix_trie import RadixTrie
@@ -41,28 +52,60 @@ def route_power_of_two(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
     endpoints_queued_tokens: dict[str, int],
-) -> str:
+) -> RouteDecision:
     """Aibrix ``power-of-two``: two random choices, pick lower load.
 
     Load = ``num_used_tokens + queued_prompt_tokens`` (GORGO's existing signal).
     """
     candidates = [u for u in replica_urls if u in metrics]
+    if not candidates:
+        return RouteDecision(random.choice(replica_urls), "empty-candidates")
     if len(candidates) < 2:
-        return candidates[0] if candidates else random.choice(replica_urls)
+        # One candidate: trivially the answer, but the policy's
+        # power-of-two scoring path didn't run, so flag it.
+        return RouteDecision(candidates[0], "insufficient-candidates")
     a, b = random.sample(candidates, 2)
     la = metrics[a].num_used_tokens + endpoints_queued_tokens.get(a, 0)
     lb = metrics[b].num_used_tokens + endpoints_queued_tokens.get(b, 0)
-    return a if la <= lb else b
+    return RouteDecision(a if la <= lb else b)
 
 
 def route_least_request(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
-) -> str:
-    """``least-request``: minimize ``sglang:num_running_reqs``."""
-    return _tie_break_min(
-        [u for u in replica_urls if u in metrics],
-        lambda u: float(metrics[u].num_running_reqs),
+    endpoints_inflight_requests: dict[str, int],
+) -> RouteDecision:
+    """``least-request``: minimize in-flight request count per replica.
+
+    Scores by ``max(snap.num_running_reqs, inflight[u])`` rather than
+    SGLang's metric alone:
+
+    * ``snap.num_running_reqs`` reflects what SGLang's scheduler sees
+      *as of the last metrics scrape*, including this proxy's traffic
+      and any other clients of the same replica. Frozen between scrapes
+      (default 30s on this proxy), so without a corrective term the
+      policy herds all between-scrape requests onto whichever replica
+      was the snapshot's minimum.
+    * ``endpoints_inflight_requests[u]`` is this proxy's own
+      dispatched-but-not-completed counter, updated synchronously on
+      every dispatch and completion. Fresh, but blind to other clients
+      in shared-pool deployments.
+
+    ``max`` of the two is the honest non-double-counting estimate:
+    fresh metrics dominate when they're caught up; the local counter
+    takes over during a stale window. In steady state with a single
+    proxy on the replica they converge.
+    """
+    candidates = [u for u in replica_urls if u in metrics]
+    if not candidates:
+        return RouteDecision(random.choice(replica_urls), "empty-candidates")
+    return RouteDecision(
+        _tie_break_min(
+            candidates,
+            lambda u: float(
+                max(metrics[u].num_running_reqs, endpoints_inflight_requests.get(u, 0))
+            ),
+        )
     )
 
 
@@ -70,29 +113,34 @@ def route_least_load(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
     endpoints_queued_tokens: dict[str, int],
-) -> str:
+) -> RouteDecision:
     """``least-load``: minimize running + queue + proxy queued tokens + used KV tokens."""
-    return _tie_break_min(
-        [u for u in replica_urls if u in metrics],
-        lambda u: metrics[u].combined_load(endpoints_queued_tokens.get(u, 0)),
+    candidates = [u for u in replica_urls if u in metrics]
+    if not candidates:
+        return RouteDecision(random.choice(replica_urls), "empty-candidates")
+    return RouteDecision(
+        _tie_break_min(
+            candidates,
+            lambda u: metrics[u].combined_load(endpoints_queued_tokens.get(u, 0)),
+        )
     )
 
 
 def route_least_kv_cache(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
-) -> str:
+) -> RouteDecision:
     """``least-kv-cache``: minimize ``sglang:num_used_tokens``."""
-    return _tie_break_min(
-        [u for u in replica_urls if u in metrics],
-        lambda u: float(metrics[u].num_used_tokens),
-    )
+    candidates = [u for u in replica_urls if u in metrics]
+    if not candidates:
+        return RouteDecision(random.choice(replica_urls), "empty-candidates")
+    return RouteDecision(_tie_break_min(candidates, lambda u: float(metrics[u].num_used_tokens)))
 
 
 def route_least_gpu_cache(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
-) -> str:
+) -> RouteDecision:
     """``least-gpu-cache``: same as KV for homogeneous SGLang (single pool)."""
     return route_least_kv_cache(replica_urls, metrics)
 
@@ -100,29 +148,29 @@ def route_least_gpu_cache(
 def route_least_latency(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
-) -> str:
+) -> RouteDecision:
     """``least-latency``: minimize last /metrics scrape RTT (proxy-side latency)."""
-    return _tie_break_min(
-        [u for u in replica_urls if u in metrics],
-        lambda u: metrics[u].latency,
-    )
+    candidates = [u for u in replica_urls if u in metrics]
+    if not candidates:
+        return RouteDecision(random.choice(replica_urls), "empty-candidates")
+    return RouteDecision(_tie_break_min(candidates, lambda u: metrics[u].latency))
 
 
 def route_least_utilization(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
-) -> str:
+) -> RouteDecision:
     """``least-utilization``: minimize ``sglang:utilization``."""
-    return _tie_break_min(
-        [u for u in replica_urls if u in metrics],
-        lambda u: metrics[u].utilization,
-    )
+    candidates = [u for u in replica_urls if u in metrics]
+    if not candidates:
+        return RouteDecision(random.choice(replica_urls), "empty-candidates")
+    return RouteDecision(_tie_break_min(candidates, lambda u: metrics[u].utilization))
 
 
 def route_least_busy_time(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
-) -> str:
+) -> RouteDecision:
     """``least-busy-time``: Aibrix uses GPU busy ratio; we proxy with utilization."""
     return route_least_utilization(replica_urls, metrics)
 
@@ -130,19 +178,19 @@ def route_least_busy_time(
 def route_throughput(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
-) -> str:
+) -> RouteDecision:
     """``throughput``: prefer highest ``sglang:gen_throughput`` (tokens/s)."""
-    return _tie_break_max(
-        [u for u in replica_urls if u in metrics],
-        lambda u: metrics[u].gen_throughput,
-    )
+    candidates = [u for u in replica_urls if u in metrics]
+    if not candidates:
+        return RouteDecision(random.choice(replica_urls), "empty-candidates")
+    return RouteDecision(_tie_break_max(candidates, lambda u: metrics[u].gen_throughput))
 
 
 def route_pack_load(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
     endpoints_queued_tokens: dict[str, int],
-) -> str:
+) -> RouteDecision:
     """``pack-load``: maximize load among replicas still under a soft cap (pack work).
 
     Aibrix uses pull-mode utilization + cap; we maximize ``combined_load`` capped
@@ -150,7 +198,7 @@ def route_pack_load(
     """
     candidates = [u for u in replica_urls if u in metrics]
     if not candidates:
-        return random.choice(replica_urls)
+        return RouteDecision(random.choice(replica_urls), "empty-candidates")
     loads = [metrics[u].combined_load(endpoints_queued_tokens.get(u, 0)) for u in candidates]
     med = statistics.median(loads)
     if len(loads) >= 2:
@@ -164,46 +212,52 @@ def route_pack_load(
         u for u in candidates if metrics[u].combined_load(endpoints_queued_tokens.get(u, 0)) <= cap
     ]
     pool = under if under else candidates
-    return _tie_break_max(
-        pool,
-        lambda u: metrics[u].combined_load(endpoints_queued_tokens.get(u, 0)),
+    return RouteDecision(
+        _tie_break_max(
+            pool,
+            lambda u: metrics[u].combined_load(endpoints_queued_tokens.get(u, 0)),
+        )
     )
 
 
 def route_queue_router(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
-) -> str:
+) -> RouteDecision:
     """``queue-router``: Aibrix wraps a queue + backend; we route to min queue depth."""
-    return _tie_break_min(
-        [u for u in replica_urls if u in metrics],
-        lambda u: float(metrics[u].num_queue_reqs),
-    )
+    candidates = [u for u in replica_urls if u in metrics]
+    if not candidates:
+        return RouteDecision(random.choice(replica_urls), "empty-candidates")
+    return RouteDecision(_tie_break_min(candidates, lambda u: float(metrics[u].num_queue_reqs)))
 
 
 def route_prefix_cache(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
     endpoints_queued_tokens: dict[str, int],
+    endpoints_inflight_requests: dict[str, int],
     radix_trie: RadixTrie,
     token_ids: list[int],
     *,
     imbalance_abs: int = 8,
     std_factor: float = 2.0,
-) -> str:
+) -> RouteDecision:
     """Aibrix-style prefix cache routing (see algorithms README).
 
     If running-request imbalance > ``imbalance_abs``, use least-request.
     Else among replicas with best radix prefix match, pick running < mean + factor*std;
     if none qualify, least-request among matches; if no matches, least-request global.
+
+    Delegations to ``route_least_request`` / ``route_least_load`` propagate
+    those policies' fallback reasons unchanged.
     """
     candidates = [u for u in replica_urls if u in metrics]
     if not candidates:
-        return random.choice(replica_urls)
+        return RouteDecision(random.choice(replica_urls), "empty-candidates")
 
     running = [metrics[u].num_running_reqs for u in candidates]
     if running and max(running) - min(running) > imbalance_abs:
-        return route_least_request(candidates, metrics)
+        return route_least_request(candidates, metrics, endpoints_inflight_requests)
 
     if not token_ids:
         return route_least_load(candidates, metrics, endpoints_queued_tokens)
@@ -211,7 +265,7 @@ def route_prefix_cache(
     cached = radix_trie.cached_prefix_lengths(token_ids, candidates)
     best_cached = max(cached.values()) if cached else 0
     if best_cached <= 0:
-        return route_least_request(candidates, metrics)
+        return route_least_request(candidates, metrics, endpoints_inflight_requests)
 
     match_urls = [u for u in candidates if cached.get(u, 0) == best_cached]
     mean_r = statistics.mean(metrics[u].num_running_reqs for u in candidates)
@@ -223,41 +277,47 @@ def route_prefix_cache(
 
     qualified = [u for u in match_urls if float(metrics[u].num_running_reqs) <= threshold]
     pool = qualified if qualified else match_urls
-    return _tie_break_min(pool, lambda u: float(metrics[u].num_running_reqs))
+    return RouteDecision(_tie_break_min(pool, lambda u: float(metrics[u].num_running_reqs)))
 
 
 def route_simple_session_affinity(
     replica_urls: list[str],
     token_ids: list[int],
-) -> str:
+) -> RouteDecision:
     """Sticky routing from prompt token hash (no client IP in proxy)."""
     if not token_ids:
-        return random.choice(replica_urls)
+        return RouteDecision(random.choice(replica_urls), "missing-token-ids")
     h = hash(tuple(token_ids[:256]))
-    return replica_urls[h % len(replica_urls)]
+    return RouteDecision(replica_urls[h % len(replica_urls)])
 
 
 def route_vtc_basic(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
     endpoints_queued_tokens: dict[str, int],
-) -> str:
+) -> RouteDecision:
     """``vtc-basic`` needs per-client fairness; without user id we blend load + util."""
-    return _tie_break_min(
-        [u for u in replica_urls if u in metrics],
-        lambda u: (
-            metrics[u].combined_load(endpoints_queued_tokens.get(u, 0))
-            + 10.0 * metrics[u].utilization
-        ),
+    candidates = [u for u in replica_urls if u in metrics]
+    if not candidates:
+        return RouteDecision(random.choice(replica_urls), "empty-candidates")
+    return RouteDecision(
+        _tie_break_min(
+            candidates,
+            lambda u: (
+                metrics[u].combined_load(endpoints_queued_tokens.get(u, 0))
+                + 10.0 * metrics[u].utilization
+            ),
+        )
     )
 
 
 def route_fallback(
     replica_urls: list[str],
     metrics: dict[str, ReplicaSnapshot],
-) -> str:
+    endpoints_inflight_requests: dict[str, int],
+) -> RouteDecision:
     """Aibrix fallback defaults to least-request."""
-    return route_least_request(replica_urls, metrics)
+    return route_least_request(replica_urls, metrics, endpoints_inflight_requests)
 
 
 def route_slo_family(
@@ -265,7 +325,7 @@ def route_slo_family(
     metrics: dict[str, ReplicaSnapshot],
     endpoints_queued_tokens: dict[str, int],
     variant: str,
-) -> str:
+) -> RouteDecision:
     """SLO routers in Aibrix use queues; we map variants to load heuristics."""
     if variant == "slo-pack-load":
         return route_pack_load(replica_urls, metrics, endpoints_queued_tokens)
@@ -274,7 +334,7 @@ def route_slo_family(
     return route_least_load(replica_urls, metrics, endpoints_queued_tokens)
 
 
-def route_pd_stub(replica_urls: list[str]) -> str:
+def route_pd_stub(replica_urls: list[str]) -> RouteDecision:
     """Prefill/decode split not modeled; random."""
     return route_random(replica_urls)
 
@@ -289,7 +349,11 @@ AIBRIX_POLICIES: list[PolicyDef] = [
         True,
         lambda c: route_power_of_two(c.replica_urls, c.metrics, c.endpoints_queued_tokens),
     ),
-    PolicyDef("least-request", True, lambda c: route_least_request(c.replica_urls, c.metrics)),
+    PolicyDef(
+        "least-request",
+        True,
+        lambda c: route_least_request(c.replica_urls, c.metrics, c.endpoints_inflight_requests),
+    ),
     PolicyDef(
         "least-load",
         True,
@@ -315,6 +379,7 @@ AIBRIX_POLICIES: list[PolicyDef] = [
             c.replica_urls,
             c.metrics,
             c.endpoints_queued_tokens,
+            c.endpoints_inflight_requests,
             c.radix_trie,
             c.token_ids,
         ),
@@ -361,7 +426,11 @@ AIBRIX_POLICIES: list[PolicyDef] = [
             c.replica_urls, c.metrics, c.endpoints_queued_tokens, "slo-least-load-pulling"
         ),
     ),
-    PolicyDef("fallback", True, lambda c: route_fallback(c.replica_urls, c.metrics)),
+    PolicyDef(
+        "fallback",
+        True,
+        lambda c: route_fallback(c.replica_urls, c.metrics, c.endpoints_inflight_requests),
+    ),
     # Explicitly not supported without PD split / Redis tracker -> stubbed to random.
     PolicyDef("pd", False, lambda c: route_pd_stub(c.replica_urls)),
     PolicyDef("pd-disaggregation", False, lambda c: route_pd_stub(c.replica_urls)),

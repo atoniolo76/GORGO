@@ -27,10 +27,42 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 
 if TYPE_CHECKING:
     from utils.radix_trie import RadixTrie
+
+
+class RouteDecision(NamedTuple):
+    """Return shape for every routing policy.
+
+    ``target`` is the chosen replica URL.
+
+    ``fallback_reason`` is ``None`` when the policy's primary scoring
+    path produced ``target``. It is a short kebab-case string when the
+    policy hit an internal random fallback (e.g. empty candidate set
+    after filtering, missing token ids for a session-affinity hash) and
+    chose by ``random.choice`` instead. Distinct values let post-hoc
+    trace analysis tell apart "policy fired" from "policy bailed out
+    and rolled dice" without changing the policy's name in the trace.
+    Keep the vocabulary small and stable; downstream group-bys assume
+    it.
+
+    Conventions:
+      * ``"empty-candidates"``           -- no replica passed the policy's
+        per-snapshot filter (e.g. all metrics missing).
+      * ``"insufficient-candidates"``    -- fewer candidates than the
+        policy needs (e.g. ``power-of-two`` with 1 candidate).
+      * ``"missing-token-ids"``          -- session-affinity-style
+        policies given an empty token list.
+
+    The proxy concatenates these onto the configured policy name when
+    writing the trace's ``effective_policy`` field, e.g.
+    ``"random-fallback:internal:least-request:empty-candidates"``.
+    """
+
+    target: str
+    fallback_reason: str | None = None
 
 
 def normalize_policy(name: str) -> str:
@@ -100,6 +132,20 @@ class RouteContext:
     represented by an empty ``metrics`` dict (the proxy filters
     missing replicas before invoking the policy).
 
+    ``endpoints_queued_tokens`` is a per-target *token* counter
+    (incremented by ``request_tokens`` on dispatch, decremented on
+    completion). Used by load-aware policies that score on tokens.
+
+    ``endpoints_inflight_requests`` is a per-target *request* counter
+    with the same lifecycle. Lets request-counting policies (notably
+    ``least-request``) bridge the staleness window of the SGLang
+    metrics scrape: between scrapes ``num_running_reqs`` is frozen at
+    its last value, but the proxy has been dispatching requests in the
+    meantime; this counter captures those. ``route_least_request``
+    scores by ``max(snap.num_running_reqs, inflight[u])`` so the score
+    is correct in both regimes -- fresh metrics dominate when they're
+    available, the local counter takes over during a stale window.
+
     ``hyperparameters`` carries the structured GORGO hyperparameter
     store (see :mod:`policy.gorgo` for its shape: ``{"defaults":
     {...}, "per_target": {url: {...}}}``). Non-GORGO policies don't
@@ -109,6 +155,7 @@ class RouteContext:
     replica_urls: list[str]
     metrics: dict[str, ReplicaSnapshot]
     endpoints_queued_tokens: dict[str, int]
+    endpoints_inflight_requests: dict[str, int]
     radix_trie: RadixTrie
     token_ids: list[int]
     request_tokens: int
@@ -128,14 +175,14 @@ class PolicyDef:
 
     name: str
     needs_metrics: bool
-    fn: Callable[[RouteContext], str]
+    fn: Callable[[RouteContext], RouteDecision]
 
 
-def route_random(replica_urls: list[str]) -> str:
+def route_random(replica_urls: list[str]) -> RouteDecision:
     """Uniform random pick. Used as a public policy *and* as the
     fallback every other module reaches for when its preconditions
     aren't met (e.g. no metrics yet)."""
-    return random.choice(replica_urls)
+    return RouteDecision(target=random.choice(replica_urls))
 
 
 # ----- Registry assembly ----------------------------------------------------
@@ -218,21 +265,32 @@ def route(
     token_ids: list[int],
     request_tokens: int,
     hyperparameters: dict[str, Any],
+    endpoints_inflight_requests: dict[str, int] | None = None,
 ) -> str:
     """Dispatch by normalized policy name. Thin wrapper over the
     registry kept around for tests / scripts that don't want to
-    construct a :class:`RouteContext` themselves."""
+    construct a :class:`RouteContext` themselves.
+
+    Returns the chosen URL only; any internal-fallback signal from the
+    underlying :class:`RouteDecision` is dropped on the floor (callers
+    that care should construct a context and call the policy fn
+    directly). ``endpoints_inflight_requests`` defaults to an empty
+    dict so old callers don't have to plumb the new field through;
+    counter-bridging is only useful when the proxy is the one calling.
+    """
     if not replica_urls:
         raise ValueError("no replicas")
     pdef = get_policy(policy)
-    return pdef.fn(
+    decision = pdef.fn(
         RouteContext(
             replica_urls=replica_urls,
             metrics=metrics,
             endpoints_queued_tokens=endpoints_queued_tokens,
+            endpoints_inflight_requests=endpoints_inflight_requests or {},
             radix_trie=radix_trie,
             token_ids=token_ids,
             request_tokens=request_tokens,
             hyperparameters=hyperparameters,
         )
     )
+    return decision.target

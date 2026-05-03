@@ -764,6 +764,24 @@ async def _run_one_policy(global_spec: dict, policy_spec: dict) -> dict:
         final_hyperparameters = hps.get("hyperparameters")
     await _post_json(url, "/trace/stop", {})
     trace_doc = await _post_json(url, "/trace/save", {})
+    # Surface the trace's fallback summary at the top level of the
+    # per-policy result so an analyst spotting an anomalous result
+    # doesn't have to crack the trace to see whether random-fallback
+    # rows contaminated the per-policy aggregate. The proxy computes it
+    # over its in-memory buffer in /trace/save (see
+    # ``_compute_fallback_summary`` in proxy/modal_proxy.py); a non-zero
+    # ``fallback_rate`` is a yellow flag for the run's validity.
+    fallback_summary = (trace_doc or {}).get("fallback_summary") or {}
+    if fallback_summary:
+        rate = fallback_summary.get("fallback_rate", 0.0) or 0.0
+        if rate > 0:
+            print(
+                f"[fallback] policy={label!r} fallback_rate={rate:.1%} "
+                f"({fallback_summary.get('fallback_count')}/"
+                f"{fallback_summary.get('total_requests')}) "
+                f"by_effective_policy={fallback_summary.get('by_effective_policy')}",
+                flush=True,
+            )
     return {
         "policy": name,
         "label": label,
@@ -777,6 +795,7 @@ async def _run_one_policy(global_spec: dict, policy_spec: dict) -> dict:
         ),
         "workload": workload,
         "trace": trace_doc,
+        "fallback_summary": fallback_summary,
         "metrics_ready": metrics_ready,
         "elapsed_seconds": time.time() - started,
     }
