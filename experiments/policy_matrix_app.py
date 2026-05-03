@@ -383,12 +383,21 @@ def _auto_tune_payload(policy_spec: dict) -> dict | None:
     auto = policy_spec.get("auto_tune")
     if not auto:
         return None
-    return {
+    payload: dict = {
         "enabled": True,
         "window_size": int(auto.get("window_size", 200)),
         "hop_size": int(auto.get("hop_size", 50)),
         "apply": bool(auto.get("apply", True)),
     }
+    # Forward the full auto-tune knob set so spec-driven `mode` /
+    # `objective_metric` (and any future fields) reach the proxy. The
+    # earlier short list silently dropped these, which made
+    # ``gorgo-online-es`` fall back to the default ``fit`` mode.
+    if "mode" in auto:
+        payload["mode"] = str(auto["mode"])
+    if "objective_metric" in auto:
+        payload["objective_metric"] = str(auto["objective_metric"])
+    return payload
 
 
 async def _run_one_policy(global_spec: dict, policy_spec: dict) -> dict:
