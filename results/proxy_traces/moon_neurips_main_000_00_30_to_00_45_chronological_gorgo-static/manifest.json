@@ -1,0 +1,20 @@
+{
+  "trace": {
+    "enabled": false,
+    "trace_id": "moon_neurips_main_000_00_30_to_00_45_chronological_gorgo-static",
+    "sample_metrics": true,
+    "sample_requests": true,
+    "max_events": 200000,
+    "started_at": "2026-05-03T04:28:14.003798Z",
+    "stopped_at": "2026-05-03T04:44:14.509747Z",
+    "dropped_metrics": 0,
+    "dropped_requests": 0,
+    "saved_paths": null,
+    "metrics_events": 93,
+    "request_events": 2781,
+    "first_event_ts": "2026-05-03T04:28:18.387125Z",
+    "last_event_ts": "2026-05-03T04:44:00.254852Z"
+  },
+  "metrics_path": "/results/proxy_traces/moon_neurips_main_000_00_30_to_00_45_chronological_gorgo-static/metrics.jsonl",
+  "requests_path": "/results/proxy_traces/moon_neurips_main_000_00_30_to_00_45_chronological_gorgo-static/requests.jsonl"
+}

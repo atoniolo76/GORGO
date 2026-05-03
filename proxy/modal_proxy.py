@@ -150,6 +150,37 @@ SCORE_FUNCTIONS: dict[str, Callable[[dict], float]] = {
 }
 
 
+# ------------------------------------------------------------------
+# Online tuning metric functions: operate on a list of per-request
+# samples (the same shape ``_record_request_sample`` appends) and return
+# a "higher is better" score. Used by the online-ES auto-tune mode in
+# ``proxy()``'s recompute path; kept separate from ``SCORE_FUNCTIONS``
+# (which expects workload-level stats dicts produced by
+# ``proxy.workload_core``) so the two never share a metric name with
+# divergent semantics.
+# ------------------------------------------------------------------
+
+
+def _percentile_of(xs: list[float], p: float) -> float:
+    if not xs:
+        return 0.0
+    s = sorted(xs)
+    return s[max(0, min(len(s) - 1, int(round(p * (len(s) - 1)))))]
+
+
+ONLINE_SCORE_FUNCTIONS: dict[str, Callable[[list[dict]], float]] = {
+    "neg_p50_ttft": lambda w: -_percentile_of([s["ttft_seconds"] for s in w], 0.50),
+    "neg_p95_ttft": lambda w: -_percentile_of([s["ttft_seconds"] for s in w], 0.95),
+    "neg_p99_ttft": lambda w: -_percentile_of([s["ttft_seconds"] for s in w], 0.99),
+    "neg_avg_ttft": lambda w: -(sum(s["ttft_seconds"] for s in w) / max(1, len(w))),
+    "neg_p95_e2e": lambda w: -_percentile_of([s["total_seconds"] for s in w], 0.95),
+    "neg_p99_e2e": lambda w: -_percentile_of([s["total_seconds"] for s in w], 0.99),
+}
+
+
+SUPPORTED_AUTO_TUNE_MODES: frozenset[str] = frozenset({"fit", "online-es"})
+
+
 class HillClimbTuner:
     """Coordinate hill-climb with shrinking multiplicative step."""
 
@@ -582,6 +613,34 @@ def proxy(registry_key: str = ""):
             "last_applied_at_monotonic": None,
             "last_recommendation": None,
             "enabled_at_monotonic": None,
+            # Tuning mode (Option B):
+            #   "fit"       -- median-of-rates per-target fit on observed
+            #                  prefill/decode samples (the original behavior).
+            #                  Best when the cost-model parameters have a
+            #                  direct physical interpretation and the
+            #                  uncached-token correction (Option A) is in
+            #                  place.
+            #   "online-es" -- treat (t_prefill, queued_tokens_weight) as
+            #                  abstract knobs and use Gaussian-(1+1)-ES to
+            #                  minimize the configured ``objective_metric``
+            #                  (default ``neg_p95_ttft``) over the rolling
+            #                  window. Defaults-only (per-target stays
+            #                  empty); the ES doesn't fan out to per-replica
+            #                  to keep the search space 2D.
+            "mode": "fit",
+            "objective_metric": "neg_p95_ttft",
+            "online_tuner": None,
+            "online_state": None,
+            # Currently-applied candidate; ``None`` until the first ES
+            # apply. Lifecycle:
+            #   1. ES proposes -> applied to ``hyperparameters.defaults``,
+            #      counter zeroed, ``pending_candidate`` set.
+            #   2. Wait for ``window_size`` new samples to land.
+            #   3. Score the window, report to ES, ES updates incumbent.
+            #   4. Propose next candidate -> back to (1).
+            "pending_candidate": None,
+            "pending_started_at_count": 0,
+            "last_score": None,
         },
         "batch_tuning": {
             "running": False,
@@ -1339,11 +1398,29 @@ def proxy(registry_key: str = ""):
         every ``POST /tune`` so callers always see what they just
         configured."""
         at = state["auto_tune"]
+        tuner = at.get("online_tuner")
+        tuner_state = None
+        if tuner is not None:
+            try:
+                tuner_state = {
+                    "name": tuner.name,
+                    "best_score": tuner.best_score,
+                    "best_params": tuner.best_params,
+                    "evaluated_after_baseline": tuner.evaluated_after_baseline,
+                    **tuner.state,
+                }
+            except Exception:
+                tuner_state = None
         return {
             "enabled": at["enabled"],
             "window_size": at["window_size"],
             "hop_size": at["hop_size"],
             "apply": at["apply"],
+            "mode": at.get("mode", "fit"),
+            "objective_metric": at.get("objective_metric", "neg_p95_ttft"),
+            "online_tuner_state": tuner_state,
+            "pending_candidate": at.get("pending_candidate"),
+            "last_score": at.get("last_score"),
             "buffered_samples": len(samples),
             "samples_since_last_apply": at["samples_since_last_apply"],
             "samples_until_next_apply": (
@@ -1413,6 +1490,8 @@ def proxy(registry_key: str = ""):
         new_window = at["window_size"]
         new_hop = at["hop_size"]
         new_apply = at["apply"]
+        new_mode = at.get("mode", "fit")
+        new_metric = at.get("objective_metric", "neg_p95_ttft")
 
         if "window_size" in data:
             try:
@@ -1430,6 +1509,20 @@ def proxy(registry_key: str = ""):
                 return 400, {"error": "hop_size must be > 0"}
         if "apply" in data:
             new_apply = bool(data["apply"])
+        if "mode" in data:
+            mv = data["mode"]
+            if not isinstance(mv, str) or mv not in SUPPORTED_AUTO_TUNE_MODES:
+                return 400, {
+                    "error": f"mode must be one of {sorted(SUPPORTED_AUTO_TUNE_MODES)}",
+                }
+            new_mode = mv
+        if "objective_metric" in data:
+            mv = data["objective_metric"]
+            if not isinstance(mv, str) or mv not in ONLINE_SCORE_FUNCTIONS:
+                return 400, {
+                    "error": f"objective_metric must be one of {sorted(ONLINE_SCORE_FUNCTIONS)}",
+                }
+            new_metric = mv
 
         # Default to enabling so a bare POST /tune {} turns it on. To
         # leave the toggle alone (e.g. just adjust window_size while
@@ -1444,10 +1537,46 @@ def proxy(registry_key: str = ""):
             }
 
         was_enabled = at["enabled"]
+        was_mode = at.get("mode", "fit")
         at["window_size"] = new_window
         at["hop_size"] = new_hop
         at["apply"] = new_apply
         at["enabled"] = new_enabled
+        at["mode"] = new_mode
+        at["objective_metric"] = new_metric
+
+        # Lifecycle for the online-ES tuner instance:
+        #   - fresh enable into online-es      -> create tuner from current
+        #     defaults, reset pending state
+        #   - mode flip fit -> online-es       -> create tuner, reset pending
+        #   - mode flip online-es -> fit       -> drop tuner + pending state
+        #     so a future flip back starts fresh from current incumbent
+        #   - reconfiguration within online-es -> keep tuner, only reset
+        #     pending if window_size changed (the prior pending window is
+        #     no longer the right size)
+        if new_enabled and new_mode == "online-es":
+            seed_defaults = (
+                state["hyperparameters"].get("defaults") or DEFAULT_GORGO_HYPERPARAMETERS
+            )
+            seed = {k: float(seed_defaults.get(k, v)) for k, v in HYPERPARAM_RANGES.items()}
+            need_new_tuner = (
+                at.get("online_tuner") is None or was_mode != "online-es" or not was_enabled
+            )
+            if need_new_tuner:
+                at["online_tuner"] = GaussianESTuner(
+                    initial_params=seed,
+                    ranges=HYPERPARAM_RANGES,
+                    sigma=0.5,
+                    sigma_min=0.05,
+                    max_steps=10_000,
+                )
+                at["pending_candidate"] = None
+                at["pending_started_at_count"] = state["total_samples_appended"]
+                at["last_score"] = None
+        elif new_mode == "fit" and (was_mode == "online-es" or at.get("online_tuner")):
+            at["online_tuner"] = None
+            at["pending_candidate"] = None
+            at["last_score"] = None
 
         if new_enabled and not was_enabled:
             # Fresh enable: zero the per-window counter so the first
@@ -1455,14 +1584,20 @@ def proxy(registry_key: str = ""):
             # samples that landed while the tuner was off.
             at["samples_since_last_apply"] = 0
             at["enabled_at_monotonic"] = time.monotonic()
-            _log(f"auto-tune ENABLED window={new_window} hop={new_hop} apply={new_apply}")
+            _log(
+                f"auto-tune ENABLED mode={new_mode} window={new_window} "
+                f"hop={new_hop} apply={new_apply} metric={new_metric}"
+            )
         elif not new_enabled and was_enabled:
             _log("auto-tune DISABLED")
         elif new_enabled:
             # Reconfigured while running -- keep the existing counter
             # so we don't reset the "samples until next apply" clock
             # on every adjustment.
-            _log(f"auto-tune RECONFIGURED window={new_window} hop={new_hop} apply={new_apply}")
+            _log(
+                f"auto-tune RECONFIGURED mode={new_mode} window={new_window} "
+                f"hop={new_hop} apply={new_apply} metric={new_metric}"
+            )
 
         # Best-effort summary of the current trailing window if it's
         # already large enough; gives the caller something useful to
@@ -2052,6 +2187,7 @@ def proxy(registry_key: str = ""):
         total_ns: int,
         prompt_tokens: int | None,
         completion_tokens: int | None,
+        cached_tokens_at_dispatch: int = 0,
     ) -> None:
         """Append a per-request sample shaped like
         :func:`proxy.measure.measure_chat_completion`'s output. Skipped
@@ -2069,6 +2205,15 @@ def proxy(registry_key: str = ""):
           3. ``0.0`` (no snapshot at all -- prefill rate becomes a
              slight overestimate rather than negative).
         Same role ``ping_once`` plays in ``proxy/calibrate.py``.
+
+        ``cached_tokens_at_dispatch`` is the radix-trie's cached prefix
+        length on ``target`` measured *at routing decision time*. The
+        per-token prefill rate is fitted against ``prompt_tokens -
+        cached_tokens_at_dispatch`` so it represents the cost per
+        *uncached* token -- which is what ``policy.gorgo``'s cost model
+        multiplies by. Without this correction the fitted rate is
+        amortized over cache hits and the cost model under-weighs the
+        prefill term in cache-heavy workloads (Option A fix).
         """
         if (
             ttft_ns is None
@@ -2092,6 +2237,12 @@ def proxy(registry_key: str = ""):
         prefill_s = max(ttft_s - ping_rtt_s, 0.0)
         decode_s = max(total_s - ttft_s, 0.0)
 
+        # Clamp cached_tokens_at_dispatch into [0, prompt_tokens) so the
+        # divisor is at least 1 token -- a fully-cached prompt still has
+        # *some* prefill work (the next token must be scheduled) and we
+        # don't want to divide by zero when block boundaries align.
+        uncached_tokens = max(1, prompt_tokens - max(0, cached_tokens_at_dispatch))
+
         samples.append(
             {
                 "ping_seconds": ping_rtt_s,
@@ -2100,8 +2251,10 @@ def proxy(registry_key: str = ""):
                 "prefill_seconds": prefill_s,
                 "decode_seconds": decode_s,
                 "prompt_tokens": prompt_tokens,
+                "cached_tokens_at_dispatch": cached_tokens_at_dispatch,
+                "uncached_tokens": uncached_tokens,
                 "completion_tokens": completion_tokens,
-                "prefill_rate_seconds_per_token": prefill_s / prompt_tokens,
+                "prefill_rate_seconds_per_token": prefill_s / uncached_tokens,
                 "decode_rate_seconds_per_token": decode_s / completion_tokens,
                 "target": target,
                 "recorded_at_monotonic": time.monotonic(),
@@ -2133,6 +2286,87 @@ def proxy(registry_key: str = ""):
             return
 
         window = list(samples)[-at["window_size"] :]
+        mode = at.get("mode", "fit")
+
+        if mode == "online-es":
+            # ----- Option B: empirical hyperparameter search -----
+            # Treat (t_prefill, queued_tokens_weight) as abstract knobs
+            # and use Gaussian (1+1)-ES to minimize the configured
+            # objective metric over the rolling window. Per-target stays
+            # empty in this mode -- the search space is intentionally
+            # 2D (defaults only) so convergence is fast.
+            metric = at.get("objective_metric", "neg_p95_ttft")
+            score_fn = ONLINE_SCORE_FUNCTIONS.get(metric)
+            tuner: GaussianESTuner | None = at.get("online_tuner")
+            if score_fn is None or tuner is None:
+                # Defensive: shouldn't happen because POST /tune
+                # validates these fields, but if state is corrupted
+                # don't crash the request loop.
+                at["samples_since_last_apply"] = 0
+                return
+            score = float(score_fn(window))
+            pending = at.get("pending_candidate")
+            if pending is not None:
+                # Tell the tuner how the just-applied candidate scored
+                # over its evaluation window. ``report`` updates the
+                # incumbent if the candidate beat ``best_score`` * (1+tol).
+                tuner.report(pending, score)
+            else:
+                # First fire: seed the tuner's baseline from the current
+                # incumbent so subsequent candidates have something to
+                # compare against. ``report`` with ``best_score=None``
+                # always accepts and stores ``score`` as the baseline.
+                tuner.report(dict(tuner.best_params), score)
+            at["last_score"] = score
+
+            proposal = tuner.propose()
+            if proposal is None:
+                # Tuner converged or hit max_steps. Pin to best params and
+                # turn off auto-tune to stop pointless recomputes; manual
+                # POST /tune {"enabled": true} can reactivate.
+                if at["apply"]:
+                    state["hyperparameters"] = merge_update(
+                        state["hyperparameters"],
+                        {"defaults": dict(tuner.best_params), "per_target": {}},
+                        replace=False,
+                    )
+                at["enabled"] = False
+                at["pending_candidate"] = None
+                _log(
+                    f"auto-tune online-es CONVERGED best={tuner.best_params} "
+                    f"score={tuner.best_score}"
+                )
+                return
+
+            if at["apply"]:
+                # Online-ES only writes ``defaults`` -- per-target
+                # overrides are intentionally left alone so an operator
+                # can pin a heterogeneous replica manually without the
+                # ES blowing it away every cycle.
+                state["hyperparameters"] = merge_update(
+                    state["hyperparameters"],
+                    {"defaults": dict(proposal), "per_target": {}},
+                    replace=False,
+                )
+            at["pending_candidate"] = dict(proposal)
+            at["pending_started_at_count"] = state["total_samples_appended"]
+            at["applied_count"] += 1
+            at["last_applied_at_monotonic"] = time.monotonic()
+            at["last_recommendation"] = {
+                "defaults": dict(proposal),
+                "per_target": {},
+            }
+            at["samples_since_last_apply"] = 0
+            _log(
+                f"auto-tune online-es #{at['applied_count']} "
+                f"window={len(window)} score={score:.4f} "
+                f"best_score={tuner.best_score} "
+                f"sigma={tuner.sigma:.4f} "
+                f"proposal={proposal} (apply={at['apply']})"
+            )
+            return
+
+        # ----- mode == "fit" (original behavior) -----
         # Per-target recommendation: pooled ``defaults`` for unseen
         # replicas, plus per-replica overrides for any replica with
         # at least ``min_samples_per_target`` observations in the
@@ -2185,11 +2419,16 @@ def proxy(registry_key: str = ""):
         metrics_seq_at_decision = metrics_meta.get("refresh_seq", 0)
         last_refresh = metrics_meta.get("last_refresh_monotonic") or 0.0
         metrics_age_seconds = (decision_monotonic - last_refresh) if last_refresh else None
-        cached_by_replica = (
-            radix_trie.cached_prefix_lengths(token_ids, replica_urls)
-            if token_ids and state["trace"]["enabled"] and state["trace"]["sample_requests"]
-            else {}
-        )
+        # Per-replica cached-prefix lookup. When tracing requests we need the
+        # full per-replica view for the candidate snapshot; otherwise we'll
+        # do a cheaper single-target lookup after the routing decision below.
+        # Either way ``cached_for_target`` ends up populated and is fed into
+        # ``_record_request_sample`` so the auto-tuner fits prefill rate
+        # against *uncached* tokens (Option A).
+        if token_ids and state["trace"]["enabled"] and state["trace"]["sample_requests"]:
+            cached_by_replica = radix_trie.cached_prefix_lengths(token_ids, replica_urls)
+        else:
+            cached_by_replica = {}
         candidate_snapshot = None
         if state["trace"]["enabled"] and state["trace"]["sample_requests"]:
             candidate_snapshot = {}
@@ -2215,6 +2454,16 @@ def proxy(registry_key: str = ""):
                 return
             target = random.choice(replica_urls)
 
+        # Resolve cached-prefix length for the chosen target. Uses the
+        # batched lookup if we already paid for it (trace path), otherwise
+        # the cheaper single-target form.
+        if cached_by_replica:
+            cached_for_target = cached_by_replica.get(target, 0)
+        elif token_ids:
+            cached_for_target = radix_trie.cached_prefix_length(token_ids, target)
+        else:
+            cached_for_target = 0
+
         request_trace_event = {
             "kind": "request",
             "trace_id": state["trace"]["trace_id"],
@@ -2224,6 +2473,7 @@ def proxy(registry_key: str = ""):
             "policy": state["policy"],
             "target": target,
             "request_tokens": request_tokens,
+            "cached_tokens_at_dispatch": cached_for_target,
             "metrics_seq_at_decision": metrics_seq_at_decision,
             "metrics_age_seconds": metrics_age_seconds,
             "candidate_snapshot": candidate_snapshot,
@@ -2357,6 +2607,7 @@ def proxy(registry_key: str = ""):
                         completion_tokens=(
                             completion_tokens if completion_tokens is not None else output_tokens
                         ),
+                        cached_tokens_at_dispatch=cached_for_target,
                     )
                 else:
                     # Plain passthrough for non-SSE bodies (e.g. error

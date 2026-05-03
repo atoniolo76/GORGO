@@ -1,0 +1,329 @@
+{
+  "base_run_id": "moon_smoke_3replica",
+  "sweep_manifest_path": null,
+  "start_index": 0,
+  "top_k": 1,
+  "results": [
+    {
+      "ok": true,
+      "index": 0,
+      "trace_path": "/data/mooncake_traces/cleaned_v1/with_bodies/00028_20260401T140000Z_token_hash_filter_top20_quick200.jsonl",
+      "source_trace": "/data/mooncake_traces/cleaned_v1/00028_20260401T140000Z_token_hash_filter_top20_quick200.jsonl",
+      "matrix_manifest_path": "/results/policy_matrix_sweep/smoke_l40s_v1/smoke_l40s_v1_20260503_033435/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200.json",
+      "manifest": {
+        "run_id": "moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200",
+        "trace_path": "/data/mooncake_traces/cleaned_v1/with_bodies/00028_20260401T140000Z_token_hash_filter_top20_quick200.jsonl",
+        "start_at_wall_time": "2026-05-03T03:39:23.957570Z",
+        "policies": [
+          "gorgo-static",
+          "gorgo-autotuned"
+        ],
+        "results": [
+          {
+            "policy": "gorgo",
+            "label": "gorgo-static",
+            "proxy_url": "https://ta-01kqnyp37gngdf4h67e9h67fez-8000-efsyhejg90gyq7e80c992oiee.w.modal.host",
+            "run_id": "moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static",
+            "trace_id": "moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static",
+            "auto_tune": null,
+            "workload": {
+              "running": false,
+              "status": "succeeded",
+              "phase": "done",
+              "run_id": "moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static",
+              "started_at": "2026-05-03T03:39:38.697218Z",
+              "finished_at": "2026-05-03T03:44:03.406762Z",
+              "config": {
+                "data_path": "/data/mooncake_traces/cleaned_v1/with_bodies/00028_20260401T140000Z_token_hash_filter_top20_quick200.jsonl",
+                "run_id": "moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static",
+                "concurrency": 16,
+                "model": "",
+                "stream": true,
+                "max_tokens": 64,
+                "max_input_tokens": 24000,
+                "arrival_mode": "open-loop",
+                "time_scale": 10.0,
+                "output_path": "/results/workload_runs/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static.json",
+                "save_per_request": true,
+                "start_at_wall_time": "2026-05-03T03:39:23.957570Z"
+              },
+              "stats": {
+                "sent": 200,
+                "ok": 200,
+                "fail": 0,
+                "success_rate": 1.0,
+                "status_breakdown": {
+                  "200": 200
+                },
+                "elapsed_seconds": 262.705530863,
+                "request_throughput_rps": 0.7613086764598774,
+                "input_token_throughput": 6058.231795774326,
+                "output_token_throughput": 907.1297403490024,
+                "total_token_throughput": 6965.361536123329,
+                "total_input_tokens": 1591531,
+                "total_output_tokens": 238308,
+                "ttft_seconds": {
+                  "avg": 0.647136063465,
+                  "min": 0.125374306,
+                  "max": 2.605876056,
+                  "p50": 0.481242135,
+                  "p95": 1.716573457,
+                  "p99": 2.513284592,
+                  "n": 200
+                },
+                "request_e2e_seconds": {
+                  "avg": 18.611649727225,
+                  "min": 0.906105586,
+                  "max": 238.209918582,
+                  "p50": 2.613542672,
+                  "p95": 112.606238746,
+                  "p99": 159.669060912,
+                  "n": 200
+                },
+                "itl_ms": {
+                  "avg": 20.02545190748177,
+                  "min": 7.982027555555555,
+                  "max": 51.77280046226415,
+                  "p50": 17.842283444444448,
+                  "p95": 33.267239017167384,
+                  "p99": 49.7324882063492,
+                  "n": 200
+                },
+                "decode_tokens_per_second": {
+                  "avg": 57.6420316297935,
+                  "min": 19.3151614568131,
+                  "max": 125.28145174141774,
+                  "p50": 56.1244540779304,
+                  "p95": 103.63915843002954,
+                  "p99": 124.90482054412918,
+                  "n": 200
+                },
+                "input_tokens": {
+                  "avg": 7957.655,
+                  "min": 18.0,
+                  "max": 26110.0,
+                  "p50": 2146.0,
+                  "p95": 20655.0,
+                  "p99": 26110.0,
+                  "n": 200
+                },
+                "output_tokens": {
+                  "avg": 1191.54,
+                  "min": 38.0,
+                  "max": 16000.0,
+                  "p50": 78.0,
+                  "p95": 7591.0,
+                  "p99": 12034.0,
+                  "n": 200
+                },
+                "output_path": "/results/workload_runs/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static.json"
+              },
+              "output_path": "/results/workload_runs/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static.json",
+              "error": null,
+              "stop_requested": false
+            },
+            "trace": {
+              "trace": {
+                "enabled": false,
+                "trace_id": "moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static",
+                "sample_metrics": true,
+                "sample_requests": true,
+                "max_events": 200000,
+                "started_at": "2026-05-03T03:39:38.684775Z",
+                "stopped_at": "2026-05-03T03:44:38.870755Z",
+                "dropped_metrics": 0,
+                "dropped_requests": 0,
+                "saved_paths": {
+                  "metrics_path": "/results/proxy_traces/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static/metrics.jsonl",
+                  "requests_path": "/results/proxy_traces/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static/requests.jsonl",
+                  "manifest_path": "/results/proxy_traces/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static/manifest.json"
+                },
+                "metrics_events": 27,
+                "request_events": 200,
+                "first_event_ts": "2026-05-03T03:39:41.215395Z",
+                "last_event_ts": "2026-05-03T03:44:15.392079Z"
+              },
+              "paths": {
+                "metrics_path": "/results/proxy_traces/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static/metrics.jsonl",
+                "requests_path": "/results/proxy_traces/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static/requests.jsonl",
+                "manifest_path": "/results/proxy_traces/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-static/manifest.json"
+              }
+            },
+            "metrics_ready": {
+              "replica_count": 3,
+              "metrics_count": 3,
+              "errors": {},
+              "last_refresh_age_seconds": 0.2160131470000053
+            },
+            "elapsed_seconds": 304.1477687358856
+          },
+          {
+            "policy": "gorgo",
+            "label": "gorgo-autotuned",
+            "proxy_url": "https://ta-01kqnyp3dtkrej3rzc011qftrt-8000-hpjew3rqh7xhdcncrnd1xoedn.w.modal.host",
+            "run_id": "moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned",
+            "trace_id": "moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned",
+            "auto_tune": {
+              "config": {
+                "enabled": true,
+                "window_size": 64,
+                "hop_size": 16,
+                "apply": true
+              },
+              "hyperparameters": {
+                "defaults": {
+                  "t_prefill": 2.2629280164138098e-05,
+                  "queued_tokens_weight": 0.017419837484375
+                },
+                "per_target": {
+                  "https://ta-01kqnye7fdc443f4h0wrdnrd38-8000-g4a1k48pzcew4wa2drfr8d8ij.w.modal.host": {
+                    "t_prefill": 6.941238076561747e-05,
+                    "queued_tokens_weight": 0.028437640776859504
+                  },
+                  "https://ta-01kqnye54vpd72tnbpg0vjcma1-8000-06z3bpd1rn6w6gthw7kgfb8t9.w.modal.host": {
+                    "t_prefill": 0.0,
+                    "queued_tokens_weight": 0.0145879966875
+                  },
+                  "https://ta-01kqnyejwhm36vhhhgwr8v8c1d-8000-afimh6v79610ouadkprjqvlgr.w.modal.host": {
+                    "t_prefill": 1.653082190277498e-06,
+                    "queued_tokens_weight": 0.016483580380434786
+                  }
+                }
+              }
+            },
+            "workload": {
+              "running": false,
+              "status": "succeeded",
+              "phase": "done",
+              "run_id": "moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned",
+              "started_at": "2026-05-03T03:39:09.339878Z",
+              "finished_at": "2026-05-03T03:44:10.377338Z",
+              "config": {
+                "data_path": "/data/mooncake_traces/cleaned_v1/with_bodies/00028_20260401T140000Z_token_hash_filter_top20_quick200.jsonl",
+                "run_id": "moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned",
+                "concurrency": 16,
+                "model": "",
+                "stream": true,
+                "max_tokens": 64,
+                "max_input_tokens": 24000,
+                "arrival_mode": "open-loop",
+                "time_scale": 10.0,
+                "output_path": "/results/workload_runs/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned.json",
+                "save_per_request": true,
+                "start_at_wall_time": "2026-05-03T03:39:23.957570Z"
+              },
+              "stats": {
+                "sent": 200,
+                "ok": 200,
+                "fail": 0,
+                "success_rate": 1.0,
+                "status_breakdown": {
+                  "200": 200
+                },
+                "elapsed_seconds": 285.431567078,
+                "request_throughput_rps": 0.7006933467360529,
+                "input_token_throughput": 5575.875914120885,
+                "output_token_throughput": 747.8114708373188,
+                "total_token_throughput": 6323.687384958204,
+                "total_input_tokens": 1591531,
+                "total_output_tokens": 213449,
+                "ttft_seconds": {
+                  "avg": 0.86067987097,
+                  "min": 0.115164938,
+                  "max": 5.095520654,
+                  "p50": 0.650574434,
+                  "p95": 2.414905887,
+                  "p99": 4.746202477,
+                  "n": 200
+                },
+                "request_e2e_seconds": {
+                  "avg": 18.23929617759,
+                  "min": 0.680180614,
+                  "max": 145.764167472,
+                  "p50": 2.993017319,
+                  "p95": 118.61647904,
+                  "p99": 138.714799954,
+                  "n": 200
+                },
+                "itl_ms": {
+                  "avg": 23.220917897636827,
+                  "min": 8.424760158730159,
+                  "max": 73.03594863492063,
+                  "p50": 19.910804606060605,
+                  "p95": 46.90729066666667,
+                  "p99": 70.37348703174602,
+                  "n": 200
+                },
+                "decode_tokens_per_second": {
+                  "avg": 51.34725381298375,
+                  "min": 13.691887607274408,
+                  "max": 118.69774108213038,
+                  "p50": 50.98389831621767,
+                  "p95": 83.77198884228913,
+                  "p99": 116.25161610505603,
+                  "n": 200
+                },
+                "input_tokens": {
+                  "avg": 7957.655,
+                  "min": 18.0,
+                  "max": 26110.0,
+                  "p50": 2146.0,
+                  "p95": 20655.0,
+                  "p99": 26110.0,
+                  "n": 200
+                },
+                "output_tokens": {
+                  "avg": 1067.245,
+                  "min": 6.0,
+                  "max": 9288.0,
+                  "p50": 78.0,
+                  "p95": 7594.0,
+                  "p99": 8828.0,
+                  "n": 200
+                },
+                "output_path": "/results/workload_runs/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned.json"
+              },
+              "output_path": "/results/workload_runs/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned.json",
+              "error": null,
+              "stop_requested": false
+            },
+            "trace": {
+              "trace": {
+                "enabled": false,
+                "trace_id": "moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned",
+                "sample_metrics": true,
+                "sample_requests": true,
+                "max_events": 200000,
+                "started_at": "2026-05-03T03:39:09.318869Z",
+                "stopped_at": "2026-05-03T03:45:09.581828Z",
+                "dropped_metrics": 0,
+                "dropped_requests": 0,
+                "saved_paths": {
+                  "metrics_path": "/results/proxy_traces/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned/metrics.jsonl",
+                  "requests_path": "/results/proxy_traces/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned/requests.jsonl",
+                  "manifest_path": "/results/proxy_traces/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned/manifest.json"
+                },
+                "metrics_events": 33,
+                "request_events": 200,
+                "first_event_ts": "2026-05-03T03:39:26.979133Z",
+                "last_event_ts": "2026-05-03T03:44:46.999355Z"
+              },
+              "paths": {
+                "metrics_path": "/results/proxy_traces/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned/metrics.jsonl",
+                "requests_path": "/results/proxy_traces/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned/requests.jsonl",
+                "manifest_path": "/results/proxy_traces/moon_smoke_3replica_000_00028_20260401T140000Z_token_hash_filter_top20_quick200_gorgo-autotuned/manifest.json"
+              }
+            },
+            "metrics_ready": {
+              "replica_count": 3,
+              "metrics_count": 3,
+              "errors": {},
+              "last_refresh_age_seconds": 0.9591399790000001
+            },
+            "elapsed_seconds": 363.88181829452515
+          }
+        ]
+      }
+    }
+  ]
+}

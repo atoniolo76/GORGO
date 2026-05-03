@@ -992,6 +992,27 @@ components:
             still runs (and `last_recommendation` is updated) but
             `state["hyperparameters"]` is not mutated -- useful for
             shadow-mode comparison against the current settings.
+        mode:
+          type: string
+          enum: [fit, online-es]
+          description: |
+            Tuning algorithm:
+            * `fit` (default): median-of-rates per-target fit on observed
+              prefill/decode samples. Best when the cost-model parameters
+              have a direct physical interpretation. Pairs well with the
+              uncached-token correction in `_record_request_sample`.
+            * `online-es`: treat `(t_prefill, queued_tokens_weight)` as
+              abstract knobs and use a Gaussian (1+1)-Evolution Strategy
+              to minimize `objective_metric` over the rolling window.
+              Updates `defaults` only (per-target stays empty) so the
+              search space is 2D.
+        objective_metric:
+          type: string
+          enum: [neg_p50_ttft, neg_p95_ttft, neg_p99_ttft, neg_avg_ttft, neg_p95_e2e, neg_p99_e2e]
+          description: |
+            Score function for `mode: online-es` (ignored under `fit`).
+            Higher is better; all `neg_*` variants negate the underlying
+            latency so the maximizer minimizes latency.
       additionalProperties: false
 
     TraceStartRequest:
@@ -1278,14 +1299,55 @@ components:
             and the per-window counter pins at `hop_size`.
         current_hyperparameters:
           $ref: '#/components/schemas/HyperparameterStore'
+        mode:
+          type: string
+          enum: [fit, online-es]
+          description: Active tuning algorithm; see `TuneRequest.mode`.
+        objective_metric:
+          type: string
+          description: |
+            Score function consumed by `mode: online-es`. One of the
+            `neg_*` variants enumerated under `TuneRequest.objective_metric`.
+        online_tuner_state:
+          oneOf:
+            - type: object
+              description: |
+                Internal state of the Gaussian (1+1)-ES tuner under
+                `mode: online-es`. Includes the incumbent best params,
+                its score, the current step size (`sigma`), and the
+                running success rate window.
+              additionalProperties: true
+            - type: 'null'
+        pending_candidate:
+          oneOf:
+            - type: object
+              additionalProperties: { type: number }
+              description: |
+                Hyperparameters currently applied for evaluation under
+                `mode: online-es`. The next recompute compares the
+                window's score against the incumbent and accepts/rejects.
+            - type: 'null'
+        last_score:
+          oneOf:
+            - type: number
+            - type: 'null'
+          description: |
+            Most recent objective score computed under `mode: online-es`
+            (higher is better; sign already accounts for `neg_*`).
 
     TuneSample:
       type: object
       description: |
-        Per-request observation. `ping_seconds` is the most-recent
-        proxy<->replica metrics-scrape latency at the time the sample
-        was recorded, used as a stand-in for the irreducible RTT that
-        gets subtracted from TTFT to estimate prefill time.
+        Per-request observation appended to the proxy sample buffer.
+        `ping_seconds` is the irreducible RTT subtracted from TTFT
+        before fitting prefill rate; sourced from the dedicated network
+        RTT probe (`ReplicaLiveMetrics.network_rtt_seconds`) when
+        available, falling back to `latency_seconds`.
+        `cached_tokens_at_dispatch` records how many prompt tokens the
+        radix trie already had cached on the chosen replica at the
+        routing decision -- the per-token prefill rate is then computed
+        against `uncached_tokens` so the cost model isn't fed an
+        amortized rate that bakes in cache-hit benefits.
       properties:
         ping_seconds: { type: number }
         ttft_seconds: { type: number }
@@ -1293,8 +1355,24 @@ components:
         prefill_seconds: { type: number }
         decode_seconds: { type: number }
         prompt_tokens: { type: integer }
+        cached_tokens_at_dispatch:
+          type: integer
+          description: |
+            Tokens of `messages` already present in the radix trie under
+            `target` at decision time. `0` for a cold replica or empty
+            trie. Always `<= prompt_tokens`.
+        uncached_tokens:
+          type: integer
+          description: |
+            `max(1, prompt_tokens - cached_tokens_at_dispatch)`. Used as
+            the divisor for `prefill_rate_seconds_per_token`.
         completion_tokens: { type: integer }
-        prefill_rate_seconds_per_token: { type: number }
+        prefill_rate_seconds_per_token:
+          type: number
+          description: |
+            `prefill_seconds / uncached_tokens` -- per-uncached-token
+            prefill cost, the unit `policy.gorgo`'s cost model multiplies
+            against `(input_tokens - cached_tokens)` at routing time.
         decode_rate_seconds_per_token: { type: number }
         target: { type: string, format: uri }
         recorded_at_monotonic:

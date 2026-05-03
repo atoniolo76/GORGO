@@ -1,0 +1,10 @@
+{
+  "_note": "Cleaned raw 15-min chronological GLM5.1 trace, 2026-04-01T00:30:00 to 00:45:00 UTC. 3337 of 3818 rows kept (481 over-context/4xx removed via scripts/filter_bad_trace_requests.py against the prior raw15m_v1 run).",
+  "top": [
+    {
+      "result": {
+        "output_path": "/data/mooncake_traces/raw15m_v1_cleaned/with_bodies/00_30_to_00_45_chronological_cleaned.jsonl"
+      }
+    }
+  ]
+}
