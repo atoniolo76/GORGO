@@ -886,7 +886,12 @@ components:
     ReplicaMetricsSnapshot:
       type: object
       required:
-        [refresh_interval_seconds, last_refresh_age_seconds, errors, metrics, endpoints_queued_tokens]
+        - refresh_interval_seconds
+        - last_refresh_age_seconds
+        - errors
+        - metrics
+        - endpoints_queued_tokens
+        - endpoints_inflight_requests
       properties:
         refresh_interval_seconds: { type: number }
         last_refresh_age_seconds:
@@ -905,6 +910,16 @@ components:
           type: object
           additionalProperties: { type: integer }
           description: Estimated in-flight prompt tokens per replica (increments on dispatch, decrements on response).
+        endpoints_inflight_requests:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+          description: |
+            Proxy-side request-count companion to `endpoints_queued_tokens`.
+            Bumped on every dispatch, decremented in `finally`. Read by
+            `route_least_request` as `max(snap.num_running_reqs,
+            inflight[u])` so the policy's score remains correct between
+            SGLang `/metrics` scrapes (which freeze `num_running_reqs`
+            for up to `refresh_interval_seconds`).
 
     TrieSummary:
       type: object
@@ -1071,6 +1086,289 @@ components:
       properties:
         trace: { $ref: '#/components/schemas/TraceStatus' }
         paths: { $ref: '#/components/schemas/TracePaths' }
+        fallback_summary:
+          oneOf:
+            - $ref: '#/components/schemas/TraceFallbackSummary'
+            - type: 'null'
+          description: |
+            Per-policy tally of how often `_select_endpoint` (or a
+            policy-internal precondition failure) bypassed the
+            configured policy and chose randomly. Computed in-memory
+            from the same buffer that backed the saved JSONL, so it
+            reflects exactly the rows in `requests_path`.
+
+    TraceFallbackSummary:
+      type: object
+      required:
+        - total_requests
+        - fallback_count
+        - fallback_rate
+        - single_replica_count
+        - by_effective_policy
+      properties:
+        total_requests:
+          type: integer
+          minimum: 0
+          description: Number of request trace events in the buffer.
+        fallback_count:
+          type: integer
+          minimum: 0
+          description: |
+            Rows where `effective_policy` was a `random-fallback:*`
+            sentinel (i.e. the configured policy did not actually
+            choose the target).
+        fallback_rate:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: '`fallback_count / total_requests`.'
+        single_replica_count:
+          type: integer
+          minimum: 0
+          description: |
+            Rows tagged `single-replica` -- the trivial-pool
+            short-circuit, not a true fallback. Surfaced separately
+            so per-policy aggregates can still drop them when
+            counting honest policy decisions.
+        by_effective_policy:
+          type: object
+          description: |
+            Histogram of `effective_policy` values among the
+            `fallback_count` rows. Keys follow the namespace defined
+            in `policy.base.RouteDecision`:
+              * `random-fallback:missing-metrics` -- proxy-side fallback
+                because at least one replica had no live snapshot.
+              * `random-fallback:exception:<configured>:<exc-class>` --
+                proxy-side fallback because the policy fn raised.
+              * `random-fallback:internal:<configured>:<reason>` --
+                policy-side fallback (e.g. `empty-candidates`,
+                `insufficient-candidates`, `missing-token-ids`).
+            Single-replica rows are excluded; see `single_replica_count`.
+          additionalProperties:
+            type: integer
+            minimum: 0
+
+    RequestTraceEvent:
+      type: object
+      required:
+        - kind
+        - trace_id
+        - request_id
+        - wall_ts
+        - monotonic_s
+        - policy
+        - effective_policy
+        - target
+        - request_tokens
+        - metrics_seq_at_decision
+      description: |
+        One row in `requests.jsonl` (saved by `POST /trace/save`).
+        Written from `_handle_chat_completions` after each upstream
+        response completes; the trace buffer is bounded by
+        `state["trace"]["max_events"]`.
+      properties:
+        kind:
+          type: string
+          enum: [request]
+        trace_id: { type: string }
+        request_id: { type: string }
+        wall_ts:
+          type: string
+          format: date-time
+        monotonic_s:
+          type: number
+          description: Proxy-process monotonic clock at decision time.
+        policy:
+          type: string
+          description: |
+            The configured policy at decision time, captured atomically
+            in `_select_endpoint` (rather than re-read from
+            `state["policy"]` later) so a concurrent `POST /policy`
+            mid-request can't desync `policy` and `effective_policy`.
+        effective_policy:
+          type: string
+          description: |
+            What actually selected `target` on this request.
+              * Equal to `policy` when the configured policy ran.
+              * `single-replica` when only one replica was registered
+                and the policy was short-circuited.
+              * `random-fallback:missing-metrics` when at least one
+                replica had no live snapshot at decision time.
+              * `random-fallback:exception:<configured>:<exc-class>`
+                when the policy fn raised.
+              * `random-fallback:internal:<configured>:<reason>` when
+                the policy fn itself signaled an internal random
+                fallback via `RouteDecision.fallback_reason`.
+            Filter on `effective_policy == policy` to drop fallback
+            rows from per-policy aggregates.
+        target:
+          type: string
+          format: uri
+          description: Replica URL that received this request.
+        request_tokens:
+          type: integer
+          minimum: 0
+          description: Tiktoken-cl100k count of the input prompt.
+        metrics_seq_at_decision:
+          type: integer
+          description: |
+            `metrics_meta["refresh_seq"]` at decision time. Pair with
+            `metrics_age_seconds` to reason about how stale the
+            policy's view was.
+        metrics_age_seconds:
+          oneOf:
+            - type: number
+            - type: 'null'
+          description: |
+            Wall-clock seconds since the most recent successful
+            `_refresh_all` pass. `null` means no scrape had completed
+            yet at decision time.
+        candidate_snapshot:
+          oneOf:
+            - type: object
+              additionalProperties:
+                $ref: '#/components/schemas/CandidateReplicaSnapshot'
+            - type: 'null'
+          description: |
+            Per-replica snapshot the policy actually saw at decision
+            time, keyed by replica URL. `null` when
+            `state["trace"]["sample_requests"]` is `false`.
+        status:
+          oneOf:
+            - type: integer
+            - type: 'null'
+          description: Upstream HTTP status; `null` if the request never reached upstream.
+        ttft_ns:
+          oneOf:
+            - type: integer
+              minimum: 0
+            - type: 'null'
+          description: |
+            Time-to-first-token in nanoseconds, measured from before
+            `client.stream(...)` to the wire arrival of the first
+            chunk containing `delta.content`.
+        total_ns:
+          oneOf:
+            - type: integer
+              minimum: 0
+            - type: 'null'
+          description: End-to-end nanoseconds from request start to upstream stream close.
+        prompt_tokens:
+          oneOf:
+            - type: integer
+            - type: 'null'
+          description: From the SSE `usage` event, when the upstream sent one.
+        completion_tokens:
+          oneOf:
+            - type: integer
+            - type: 'null'
+        error:
+          oneOf:
+            - type: string
+            - type: 'null'
+
+    CandidateReplicaSnapshot:
+      type: object
+      description: |
+        Per-replica snapshot a policy saw at decision time. `null`
+        scalars indicate missing values (e.g. metrics not yet scraped
+        for this replica). `queued_tokens` and `inflight_requests` are
+        proxy-side counters maintained by `_handle_chat_completions`
+        and read by load- / request-aware policies.
+      properties:
+        latency_seconds:
+          oneOf: [{ type: number }, { type: 'null' }]
+        num_running_reqs:
+          oneOf: [{ type: integer }, { type: 'null' }]
+        num_queue_reqs:
+          oneOf: [{ type: integer }, { type: 'null' }]
+        num_used_tokens:
+          oneOf: [{ type: integer }, { type: 'null' }]
+        utilization:
+          oneOf: [{ type: number }, { type: 'null' }]
+        gen_throughput:
+          oneOf: [{ type: number }, { type: 'null' }]
+        queued_tokens:
+          type: integer
+          minimum: 0
+          description: Proxy-side `endpoints_queued_tokens[u]` at decision time.
+        inflight_requests:
+          type: integer
+          minimum: 0
+          description: |
+            Proxy-side `endpoints_inflight_requests[u]` at decision
+            time. Bumped on dispatch, decremented in `finally`. Read
+            by `route_least_request` to bridge SGLang scrape staleness.
+        cached_prefix_tokens:
+          type: integer
+          minimum: 0
+          description: |
+            Longest token-prefix the radix trie believes this replica
+            has cached for the current prompt.
+
+    MetricsTraceEvent:
+      type: object
+      required:
+        - kind
+        - trace_id
+        - seq
+        - wall_ts
+        - replica_url
+        - region
+        - scrape_latency_seconds
+        - ok
+      description: |
+        One row in `metrics.jsonl` (saved by `POST /trace/save`).
+        Written by `_refresh_one` for every replica scraped each
+        refresh pass, regardless of success.
+      properties:
+        kind:
+          type: string
+          enum: [metrics]
+        trace_id: { type: string }
+        seq:
+          type: integer
+          description: Sequence number of the refresh pass.
+        wall_ts:
+          type: string
+          format: date-time
+        monotonic_s: { type: number }
+        replica_url:
+          type: string
+          format: uri
+        region:
+          type: string
+          description: Modal region the proxy lives in.
+        scrape_latency_seconds:
+          type: number
+          description: |
+            Wall-clock RTT of the `/metrics` GET (includes Prometheus
+            handler time on the SGLang side). Inflates under load --
+            prefer `network_rtt_seconds` for a pure RTT estimate.
+        network_rtt_seconds:
+          oneOf:
+            - type: number
+            - type: 'null'
+          description: |
+            EWMA-smoothed RTT of the dedicated lightweight probe
+            issued in parallel with the metrics scrape.
+        ok:
+          type: boolean
+          description: Whether the scrape succeeded.
+        num_running_reqs:
+          oneOf: [{ type: integer }, { type: 'null' }]
+        num_queue_reqs:
+          oneOf: [{ type: integer }, { type: 'null' }]
+        num_used_tokens:
+          oneOf: [{ type: integer }, { type: 'null' }]
+        utilization:
+          oneOf: [{ type: number }, { type: 'null' }]
+        gen_throughput:
+          oneOf: [{ type: number }, { type: 'null' }]
+        error:
+          oneOf:
+            - type: string
+            - type: 'null'
 
     WorkloadSource:
       type: string

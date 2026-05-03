@@ -44,7 +44,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from policy.base import PolicyDef, RouteContext, route_random
+from policy.base import PolicyDef, RouteContext, RouteDecision, route_random
 
 # ---------------------------------------------------------------------------
 # Hyperparameter schema
@@ -225,14 +225,15 @@ def prune_per_target(store: dict[str, Any], known_targets: set[str]) -> dict[str
 # ---------------------------------------------------------------------------
 
 
-def route_gorgo(ctx: RouteContext) -> str:
+def route_gorgo(ctx: RouteContext) -> RouteDecision:
     """GORGO multi-objective routing.
 
     Each replica is scored independently using its own *effective*
     hyperparameters (defaults overlaid by any per-target override).
     The minimum-score replica wins; replicas without a metrics
     snapshot are skipped, falling back to random if every snapshot
-    is missing.
+    is missing (and the fallback flagged in the returned
+    :class:`RouteDecision`).
 
     Read directly off ``ctx`` rather than via positional arguments
     so the registry's adapter lambda stays a one-liner. The other
@@ -268,8 +269,8 @@ def route_gorgo(ctx: RouteContext) -> str:
         rtt = snap.network_rtt if snap.network_rtt > 0.0 else snap.latency
         scores[u] = rtt + prefill_cost + queue_cost
     if not scores:
-        return route_random(ctx.replica_urls)
-    return min(scores, key=scores.get)
+        return RouteDecision(route_random(ctx.replica_urls).target, "empty-candidates")
+    return RouteDecision(min(scores, key=scores.get))
 
 
 # ---------------------------------------------------------------------------

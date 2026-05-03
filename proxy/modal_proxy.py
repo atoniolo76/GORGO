@@ -628,6 +628,15 @@ def proxy(registry_key: str = ""):
         },
     }
     endpoints_queued_tokens: dict[str, int] = {url: 0 for url in replica_urls}
+    # Per-target proxy-side in-flight request counter; bumped on every
+    # dispatch, decremented in finally on every completion / error path.
+    # Mirrors ``endpoints_queued_tokens`` but counts requests rather than
+    # tokens. Read by ``route_least_request`` (see policy/lb_aibrix.py)
+    # so the policy's score remains correct between SGLang metrics
+    # scrapes -- otherwise the score is frozen for a full
+    # ``METRICS_REFRESH_INTERVAL_SECONDS`` and every request in the
+    # window herds onto the snapshot's minimum.
+    endpoints_inflight_requests: dict[str, int] = {url: 0 for url in replica_urls}
 
     # Bounded ring buffer of per-request samples produced by the
     # SSE-tee in ``_handle_chat_completions``. Each entry has the same
@@ -712,8 +721,10 @@ def proxy(registry_key: str = ""):
         replica_urls.extend(normalized)
         for url in added:
             endpoints_queued_tokens[url] = 0
+            endpoints_inflight_requests[url] = 0
         for url in removed:
             endpoints_queued_tokens.pop(url, None)
+            endpoints_inflight_requests.pop(url, None)
             live_metrics.pop(url, None)
             metrics_meta["last_refresh_errors"].pop(url, None)
         prune_per_target(state["hyperparameters"], set(replica_urls))
@@ -846,6 +857,55 @@ def proxy(registry_key: str = ""):
             for row in rows:
                 f.write(json.dumps(row, separators=(",", ":")) + "\n")
 
+    def _compute_fallback_summary() -> dict:
+        """Walk the in-memory request trace buffer and tally how often the
+        configured policy actually selected the target vs how often
+        ``_select_endpoint`` (or a policy-internal precondition failure)
+        fell back to ``random.choice``.
+
+        Returns a JSON-serializable dict shaped like::
+
+          {
+            "total_requests": int,
+            "fallback_count": int,
+            "fallback_rate": float,         # 0.0 - 1.0
+            "by_effective_policy": {        # only fallback rows
+              "random-fallback:missing-metrics": int,
+              "random-fallback:internal:least-request:empty-candidates": int,
+              ...
+            }
+          }
+
+        Counts only rows where ``effective_policy != policy`` -- i.e.
+        rows whose configured-policy attribution is misleading. The
+        ``"single-replica"`` short-circuit is a degenerate case (no
+        choice to make) and is *not* counted as a fallback even though
+        ``effective_policy != policy``; it's surfaced separately under
+        ``single_replica_count``.
+        """
+        total = 0
+        fallback = 0
+        single_replica = 0
+        by_eff: dict[str, int] = {}
+        for row in request_trace_events:
+            total += 1
+            policy = row.get("policy")
+            eff = row.get("effective_policy")
+            if eff is None or eff == policy:
+                continue
+            if eff == "single-replica":
+                single_replica += 1
+                continue
+            fallback += 1
+            by_eff[eff] = by_eff.get(eff, 0) + 1
+        return {
+            "total_requests": total,
+            "fallback_count": fallback,
+            "fallback_rate": (fallback / total) if total else 0.0,
+            "single_replica_count": single_replica,
+            "by_effective_policy": by_eff,
+        }
+
     def _save_trace_to_volume() -> dict:
         tr = state["trace"]
         trace_id = tr["trace_id"] or f"trace-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
@@ -856,10 +916,12 @@ def proxy(registry_key: str = ""):
         manifest_path = os.path.join(out_dir, "manifest.json")
         _write_jsonl(metrics_path, metrics_trace_events)
         _write_jsonl(requests_path, request_trace_events)
+        fallback_summary = _compute_fallback_summary()
         manifest = {
             "trace": _trace_status_payload(),
             "metrics_path": metrics_path,
             "requests_path": requests_path,
+            "fallback_summary": fallback_summary,
         }
         with open(manifest_path, "w") as f:
             json.dump(manifest, f, indent=2)
@@ -870,6 +932,7 @@ def proxy(registry_key: str = ""):
             "manifest_path": manifest_path,
         }
         tr["saved_paths"] = paths
+        tr["fallback_summary"] = fallback_summary
         return paths
 
     # ---------- Upstream client + metrics refresh ----------
@@ -1087,15 +1150,14 @@ def proxy(registry_key: str = ""):
         yet (cold start, /metrics timeout) we fall back to random
         rather than passing a partial view to the policy.
 
-        Scope note: this function only catches *proxy-level* fallbacks
-        (no metrics, no choice, exception). Some policy fns in
-        ``policy/lb_aibrix.py`` have their own internal
-        ``random.choice`` paths when their preconditions fail (e.g.
-        empty candidate set after filtering). Those still report
-        ``effective_policy == configured`` because the policy fn
-        returned successfully -- catching them requires plumbing a
-        return-mechanism out of the policy fn, which is a separate
-        change.
+        Policy-level fallbacks are also captured: when a policy fn
+        signals an internal random fallback by returning
+        ``RouteDecision(target, fallback_reason="...")`` (see
+        :class:`policy.base.RouteDecision`), this function emits
+        ``"random-fallback:internal:<configured>:<reason>"`` instead
+        of ``configured``. Reasons are short kebab-case strings
+        defined by the policy module (see ``policy/lb_aibrix.py`` for
+        the vocabulary).
         """
         configured = state["policy"]
         if not replica_urls:
@@ -1127,18 +1189,25 @@ def proxy(registry_key: str = ""):
         else:
             metrics = {}
 
-        target = pdef.fn(
+        decision = pdef.fn(
             RouteContext(
                 replica_urls=replica_urls,
                 metrics=metrics,
                 endpoints_queued_tokens=endpoints_queued_tokens,
+                endpoints_inflight_requests=endpoints_inflight_requests,
                 radix_trie=radix_trie,
                 token_ids=token_ids,
                 request_tokens=len(token_ids),
                 hyperparameters=state["hyperparameters"],
             )
         )
-        return target, configured, configured
+        if decision.fallback_reason is not None:
+            return (
+                decision.target,
+                configured,
+                f"random-fallback:internal:{configured}:{decision.fallback_reason}",
+            )
+        return decision.target, configured, configured
 
     # ---------- JSON route handlers ----------
     #
@@ -1299,6 +1368,7 @@ def proxy(registry_key: str = ""):
                 for url, m in live_metrics.items()
             },
             "endpoints_queued_tokens": endpoints_queued_tokens,
+            "endpoints_inflight_requests": endpoints_inflight_requests,
         }
 
     async def _handle_get_hyperparameters(_data) -> tuple[int, dict]:
@@ -1567,7 +1637,11 @@ def proxy(registry_key: str = ""):
 
     async def _handle_post_trace_save(_data) -> tuple[int, dict]:
         paths = _save_trace_to_volume()
-        return 200, {"trace": _trace_status_payload(), "paths": paths}
+        return 200, {
+            "trace": _trace_status_payload(),
+            "paths": paths,
+            "fallback_summary": state["trace"].get("fallback_summary"),
+        }
 
     def _batch_tuning_public_state() -> dict:
         bt = state["batch_tuning"]
@@ -2239,6 +2313,7 @@ def proxy(registry_key: str = ""):
                     "utilization": snap.utilization if snap else None,
                     "gen_throughput": snap.gen_throughput if snap else None,
                     "queued_tokens": endpoints_queued_tokens.get(u, 0),
+                    "inflight_requests": endpoints_inflight_requests.get(u, 0),
                     "cached_prefix_tokens": cached_by_replica.get(u, 0),
                 }
 
@@ -2292,10 +2367,10 @@ def proxy(registry_key: str = ""):
             "error": None,
         }
 
-        endpoints_queued_tokens[target] = endpoints_queued_tokens.get(target, 0) + request_tokens
         client = state["upstream_client"]
         if client is None:
             # Race between startup and the first inbound request; defensive.
+            # No counters incremented yet; nothing to roll back.
             await _send_json(send, 503, {"error": "upstream client not yet initialized"})
             request_trace_event.update(
                 {
@@ -2305,10 +2380,6 @@ def proxy(registry_key: str = ""):
                 }
             )
             _trace_append("request", request_trace_event)
-            if target in endpoints_queued_tokens:
-                endpoints_queued_tokens[target] = max(
-                    0, endpoints_queued_tokens[target] - request_tokens
-                )
             return
 
         # Serialize the original parsed JSON exactly once for the upstream
@@ -2335,6 +2406,15 @@ def proxy(registry_key: str = ""):
         prompt_tokens = None
         completion_tokens = None
         output_tokens = 0
+        # Bump the per-target inflight counters immediately before the
+        # try/finally so the finally is the only place that can decrement
+        # them and there's no leak window if request-prep above raises
+        # (e.g. ``json.dumps`` on a non-serializable body). Both counters
+        # are read by routing policies on the next request, so an
+        # unmatched increment would persistently bias future decisions
+        # against this target.
+        endpoints_queued_tokens[target] = endpoints_queued_tokens.get(target, 0) + request_tokens
+        endpoints_inflight_requests[target] = endpoints_inflight_requests.get(target, 0) + 1
         # Captured before client.stream(...) so TTFT measured by the SSE
         # tee includes request-send + response-headers latency, matching
         # the contract in proxy/measure.py::consume_sse_stream.
@@ -2462,6 +2542,10 @@ def proxy(registry_key: str = ""):
             if target in endpoints_queued_tokens:
                 endpoints_queued_tokens[target] = max(
                     0, endpoints_queued_tokens[target] - request_tokens
+                )
+            if target in endpoints_inflight_requests:
+                endpoints_inflight_requests[target] = max(
+                    0, endpoints_inflight_requests[target] - 1
                 )
 
     # ---------- Lifespan ----------
