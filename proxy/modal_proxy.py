@@ -1118,23 +1118,54 @@ def proxy(registry_key: str = ""):
 
     # ---------- Routing ----------
 
-    def _select_endpoint(token_ids: list[int]) -> str:
+    def _select_endpoint(token_ids: list[int]) -> tuple[str, str, str]:
         """Pick an upstream URL using the policy registry in :mod:`policy`.
 
+        Returns ``(target, configured, effective_policy)``.
+
+        * ``configured`` is the policy name read from ``state["policy"]``
+          atomically at the start of the call. The caller writes this
+          (rather than re-reading state) into the trace event's
+          ``policy`` field so a concurrent ``POST /policy`` mid-request
+          can't produce a row whose ``policy`` and ``effective_policy``
+          disagree just from a race.
+        * ``effective_policy`` is what actually selected ``target``:
+          ``configured`` when the policy function ran successfully,
+          ``"single-replica"`` when there was no choice to make, or
+          ``"random-fallback:<reason>"`` when this function bypassed the
+          policy and picked a random replica. Distinct values let
+          post-hoc trace analysis filter fallback rows out of per-policy
+          aggregates -- otherwise a brief metrics-missing window
+          silently biases the comparison toward random's distribution.
+
         For policies that don't need ``/metrics`` data (random, pd*,
-        simple-session-affinity) we skip the snapshot entirely so the proxy
-        can keep routing during a metrics-refresh outage. For metrics-using
-        policies we filter ``live_metrics`` to currently-registered
-        replicas; if any replica has no snapshot yet (cold start, /metrics
-        timeout) we fall back to random rather than passing a partial view
-        to the policy.
+        simple-session-affinity) we skip the snapshot entirely so the
+        proxy can keep routing during a metrics-refresh outage. For
+        metrics-using policies we filter ``live_metrics`` to
+        currently-registered replicas; if any replica has no snapshot
+        yet (cold start, /metrics timeout) we fall back to random
+        rather than passing a partial view to the policy.
+
+        Scope note: this function only catches *proxy-level* fallbacks
+        (no metrics, no choice, exception). Some policy fns in
+        ``policy/lb_aibrix.py`` have their own internal
+        ``random.choice`` paths when their preconditions fail (e.g.
+        empty candidate set after filtering). Those still report
+        ``effective_policy == configured`` because the policy fn
+        returned successfully -- catching them requires plumbing a
+        return-mechanism out of the policy fn, which is a separate
+        change.
         """
+        configured = state["policy"]
         if not replica_urls:
             raise ValueError("no replicas configured")
         if len(replica_urls) == 1:
-            return replica_urls[0]
+            # Tag explicitly so post-hoc analysis can spot single-replica
+            # runs that snuck into a multi-replica comparison instead of
+            # silently treating them as if the policy had picked.
+            return replica_urls[0], configured, "single-replica"
 
-        pdef: PolicyDef = POLICY_REGISTRY[normalize_policy(state["policy"])]
+        pdef: PolicyDef = POLICY_REGISTRY[normalize_policy(configured)]
 
         if pdef.needs_metrics:
             # Filter to replicas with a live snapshot. Both this code and the
@@ -1147,11 +1178,15 @@ def proxy(registry_key: str = ""):
                     f"live metrics missing for {missing} replica(s); "
                     f"falling back to random for this request"
                 )
-                return random.choice(replica_urls)
+                return (
+                    random.choice(replica_urls),
+                    configured,
+                    "random-fallback:missing-metrics",
+                )
         else:
             metrics = {}
 
-        return pdef.fn(
+        target = pdef.fn(
             RouteContext(
                 replica_urls=replica_urls,
                 metrics=metrics,
@@ -1162,6 +1197,7 @@ def proxy(registry_key: str = ""):
                 hyperparameters=state["hyperparameters"],
             )
         )
+        return target, configured, configured
 
     # ---------- JSON route handlers ----------
     #
@@ -2446,13 +2482,21 @@ def proxy(registry_key: str = ""):
                 }
 
         try:
-            target = _select_endpoint(token_ids)
+            target, configured_policy, effective_policy = _select_endpoint(token_ids)
         except Exception as e:
-            _log(f"policy {state['policy']!r} failed ({e}); falling back to random")
+            configured_policy = state["policy"]
+            _log(f"policy {configured_policy!r} failed ({e}); falling back to random")
             if not replica_urls:
                 await _send_json(send, 503, {"error": "no replicas registered"})
                 return
             target = random.choice(replica_urls)
+            # Include the configured policy name in the sentinel so the
+            # same exception class raised from different policies is
+            # distinguishable in the trace (e.g. ``KeyError`` from gorgo
+            # vs prefix-cache). Don't include ``str(e)`` -- exception
+            # messages can carry token ids and would explode group-by
+            # cardinality in downstream analysis.
+            effective_policy = f"random-fallback:exception:{configured_policy}:{type(e).__name__}"
 
         # Resolve cached-prefix length for the chosen target. Uses the
         # batched lookup if we already paid for it (trace path), otherwise
@@ -2470,7 +2514,20 @@ def proxy(registry_key: str = ""):
             "request_id": request_id,
             "wall_ts": decision_wall_ts,
             "monotonic_s": decision_monotonic,
-            "policy": state["policy"],
+            # ``policy`` is the configured policy at decision time --
+            # passed back from ``_select_endpoint`` (or captured locally
+            # in the exception path) rather than re-read from
+            # ``state["policy"]`` so a concurrent ``POST /policy``
+            # mid-request can't produce a row whose ``policy`` and
+            # ``effective_policy`` disagree just from a race.
+            # ``effective_policy`` is what actually selected the target:
+            # equal to ``policy`` when the policy fn ran, or
+            # ``random-fallback:<reason>`` / ``single-replica`` when
+            # ``_select_endpoint`` short-circuited. Filter on
+            # ``effective_policy == policy`` to drop fallback rows from
+            # per-policy aggregates.
+            "policy": configured_policy,
+            "effective_policy": effective_policy,
             "target": target,
             "request_tokens": request_tokens,
             "cached_tokens_at_dispatch": cached_for_target,
