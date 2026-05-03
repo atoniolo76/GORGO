@@ -51,8 +51,15 @@ PROXY_IMAGE = (
 )
 
 
-def _serve_model(registry_key: str) -> None:
+def _serve_model(registry_key: str, tp_size: int | None = None) -> None:
+    """Launch SGLang on this container.
+
+    ``tp_size`` overrides the imported ``N_GPUS`` for the ``--tp`` arg.
+    Set explicitly per-engine when the @app.function uses a different
+    GPU count than the engine module's default (e.g. L40S:2 fleets).
+    """
     os.environ["SGLANG_JIT_DEEPGEMM_FAST_WARMUP"] = "1"
+    tp = tp_size if tp_size is not None else N_GPUS
     cmd = [
         "python",
         "-m",
@@ -68,7 +75,7 @@ def _serve_model(registry_key: str) -> None:
         "--port",
         f"{PORT}",
         "--tp",
-        f"{N_GPUS}",
+        f"{tp}",
         "--cuda-graph-max-bs",
         f"{10 * 2}",
         "--enable-metrics",
@@ -154,6 +161,53 @@ def engine_us_west4(registry_key: str) -> None:
     _serve_model(registry_key)
 
 
+# ---- L40S:2 engines (tp=2; 35B FP8 weights ~35GB so 1xL40S is too tight) ----
+
+_L40S_HF_VOLUME = {
+    "/root/.cache/huggingface": modal.Volume.from_name(
+        "Qwen3.5-35B-A3B-FP8-huggingface-cache",
+        create_if_missing=True,
+        environment_name=ENVIRONMENT_NAME,
+    )
+}
+
+
+@app.function(
+    image=sglang_image,
+    timeout=24 * 60 * 60,
+    region="ap-seoul-1",
+    gpu="L40S:2",
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    volumes=_L40S_HF_VOLUME,
+)
+def engine_ap_seoul(registry_key: str) -> None:
+    _serve_model(registry_key, tp_size=2)
+
+
+@app.function(
+    image=sglang_image,
+    timeout=24 * 60 * 60,
+    region="eu-frankfurt-1",
+    gpu="L40S:2",
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    volumes=_L40S_HF_VOLUME,
+)
+def engine_eu_frankfurt(registry_key: str) -> None:
+    _serve_model(registry_key, tp_size=2)
+
+
+@app.function(
+    image=sglang_image,
+    timeout=24 * 60 * 60,
+    region="us-ashburn-1",
+    gpu="L40S:2",
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    volumes=_L40S_HF_VOLUME,
+)
+def engine_us_ashburn(registry_key: str) -> None:
+    _serve_model(registry_key, tp_size=2)
+
+
 @app.function(
     image=PROXY_IMAGE,
     region="us-east",
@@ -175,6 +229,9 @@ ENGINE_BY_REGION = {
     "CANADA-2": engine_canada,
     "sines-2": engine_sines,
     "us-west4": engine_us_west4,
+    "ap-seoul-1": engine_ap_seoul,
+    "eu-frankfurt-1": engine_eu_frankfurt,
+    "us-ashburn-1": engine_us_ashburn,
 }
 
 TERMINAL_WORKLOAD_STATUS = {"succeeded", "failed", "cancelled"}

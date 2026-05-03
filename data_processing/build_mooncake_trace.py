@@ -323,6 +323,10 @@ def build_mooncake_trace(
         if len(candidates) >= target_candidates:
             break
         path = os.path.join(data_dir, filename)
+        # ORDER BY timestamp so the in-window scan (and the early-exit on
+        # the first row past ``end_dt``) is correct even when the parquet
+        # row groups aren't time-sorted -- which they often aren't, since
+        # ingestion writes rows in arrival order rather than event order.
         cursor = con.execute(
             """
             SELECT
@@ -333,6 +337,7 @@ def build_mooncake_trace(
                 response
             FROM read_parquet(?)
             WHERE request NOT LIKE '%keep-alive%'
+            ORDER BY timestamp
             """,
             [path],
         )

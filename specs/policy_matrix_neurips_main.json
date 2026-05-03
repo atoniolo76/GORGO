@@ -2,31 +2,23 @@
   "run_id": "moon_neurips_main",
   "trace_path": "",
   "start_delay_seconds": 30,
-  "concurrency": 32,
+  "concurrency": 16,
   "stream": true,
-  "max_tokens": 128,
+  "max_tokens": 64,
   "max_input_tokens": 24000,
   "arrival_mode": "open-loop",
   "time_scale": 10.0,
   "poll_interval_seconds": 60,
   "fleet_regions": [
-    "CANADA-2",
-    "sines-2",
-    "us-west4"
+    "ap-seoul-1",
+    "eu-frankfurt-1",
+    "us-ashburn-1"
   ],
   "manifest_path": "results/policy_matrix/moon_neurips_main.json",
   "policies": [
     {
       "name": "random",
       "proxy_url": "https://REPLACE_RANDOM_PROXY.modal.host"
-    },
-    {
-      "name": "least-request",
-      "proxy_url": "https://REPLACE_LEAST_REQUEST_PROXY.modal.host"
-    },
-    {
-      "name": "power-of-two",
-      "proxy_url": "https://REPLACE_POWER_OF_TWO_PROXY.modal.host"
     },
     {
       "name": "least-load",
@@ -63,8 +55,8 @@
       },
       "auto_tune": {
         "enabled": true,
-        "window_size": 200,
-        "hop_size": 50,
+        "window_size": 64,
+        "hop_size": 16,
         "apply": true
       }
     }

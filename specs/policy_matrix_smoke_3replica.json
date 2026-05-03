@@ -5,13 +5,14 @@
   "poll_interval_seconds": 60,
   "concurrency": 16,
   "stream": true,
-  "max_tokens": 128,
+  "max_tokens": 64,
+  "max_input_tokens": 24000,
   "arrival_mode": "open-loop",
-  "time_scale": 1.0,
+  "time_scale": 10.0,
   "fleet_regions": [
-    "CANADA-2",
-    "sines-2",
-    "us-west4"
+    "ap-seoul-1",
+    "eu-frankfurt-1",
+    "us-ashburn-1"
   ],
   "policies": [
     {
@@ -31,8 +32,8 @@
       },
       "auto_tune": {
         "enabled": true,
-        "window_size": 50,
-        "hop_size": 25,
+        "window_size": 64,
+        "hop_size": 16,
         "apply": true
       }
     }
