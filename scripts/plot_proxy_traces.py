@@ -60,8 +60,11 @@ def _maybe_local(path: str, root: Path | None) -> Path:
 
 
 def _plot_single(metrics_path: Path, requests_path: Path, out: Path) -> None:
-    p = argparse.ArgumentParser()
     import matplotlib.pyplot as plt
+    import numpy as np
+    import seaborn as sns
+
+    sns.set_theme(style="whitegrid", context="paper", font_scale=1.1)
 
     metrics = _read_jsonl(metrics_path)
     requests = _read_jsonl(requests_path)
@@ -73,43 +76,48 @@ def _plot_single(metrics_path: Path, requests_path: Path, out: Path) -> None:
         )
     )
     ridx = _replica_index(replicas)
+    n_replicas = len(replicas)
+    palette = sns.color_palette("Blues_d", n_colors=max(n_replicas, 3))
 
     fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
 
-    for replica in replicas:
+    for ri, replica in enumerate(replicas):
         rows = [r for r in metrics if r.get("replica_url") == replica and r.get("ok")]
         if not rows:
             continue
         xs = [_parse_ts(r) for r in rows]
         ys = [float(r.get("scrape_latency_seconds") or 0.0) * 1000.0 for r in rows]
-        axes[0].plot(xs, ys, label=f"replica {ridx[replica]}")
+        axes[0].plot(xs, ys, label=f"replica {ridx[replica]}", color=palette[ri], linewidth=1.5)
     axes[0].set_ylabel("RTT via /metrics (ms)")
-    axes[0].legend(loc="upper right", ncols=max(1, min(4, len(replicas))))
+    axes[0].legend(loc="upper right", ncols=max(1, min(4, n_replicas)))
 
     req_rows = [r for r in requests if r.get("target")]
     if req_rows:
         xs = [_parse_ts(r) for r in req_rows]
         ys = [ridx.get(r["target"], -1) for r in req_rows]
-        axes[1].scatter(xs, ys, s=10, alpha=0.7)
+        scatter_colors = [palette[ridx.get(r["target"], 0)] for r in req_rows]
+        axes[1].scatter(xs, ys, s=10, alpha=0.7, c=scatter_colors)
     axes[1].set_ylabel("Selected replica")
-    axes[1].set_yticks(list(range(len(replicas))))
-    axes[1].set_yticklabels([f"replica {i}" for i in range(len(replicas))])
+    axes[1].set_yticks(list(range(n_replicas)))
+    axes[1].set_yticklabels([f"replica {i}" for i in range(n_replicas)])
 
-    for replica in replicas:
+    for ri, replica in enumerate(replicas):
         rows = [r for r in requests if r.get("target") == replica and r.get("ttft_ns") is not None]
         if not rows:
             continue
         xs = [_parse_ts(r) for r in rows]
         ys = [float(r["ttft_ns"]) / 1e9 for r in rows]
-        axes[2].scatter(xs, ys, s=12, alpha=0.75, label=f"replica {ridx[replica]}")
+        axes[2].scatter(
+            xs, ys, s=12, alpha=0.75, label=f"replica {ridx[replica]}", color=palette[ri]
+        )
     axes[2].set_ylabel("TTFT (s)")
     axes[2].set_xlabel("Wall time")
-    axes[2].legend(loc="upper right", ncols=max(1, min(4, len(replicas))))
+    axes[2].legend(loc="upper right", ncols=max(1, min(4, n_replicas)))
 
     fig.autofmt_xdate()
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=180)
+    fig.savefig(out, dpi=180, bbox_inches="tight")
 
 
 def _iter_policy_results(manifest: dict):
@@ -153,8 +161,6 @@ def _load_policy_traces(matrix_manifest_path: Path, local_trace_root: Path | Non
 
 
 def _request_index(rows: list[dict]) -> dict[str, int]:
-    # Request IDs come from the same Mooncake trace across policies; sorting by
-    # the id is stable because trace builders generate zero-padded row suffixes.
     ids = sorted({r["request_id"] for r in rows if r.get("request_id")})
     return {rid: i for i, rid in enumerate(ids)}
 
@@ -170,6 +176,10 @@ def _plot_multi_policy(
     matrix_manifest_path: Path, local_trace_root: Path | None, out: Path
 ) -> None:
     import matplotlib.pyplot as plt
+    import numpy as np
+    import seaborn as sns
+
+    sns.set_theme(style="whitegrid", context="paper", font_scale=1.1)
 
     policy_traces = _load_policy_traces(matrix_manifest_path, local_trace_root)
     if not policy_traces:
@@ -181,23 +191,25 @@ def _plot_multi_policy(
     ridx = _request_index(all_requests)
     labels = [t["label"] for t in policy_traces]
     lidx = {label: i for i, label in enumerate(labels)}
+    n_policies = len(policy_traces)
+    palette = sns.color_palette("Blues_d", n_colors=max(n_policies, 3))
 
     fig, axes = plt.subplots(3, 1, figsize=(15, 11), sharex=True)
 
-    # Panel 1: policy-level TTFT points over common request index.
-    for t in policy_traces:
+    # Panel 1: policy-level TTFT points over common request index
+    for idx, t in enumerate(policy_traces):
         rows = [
             r for r in t["requests"] if r.get("request_id") in ridx and r.get("ttft_ns") is not None
         ]
         xs = [ridx[r["request_id"]] for r in rows]
         ys = [float(r["ttft_ns"]) / 1e9 for r in rows]
-        axes[0].scatter(xs, ys, s=8, alpha=0.35, label=t["label"])
+        axes[0].scatter(xs, ys, s=8, alpha=0.35, label=t["label"], color=palette[idx])
     axes[0].set_ylabel("TTFT (s)")
-    axes[0].legend(loc="upper right", ncols=max(1, min(4, len(policy_traces))))
+    axes[0].legend(loc="upper right", ncols=max(1, min(4, n_policies)))
 
-    # Panel 2: rolling-ish per-policy p95 over 100 request buckets.
+    # Panel 2: rolling per-policy p95 over 100 request buckets
     bucket = 100
-    for t in policy_traces:
+    for idx, t in enumerate(policy_traces):
         rows = [
             r for r in t["requests"] if r.get("request_id") in ridx and r.get("ttft_ns") is not None
         ]
@@ -207,18 +219,18 @@ def _plot_multi_policy(
             by_bucket.setdefault(b, []).append(float(r["ttft_ns"]) / 1e9)
         xs = [b * bucket for b in sorted(by_bucket)]
         ys = [_percentile(by_bucket[b], 0.95) for b in sorted(by_bucket)]
-        axes[1].plot(xs, ys, marker="o", label=t["label"])
+        axes[1].plot(
+            xs, ys, marker="o", markersize=4, label=t["label"], color=palette[idx], linewidth=1.5
+        )
     axes[1].set_ylabel("Bucket p95 TTFT (s)")
-    axes[1].legend(loc="upper right", ncols=max(1, min(4, len(policy_traces))))
+    axes[1].legend(loc="upper right", ncols=max(1, min(4, n_policies)))
 
-    # Panel 3: selected replica index per policy over request index. Replica
-    # identities are per-policy, so y-axis is policy lane and point color is not
-    # globally meaningful; this panel shows route churn/density.
-    for t in policy_traces:
+    # Panel 3: selected replica index per policy over request index
+    for idx, t in enumerate(policy_traces):
         rows = [r for r in t["requests"] if r.get("request_id") in ridx and r.get("target")]
         xs = [ridx[r["request_id"]] for r in rows]
         ys = [lidx[t["label"]]] * len(rows)
-        axes[2].scatter(xs, ys, s=8, alpha=0.4, label=t["label"])
+        axes[2].scatter(xs, ys, s=8, alpha=0.4, label=t["label"], color=palette[idx])
     axes[2].set_yticks(list(range(len(labels))))
     axes[2].set_yticklabels(labels)
     axes[2].set_ylabel("Policy")
@@ -227,7 +239,7 @@ def _plot_multi_policy(
     fig.suptitle(matrix_manifest_path.name)
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=180)
+    fig.savefig(out, dpi=180, bbox_inches="tight")
 
 
 def main() -> None:

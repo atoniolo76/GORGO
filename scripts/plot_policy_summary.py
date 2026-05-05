@@ -108,12 +108,18 @@ def main() -> None:
     parser.add_argument(
         "--highlight",
         default="gorgo-autotuned",
-        help="Policy label to render in bold red.",
+        help="Policy label to render in bold/accent color.",
     )
     args = parser.parse_args()
 
     import matplotlib.pyplot as plt
     import numpy as np
+    import seaborn as sns
+
+    sns.set_theme(style="whitegrid", context="paper", font_scale=1.1)
+
+    HIGHLIGHT_COLOR = "#0d3b66"
+    ACCENT_LIGHT = "#a8dadc"
 
     policies = _load_policies(args.results_dir, args.run_prefix)
     if not policies:
@@ -134,39 +140,45 @@ def main() -> None:
         )
 
     labels = [p["label"] for p in policies]
-    colors = ["#d62728" if lab == args.highlight else "#4477AA" for lab in labels]
-    text_colors = ["#d62728" if lab == args.highlight else "#222222" for lab in labels]
+    n_policies = len(policies)
+    bar_palette = sns.color_palette("Blues_d", n_colors=max(n_policies, 4))
+    colors = [
+        HIGHLIGHT_COLOR if lab == args.highlight else bar_palette[i] for i, lab in enumerate(labels)
+    ]
+    text_colors = [HIGHLIGHT_COLOR if lab == args.highlight else "#333333" for lab in labels]
 
     fig, axes = plt.subplots(2, 2, figsize=(16, 11))
     ax_bars, ax_route, ax_curve, ax_bucket = axes.flat
 
     # Panel 1: TTFT p50/p95/p99 bars per policy
-    x = np.arange(len(policies))
+    x = np.arange(n_policies)
     w = 0.27
     p50 = [p["ttft_p50"] for p in policies]
     p95 = [p["ttft_p95"] for p in policies]
     p99 = [p["ttft_p99"] for p in policies]
-    ax_bars.bar(x - w, p50, w, label="p50", color="#bbbbbb")
-    ax_bars.bar(x, p95, w, label="p95", color="#888888")
-    bar99 = ax_bars.bar(x + w, p99, w, label="p99", color=colors)
+
+    blue_tints = sns.color_palette("Blues", 5)
+    ax_bars.bar(x - w, p50, w, label="p50", color=blue_tints[1], edgecolor="white", linewidth=0.5)
+    ax_bars.bar(x, p95, w, label="p95", color=blue_tints[3], edgecolor="white", linewidth=0.5)
+    bar99 = ax_bars.bar(x + w, p99, w, label="p99", color=colors, edgecolor="white", linewidth=0.5)
     for i, lab in enumerate(labels):
         if lab == args.highlight:
-            for b in (ax_bars.containers[0][i], ax_bars.containers[1][i], bar99[i]):
-                b.set_edgecolor("#d62728")
-                b.set_linewidth(1.6)
+            for container in ax_bars.containers[:2]:
+                container[i].set_edgecolor(HIGHLIGHT_COLOR)
+                container[i].set_linewidth(1.6)
+            bar99[i].set_edgecolor(HIGHLIGHT_COLOR)
+            bar99[i].set_linewidth(1.6)
     ax_bars.set_xticks(x)
-    ax_bars.set_xticklabels(labels, rotation=30, ha="right", fontsize=9, color="black")
+    ax_bars.set_xticklabels(labels, rotation=30, ha="right", fontsize=9)
     for tick, c in zip(ax_bars.get_xticklabels(), text_colors):
         tick.set_color(c)
-        if c == "#d62728":
+        if c == HIGHLIGHT_COLOR:
             tick.set_fontweight("bold")
     ax_bars.set_ylabel("TTFT (s)")
     ax_bars.set_title("TTFT per policy (sorted by p95, lower = better)")
     ax_bars.legend(loc="upper left")
-    ax_bars.grid(axis="y", alpha=0.3)
 
-    # Panel 2: routing concentration - bar per policy of the share routed to
-    # the most-used replica. >50% means the policy is collapsing onto one box.
+    # Panel 2: routing concentration
     most_used = []
     n_replicas_used = []
     for p in policies:
@@ -178,13 +190,13 @@ def main() -> None:
         top_count = max(p["targets"].values())
         most_used.append(100.0 * top_count / total)
         n_replicas_used.append(sum(1 for c in p["targets"].values() if c > 0))
-    bars = ax_route.bar(x, most_used, color=colors)
-    ax_route.axhline(33.3, color="#888", linestyle="--", linewidth=1, alpha=0.7)
+    bars = ax_route.bar(x, most_used, color=colors, edgecolor="white", linewidth=0.5)
+    ax_route.axhline(33.3, color="#6c757d", linestyle="--", linewidth=1, alpha=0.7)
     ax_route.text(
         len(policies) - 0.5,
         34.5,
         "uniform (3 replicas)",
-        color="#666",
+        color="#6c757d",
         fontsize=8,
         ha="right",
     )
@@ -192,7 +204,7 @@ def main() -> None:
     ax_route.set_xticklabels(labels, rotation=30, ha="right", fontsize=9)
     for tick, c in zip(ax_route.get_xticklabels(), text_colors):
         tick.set_color(c)
-        if c == "#d62728":
+        if c == HIGHLIGHT_COLOR:
             tick.set_fontweight("bold")
     for i, b in enumerate(bars):
         ax_route.text(
@@ -205,13 +217,12 @@ def main() -> None:
     ax_route.set_ylabel("Share of requests on most-used replica")
     ax_route.set_title("Routing concentration (lower = more balanced)")
     ax_route.set_ylim(0, max(100, max(most_used) * 1.12))
-    ax_route.grid(axis="y", alpha=0.3)
 
-    # Panel 3: smoothed median TTFT over elapsed time. Uses a sliding
-    # window (30s) with dense evaluation points for a continuous curve.
+    # Panel 3: smoothed median TTFT over elapsed time
     WINDOW_S = 30
     EVAL_POINTS = 1000
-    for p in policies:
+    line_palette = sns.color_palette("mako", n_colors=n_policies)
+    for idx, p in enumerate(policies):
         data = p.get("ttft_over_time") or []
         if len(data) < 10:
             continue
@@ -225,9 +236,10 @@ def main() -> None:
             if mask.sum() >= 5:
                 smoothed[i] = np.median(vals[mask])
         valid = ~np.isnan(smoothed)
-        color = "#d62728" if p["label"] == args.highlight else None
-        lw = 2.5 if p["label"] == args.highlight else 1.3
-        alpha = 1.0 if p["label"] == args.highlight else 0.7
+        is_highlight = p["label"] == args.highlight
+        color = HIGHLIGHT_COLOR if is_highlight else line_palette[idx]
+        lw = 2.5 if is_highlight else 1.3
+        alpha = 1.0 if is_highlight else 0.7
         ax_curve.plot(
             eval_t[valid] / 60.0,
             smoothed[valid],
@@ -239,18 +251,14 @@ def main() -> None:
     ax_curve.set_xlabel("Elapsed time (minutes)")
     ax_curve.set_ylabel("Median TTFT (s)")
     ax_curve.set_title(f"Smoothed median TTFT over time ({WINDOW_S}s sliding window)")
-    ax_curve.grid(alpha=0.3)
     ax_curve.legend(loc="upper right", ncols=2, fontsize=8)
-    # Clip y-axis to 2× the cross-policy median p99 so outliers don't
-    # squash the interesting range.
     all_p99 = [p["ttft_p99"] for p in policies if p["ttft_p99"] > 0]
     if all_p99:
         clip = sorted(all_p99)[len(all_p99) // 2] * 2.0
         ax_curve.set_ylim(0, clip)
 
-    # Panel 4: smoothed p95 TTFT over time. Same sliding window approach
-    # but takes the 95th percentile within each window.
-    for p in policies:
+    # Panel 4: smoothed p95 TTFT over time
+    for idx, p in enumerate(policies):
         data = p.get("ttft_over_time") or []
         if len(data) < 10:
             continue
@@ -265,9 +273,10 @@ def main() -> None:
                 window_vals = np.sort(vals[mask])
                 smoothed[i] = window_vals[int(len(window_vals) * 0.95)]
         valid = ~np.isnan(smoothed)
-        color = "#d62728" if p["label"] == args.highlight else None
-        lw = 2.5 if p["label"] == args.highlight else 1.3
-        alpha = 1.0 if p["label"] == args.highlight else 0.7
+        is_highlight = p["label"] == args.highlight
+        color = HIGHLIGHT_COLOR if is_highlight else line_palette[idx]
+        lw = 2.5 if is_highlight else 1.3
+        alpha = 1.0 if is_highlight else 0.7
         ax_bucket.plot(
             eval_t[valid] / 60.0,
             smoothed[valid],
@@ -279,7 +288,6 @@ def main() -> None:
     ax_bucket.set_xlabel("Elapsed time (minutes)")
     ax_bucket.set_ylabel("p95 TTFT (s)")
     ax_bucket.set_title(f"Smoothed p95 TTFT over time ({WINDOW_S}s sliding window)")
-    ax_bucket.grid(alpha=0.3)
     ax_bucket.legend(loc="upper right", ncols=2, fontsize=8)
     if all_p99:
         clip_p95 = sorted(all_p99)[-1] * 1.5
@@ -293,7 +301,7 @@ def main() -> None:
     )
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.out, dpi=180)
+    fig.savefig(args.out, dpi=180, bbox_inches="tight")
     print(f"wrote {args.out}")
 
     print("\n=== Headline numbers ===")

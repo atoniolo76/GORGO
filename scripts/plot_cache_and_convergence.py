@@ -22,6 +22,12 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
+
+sns.set_theme(style="whitegrid", context="paper", font_scale=1.1)
+
+HIGHLIGHT_COLOR = "#0d3b66"
+PALETTE_NAME = "Blues_d"
 
 
 def _load_trace(trace_dir: Path, run_prefix: str, policy: str) -> list[dict]:
@@ -55,7 +61,6 @@ def main() -> None:
     trace_dir = args.results_dir / "proxy_traces"
     workload_dir = args.results_dir / "workload_runs"
 
-    # Discover policies from workload results
     policies = []
     for f in sorted(workload_dir.glob(f"{args.run_prefix}_*.json")):
         label = f.stem[len(args.run_prefix) + 1 :]
@@ -67,7 +72,6 @@ def main() -> None:
 
     print(f"Found {len(policies)} policies: {policies}")
 
-    # ---- Compute per-policy cache stats ----
     policy_stats = {}
     for policy in policies:
         rows = _load_trace(trace_dir, args.run_prefix, policy)
@@ -88,7 +92,6 @@ def main() -> None:
             total_request_tokens += req_tok
             total_cached_at_dispatch += cached_dispatch
 
-            # Also get cached_prefix_tokens for the chosen target from candidate_snapshot
             target = r.get("target")
             snap = (r.get("candidate_snapshot") or {}).get(target) or {}
             cached_target = snap.get("cached_prefix_tokens") or 0
@@ -126,24 +129,27 @@ def main() -> None:
         print("No trace data available for any policy")
         return
 
-    # Sort by cache hit rate
     sorted_policies = sorted(
         policy_stats.keys(), key=lambda p: policy_stats[p]["hit_rate_target"], reverse=True
     )
 
-    # ---- Figure 1: Cache hit rate bar chart ----
+    n_policies = len(sorted_policies)
+    palette = sns.color_palette(PALETTE_NAME, n_colors=max(n_policies, 4))
+
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
-    x = np.arange(len(sorted_policies))
+    x = np.arange(n_policies)
     hit_rates = [policy_stats[p]["hit_rate_target"] * 100 for p in sorted_policies]
-    colors = ["#d62728" if p == args.highlight else "#4477AA" for p in sorted_policies]
+    colors = [
+        HIGHLIGHT_COLOR if p == args.highlight else palette[i]
+        for i, p in enumerate(sorted_policies)
+    ]
 
-    bars = ax1.bar(x, hit_rates, color=colors)
+    bars = ax1.bar(x, hit_rates, color=colors, edgecolor="white", linewidth=0.5)
     ax1.set_xticks(x)
     ax1.set_xticklabels(sorted_policies, rotation=30, ha="right", fontsize=9)
     ax1.set_ylabel("Cache hit rate (%)")
     ax1.set_title("Achieved KV-cache hit rate per policy")
-    ax1.grid(axis="y", alpha=0.3)
     for b, v in zip(bars, hit_rates):
         ax1.text(
             b.get_x() + b.get_width() / 2,
@@ -152,15 +158,16 @@ def main() -> None:
             ha="center",
             fontsize=8,
         )
-    for tick, c in zip(ax1.get_xticklabels(), colors):
-        tick.set_color(c)
-        if c == "#d62728":
+    for tick, p in zip(ax1.get_xticklabels(), sorted_policies):
+        if p == args.highlight:
+            tick.set_color(HIGHLIGHT_COLOR)
             tick.set_fontweight("bold")
 
-    # ---- Panel 2: Cache hit rate over time (smoothed) ----
+    # Panel 2: Cache hit rate over time (smoothed)
     WINDOW_S = 30
     EVAL_POINTS = 500
-    for policy in sorted_policies:
+    line_palette = sns.color_palette("mako", n_colors=n_policies)
+    for idx, policy in enumerate(sorted_policies):
         data = policy_stats[policy]["cache_over_time"]
         if len(data) < 10:
             continue
@@ -174,9 +181,10 @@ def main() -> None:
             if mask.sum() >= 5:
                 smoothed[i] = np.mean(vals[mask])
         valid = ~np.isnan(smoothed)
-        color = "#d62728" if policy == args.highlight else None
-        lw = 2.5 if policy == args.highlight else 1.2
-        alpha = 1.0 if policy == args.highlight else 0.7
+        is_highlight = policy == args.highlight
+        color = HIGHLIGHT_COLOR if is_highlight else line_palette[idx]
+        lw = 2.5 if is_highlight else 1.3
+        alpha = 1.0 if is_highlight else 0.7
         ax2.plot(
             eval_t[valid] / 60.0,
             smoothed[valid],
@@ -190,16 +198,15 @@ def main() -> None:
     ax2.set_ylabel("Cache hit rate (%)")
     ax2.set_title(f"Cache hit rate over time ({WINDOW_S}s sliding window)")
     ax2.legend(fontsize=7, loc="lower right", ncols=2)
-    ax2.grid(alpha=0.3)
 
     fig.suptitle(args.run_prefix.replace("_", " "), fontsize=11)
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     path1 = args.out_dir / f"cache_hit_rate_{args.run_prefix.split('_')[-1]}.png"
-    fig.savefig(path1, dpi=180)
+    fig.savefig(path1, dpi=180, bbox_inches="tight")
     plt.close(fig)
     print(f"\nwrote {path1}")
 
-    # ---- Print summary table ----
+    # Print summary table
     print(f"\n{'policy':<28} {'cache hit %':>12} {'cached tok':>12} {'total tok':>12} {'n':>6}")
     for p in sorted_policies:
         s = policy_stats[p]

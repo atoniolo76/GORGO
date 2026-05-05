@@ -22,6 +22,12 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
+
+sns.set_theme(style="whitegrid", context="paper", font_scale=1.1)
+
+HIGHLIGHT_COLOR = "#0d3b66"
+PALETTE_NAME = "mako"
 
 
 def _load_requests(trace_dir: Path, run_prefix: str, policy: str) -> list[dict]:
@@ -98,8 +104,11 @@ def main() -> None:
         print("No data found")
         return
 
-    # ---- Panel 1: % picking best-cache replica over time ----
-    for policy, rows in policy_data.items():
+    n_policies = len(policy_data)
+    line_palette = sns.color_palette(PALETTE_NAME, n_colors=max(n_policies, 3))
+
+    # Panel 1: % picking best-cache replica over time
+    for idx, (policy, rows) in enumerate(policy_data.items()):
         ts, vals = [], []
         for i in range(0, len(rows) - WINDOW, STEP):
             chunk = rows[i : i + WINDOW]
@@ -107,13 +116,14 @@ def main() -> None:
             ts.append(chunk[len(chunk) // 2]["elapsed_min"])
             vals.append(rate)
         is_main = policy == args.policy
+        color = HIGHLIGHT_COLOR if is_main else line_palette[idx]
         axes[0].plot(
             ts,
             vals,
             label=policy,
-            color="#d62728" if is_main else None,
-            linewidth=2.5 if is_main else 1.2,
-            alpha=1.0 if is_main else 0.6,
+            color=color,
+            linewidth=2.5 if is_main else 1.3,
+            alpha=1.0 if is_main else 0.7,
         )
 
     axes[0].set_ylabel("Best-cache pick rate (%)")
@@ -122,10 +132,9 @@ def main() -> None:
     )
     axes[0].legend(fontsize=8, loc="lower right")
     axes[0].set_ylim(0, 105)
-    axes[0].grid(alpha=0.3)
-    axes[0].axhline(100, color="#888", linestyle="--", linewidth=0.8, alpha=0.5)
+    axes[0].axhline(100, color="#6c757d", linestyle="--", linewidth=0.8, alpha=0.5)
 
-    # ---- Panel 2: Per-replica traffic share over time ----
+    # Panel 2: Per-replica traffic share over time
     rows = policy_data.get(args.policy, [])
     if rows:
         all_targets = sorted(set(r["target"] for r in rows))
@@ -134,18 +143,21 @@ def main() -> None:
             for t in all_targets
         }
 
-        for target in all_targets:
+        replica_palette = sns.color_palette("Blues_d", n_colors=max(len(all_targets), 3))
+        for ti, target in enumerate(all_targets):
             ts, vals = [], []
             for i in range(0, len(rows) - WINDOW, STEP):
                 chunk = rows[i : i + WINDOW]
                 share = sum(1 for s in chunk if s["target"] == target) / len(chunk) * 100
                 ts.append(chunk[len(chunk) // 2]["elapsed_min"])
                 vals.append(share)
-            axes[1].plot(ts, vals, label=target_labels[target], linewidth=1.5)
+            axes[1].plot(
+                ts, vals, label=target_labels[target], linewidth=1.5, color=replica_palette[ti]
+            )
 
         axes[1].axhline(
             100 / len(all_targets),
-            color="#888",
+            color="#6c757d",
             linestyle="--",
             linewidth=0.8,
             alpha=0.5,
@@ -155,12 +167,11 @@ def main() -> None:
         axes[1].set_title(f"{args.policy}: per-replica traffic share over time")
         axes[1].legend(fontsize=7, loc="upper right")
         axes[1].set_ylim(0, 60)
-        axes[1].grid(alpha=0.3)
 
-    # ---- Panel 3: Cache hit rate over time ----
+    # Panel 3: Cache hit rate over time
     SMOOTH_WINDOW_S = 30
     EVAL_POINTS = 1000
-    for policy, rows in policy_data.items():
+    for idx, (policy, rows) in enumerate(policy_data.items()):
         times = np.array([r["elapsed_s"] for r in rows])
         vals = np.array([r["cache_ratio"] * 100 for r in rows])
         t_min, t_max = times.min(), times.max()
@@ -172,27 +183,27 @@ def main() -> None:
                 smoothed[i] = np.mean(vals[mask])
         valid = ~np.isnan(smoothed)
         is_main = policy == args.policy
+        color = HIGHLIGHT_COLOR if is_main else line_palette[idx]
         axes[2].plot(
             eval_t[valid] / 60.0,
             smoothed[valid],
             label=policy,
-            color="#d62728" if is_main else None,
-            linewidth=2.5 if is_main else 1.2,
-            alpha=1.0 if is_main else 0.6,
+            color=color,
+            linewidth=2.5 if is_main else 1.3,
+            alpha=1.0 if is_main else 0.7,
         )
 
     axes[2].set_xlabel("Elapsed time (minutes)")
     axes[2].set_ylabel("Cache hit rate (%)")
     axes[2].set_title(f"Achieved cache hit rate over time ({SMOOTH_WINDOW_S}s sliding window)")
     axes[2].legend(fontsize=8, loc="lower right")
-    axes[2].grid(alpha=0.3)
 
     fig.suptitle(f"Online Optimizer Convergence: {args.policy}\n{args.run_prefix}", fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.95))
 
     slug = args.run_prefix.split("_")[-1]
     out_path = args.out_dir / f"convergence_{slug}.png"
-    fig.savefig(out_path, dpi=180)
+    fig.savefig(out_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
     print(f"\nwrote {out_path}")
 
