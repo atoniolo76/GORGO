@@ -1,0 +1,10 @@
+{
+  "_note": "GLM5 April 2 00:30-01:00. Non-contiguous from W1 (April 1 00:30-01:00) — same time of night, different day.",
+  "top": [
+    {
+      "result": {
+        "output_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_0030_to_0100.jsonl"
+      }
+    }
+  ]
+}

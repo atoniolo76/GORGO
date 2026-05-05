@@ -1,4 +1,4 @@
-# GLM5 W1 (tuning)
+# GLM5 Apr1 W1 (tuning)
 
 | Policy | OK | Succ% | TTFT p50 | p95 | p99 | max | E2E p95 | E2E p99 | req/s |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
