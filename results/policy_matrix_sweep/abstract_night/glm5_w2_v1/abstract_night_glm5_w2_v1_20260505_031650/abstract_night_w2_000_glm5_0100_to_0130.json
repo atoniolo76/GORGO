@@ -1,0 +1,1365 @@
+{
+  "run_id": "abstract_night_w2_000_glm5_0100_to_0130",
+  "trace_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_0100_to_0130.jsonl",
+  "start_at_wall_time": "2026-05-05T03:21:25.990640Z",
+  "policies": [
+    "random",
+    "least-request",
+    "least-load",
+    "prefix-cache",
+    "simple-session-affinity",
+    "gorgo-static",
+    "gorgo-autotune",
+    "gorgo-hillclimb"
+  ],
+  "results": [
+    {
+      "policy": "random",
+      "label": "random",
+      "proxy_url": "https://ta-01kqv2crp4fa9e9fw0ch54q0fe-8000-83qu15cza3kldf721b2hn6of4.w.modal.host",
+      "run_id": "abstract_night_w2_000_glm5_0100_to_0130_random",
+      "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_random",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_w2_000_glm5_0100_to_0130_random",
+        "started_at": "2026-05-05T03:21:00.261658Z",
+        "finished_at": "2026-05-05T03:51:50.941697Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_0100_to_0130.jsonl",
+          "run_id": "abstract_night_w2_000_glm5_0100_to_0130_random",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_random.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T03:21:25.990640Z"
+        },
+        "stats": {
+          "sent": 4208,
+          "ok": 3575,
+          "fail": 633,
+          "success_rate": 0.8495722433460076,
+          "status_breakdown": {
+            "400": 606,
+            "200": 3575,
+            "502": 25,
+            "0": 2
+          },
+          "elapsed_seconds": 1820.675264891,
+          "request_throughput_rps": 2.3112303886063525,
+          "input_token_throughput": 9343.366896907026,
+          "output_token_throughput": 400.67002285752096,
+          "total_token_throughput": 9744.036919764547,
+          "total_input_tokens": 17011237,
+          "total_output_tokens": 729490,
+          "ttft_seconds": {
+            "avg": 0.6044482113381818,
+            "min": 0.096513551,
+            "max": 30.928586223,
+            "p50": 0.335869592,
+            "p95": 1.763086431,
+            "p99": 2.612041971,
+            "n": 3575
+          },
+          "request_e2e_seconds": {
+            "avg": 2.8896661888637767,
+            "min": 0.449224316,
+            "max": 177.815249725,
+            "p50": 1.706263276,
+            "p95": 5.632787335,
+            "p99": 30.920976944,
+            "n": 3575
+          },
+          "itl_ms": {
+            "avg": 11.94158230888551,
+            "min": 5.562558858267717,
+            "max": 144.23663557142856,
+            "p50": 9.9913248,
+            "p95": 22.90783946456693,
+            "p99": 36.27919837795275,
+            "n": 3575
+          },
+          "decode_tokens_per_second": {
+            "avg": 96.51594283801988,
+            "min": 6.933051343289147,
+            "max": 179.77337866972584,
+            "p50": 100.08682732444049,
+            "p95": 138.81611153655516,
+            "p99": 139.96772132741447,
+            "n": 3575
+          },
+          "input_tokens": {
+            "avg": 4758.387972027972,
+            "min": 11.0,
+            "max": 32583.0,
+            "p50": 18.0,
+            "p95": 21557.0,
+            "p99": 26815.0,
+            "n": 3575
+          },
+          "output_tokens": {
+            "avg": 204.05314685314684,
+            "min": 8.0,
+            "max": 16000.0,
+            "p50": 128.0,
+            "p95": 251.0,
+            "p99": 2737.0,
+            "n": 3575
+          },
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_random.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_random.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_random",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T03:21:00.050911Z",
+          "stopped_at": "2026-05-05T03:52:10.286789Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_random/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_random/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_random/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 4206,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 4206,
+          "first_event_ts": "2026-05-05T03:21:07.562514Z",
+          "last_event_ts": "2026-05-05T03:51:41.581189Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_random/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_random/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_random/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 4206,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 4206,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 22.279427953000003
+      },
+      "elapsed_seconds": 1879.1684129238129
+    },
+    {
+      "policy": "least-request",
+      "label": "least-request",
+      "proxy_url": "https://ta-01kqv2crcq7t8zb6kraz6hcfwn-8000-c1y3xgsylq5ydc2ip8g88h08c.w.modal.host",
+      "run_id": "abstract_night_w2_000_glm5_0100_to_0130_least-request",
+      "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_least-request",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_w2_000_glm5_0100_to_0130_least-request",
+        "started_at": "2026-05-05T03:21:00.260999Z",
+        "finished_at": "2026-05-05T03:52:20.302816Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_0100_to_0130.jsonl",
+          "run_id": "abstract_night_w2_000_glm5_0100_to_0130_least-request",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_least-request.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T03:21:25.990640Z"
+        },
+        "stats": {
+          "sent": 4208,
+          "ok": 3579,
+          "fail": 629,
+          "success_rate": 0.8505228136882129,
+          "status_breakdown": {
+            "400": 607,
+            "200": 3579,
+            "502": 18,
+            "0": 4
+          },
+          "elapsed_seconds": 1850.301887501,
+          "request_throughput_rps": 2.274223481273796,
+          "input_token_throughput": 9179.632315535224,
+          "output_token_throughput": 394.39888427374564,
+          "total_token_throughput": 9574.03119980897,
+          "total_input_tokens": 16985091,
+          "total_output_tokens": 729757,
+          "ttft_seconds": {
+            "avg": 0.5681888095834032,
+            "min": 0.10751445,
+            "max": 5.22204909,
+            "p50": 0.303351162,
+            "p95": 1.756544148,
+            "p99": 2.662517807,
+            "n": 3579
+          },
+          "request_e2e_seconds": {
+            "avg": 2.6424133298407377,
+            "min": 0.337275849,
+            "max": 115.249730501,
+            "p50": 1.600087011,
+            "p95": 4.856807071,
+            "p99": 24.095548507,
+            "n": 3579
+          },
+          "itl_ms": {
+            "avg": 10.793219941153014,
+            "min": 4.810064552631579,
+            "max": 69.46205990666667,
+            "p50": 9.45796890551181,
+            "p95": 19.467102173228348,
+            "p99": 30.5552558503937,
+            "n": 3579
+          },
+          "decode_tokens_per_second": {
+            "avg": 102.39968665983943,
+            "min": 14.396348184082925,
+            "max": 207.89741781176338,
+            "p50": 105.73094604035238,
+            "p95": 138.8256416937363,
+            "p99": 143.60183515999165,
+            "n": 3579
+          },
+          "input_tokens": {
+            "avg": 4745.764459346186,
+            "min": 11.0,
+            "max": 32583.0,
+            "p50": 18.0,
+            "p95": 21558.0,
+            "p99": 26815.0,
+            "n": 3579
+          },
+          "output_tokens": {
+            "avg": 203.89969265157865,
+            "min": 6.0,
+            "max": 10578.0,
+            "p50": 128.0,
+            "p95": 257.0,
+            "p99": 2759.0,
+            "n": 3579
+          },
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_least-request.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_least-request.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_least-request",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T03:21:00.046752Z",
+          "stopped_at": "2026-05-05T03:53:10.685188Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_least-request/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_least-request/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_least-request/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 4204,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 189,
+          "request_events": 4204,
+          "first_event_ts": "2026-05-05T03:21:07.880767Z",
+          "last_event_ts": "2026-05-05T03:52:43.887771Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_least-request/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_least-request/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_least-request/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 4204,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 4204,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 21.955310114
+      },
+      "elapsed_seconds": 1935.6402566432953
+    },
+    {
+      "policy": "least-load",
+      "label": "least-load",
+      "proxy_url": "https://ta-01kqv2csh317hz5vhwt5xbae48-8000-071lxg6pm3heh08r6lw5risye.w.modal.host",
+      "run_id": "abstract_night_w2_000_glm5_0100_to_0130_least-load",
+      "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_least-load",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_w2_000_glm5_0100_to_0130_least-load",
+        "started_at": "2026-05-05T03:21:00.187519Z",
+        "finished_at": "2026-05-05T03:51:56.764549Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_0100_to_0130.jsonl",
+          "run_id": "abstract_night_w2_000_glm5_0100_to_0130_least-load",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_least-load.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T03:21:25.990640Z"
+        },
+        "stats": {
+          "sent": 4208,
+          "ok": 3580,
+          "fail": 628,
+          "success_rate": 0.8507604562737643,
+          "status_breakdown": {
+            "400": 608,
+            "200": 3580,
+            "502": 19,
+            "0": 1
+          },
+          "elapsed_seconds": 1826.5860867489998,
+          "request_throughput_rps": 2.3037512606315182,
+          "input_token_throughput": 9287.228301510158,
+          "output_token_throughput": 405.5735480381982,
+          "total_token_throughput": 9692.801849548356,
+          "total_input_tokens": 16963922,
+          "total_output_tokens": 740815,
+          "ttft_seconds": {
+            "avg": 0.6013979748684358,
+            "min": 0.102651605,
+            "max": 3.840083172,
+            "p50": 0.363313803,
+            "p95": 1.813008715,
+            "p99": 2.658518384,
+            "n": 3580
+          },
+          "request_e2e_seconds": {
+            "avg": 3.161241087893017,
+            "min": 0.525156392,
+            "max": 111.100684882,
+            "p50": 2.069797095,
+            "p95": 5.744753354,
+            "p99": 29.016324499,
+            "n": 3580
+          },
+          "itl_ms": {
+            "avg": 14.258998338978312,
+            "min": 4.807821000000001,
+            "max": 217.04891314285715,
+            "p50": 11.833464645669292,
+            "p95": 29.92809574015748,
+            "p99": 39.37027254054054,
+            "n": 3580
+          },
+          "decode_tokens_per_second": {
+            "avg": 84.23091717038051,
+            "min": 4.607256426765982,
+            "max": 207.9944324050334,
+            "p50": 84.50756393801032,
+            "p95": 133.51426716580715,
+            "p99": 140.02529291199167,
+            "n": 3580
+          },
+          "input_tokens": {
+            "avg": 4738.525698324022,
+            "min": 11.0,
+            "max": 32583.0,
+            "p50": 18.0,
+            "p95": 21558.0,
+            "p99": 26815.0,
+            "n": 3580
+          },
+          "output_tokens": {
+            "avg": 206.93156424581005,
+            "min": 8.0,
+            "max": 11341.0,
+            "p50": 128.0,
+            "p95": 236.0,
+            "p99": 2647.0,
+            "n": 3580
+          },
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_least-load.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_least-load.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_least-load",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T03:20:59.962293Z",
+          "stopped_at": "2026-05-05T03:52:10.535534Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_least-load/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_least-load/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_least-load/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 4207,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 4207,
+          "first_event_ts": "2026-05-05T03:21:07.937207Z",
+          "last_event_ts": "2026-05-05T03:51:43.708581Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_least-load/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_least-load/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_least-load/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 4207,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 4207,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 21.804992477000006
+      },
+      "elapsed_seconds": 1874.92041349411
+    },
+    {
+      "policy": "prefix-cache",
+      "label": "prefix-cache",
+      "proxy_url": "https://ta-01kqv2csbyn9mqpsh66pa8j9km-8000-9kgiw26fe0smrbt1umo3oejbv.w.modal.host",
+      "run_id": "abstract_night_w2_000_glm5_0100_to_0130_prefix-cache",
+      "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_prefix-cache",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_w2_000_glm5_0100_to_0130_prefix-cache",
+        "started_at": "2026-05-05T03:21:00.080767Z",
+        "finished_at": "2026-05-05T03:52:48.047041Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_0100_to_0130.jsonl",
+          "run_id": "abstract_night_w2_000_glm5_0100_to_0130_prefix-cache",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_prefix-cache.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T03:21:25.990640Z"
+        },
+        "stats": {
+          "sent": 4208,
+          "ok": 3578,
+          "fail": 630,
+          "success_rate": 0.8502851711026616,
+          "status_breakdown": {
+            "400": 605,
+            "200": 3578,
+            "502": 22,
+            "0": 3
+          },
+          "elapsed_seconds": 1878.08278739,
+          "request_throughput_rps": 2.2405828051104826,
+          "input_token_throughput": 9018.14824869215,
+          "output_token_throughput": 394.7786567121316,
+          "total_token_throughput": 9412.926905404282,
+          "total_input_tokens": 16936829,
+          "total_output_tokens": 741427,
+          "ttft_seconds": {
+            "avg": 0.5609781949972051,
+            "min": 0.098799456,
+            "max": 34.33971353,
+            "p50": 0.316339332,
+            "p95": 1.631503967,
+            "p99": 2.860055879,
+            "n": 3578
+          },
+          "request_e2e_seconds": {
+            "avg": 2.9849504102361655,
+            "min": 0.358832174,
+            "max": 135.485391746,
+            "p50": 1.780076605,
+            "p95": 5.926104078,
+            "p99": 33.367640588,
+            "n": 3578
+          },
+          "itl_ms": {
+            "avg": 13.213347286953303,
+            "min": 4.711921464566929,
+            "max": 158.8506947179487,
+            "p50": 10.552155487804878,
+            "p95": 23.4401761496063,
+            "p99": 66.69486377165354,
+            "n": 3578
+          },
+          "decode_tokens_per_second": {
+            "avg": 92.92913819922401,
+            "min": 6.295219556801906,
+            "max": 212.2276458807468,
+            "p50": 94.79548852654972,
+            "p95": 138.54428618889418,
+            "p99": 140.52668156534233,
+            "n": 3578
+          },
+          "input_tokens": {
+            "avg": 4733.602291783119,
+            "min": 11.0,
+            "max": 32583.0,
+            "p50": 18.0,
+            "p95": 21557.0,
+            "p99": 26815.0,
+            "n": 3578
+          },
+          "output_tokens": {
+            "avg": 207.21827836780324,
+            "min": 6.0,
+            "max": 16000.0,
+            "p50": 128.0,
+            "p95": 241.0,
+            "p99": 2780.0,
+            "n": 3578
+          },
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_prefix-cache.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_prefix-cache.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_prefix-cache",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T03:20:59.867880Z",
+          "stopped_at": "2026-05-05T03:53:10.382661Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_prefix-cache/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_prefix-cache/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_prefix-cache/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 4205,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 189,
+          "request_events": 4205,
+          "first_event_ts": "2026-05-05T03:21:08.210034Z",
+          "last_event_ts": "2026-05-05T03:52:50.950183Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_prefix-cache/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_prefix-cache/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_prefix-cache/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 4205,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 4205,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 21.446316269
+      },
+      "elapsed_seconds": 1935.7062847614288
+    },
+    {
+      "policy": "simple-session-affinity",
+      "label": "simple-session-affinity",
+      "proxy_url": "https://ta-01kqv2cqvf3fr6j5dag2zt4mdm-8000-du3uk66t8jq4oovppnfmxx76i.w.modal.host",
+      "run_id": "abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity",
+      "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity",
+        "started_at": "2026-05-05T03:21:00.032324Z",
+        "finished_at": "2026-05-05T03:51:45.344520Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_0100_to_0130.jsonl",
+          "run_id": "abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T03:21:25.990640Z"
+        },
+        "stats": {
+          "sent": 4208,
+          "ok": 3570,
+          "fail": 638,
+          "success_rate": 0.848384030418251,
+          "status_breakdown": {
+            "400": 608,
+            "200": 3570,
+            "502": 27,
+            "0": 3
+          },
+          "elapsed_seconds": 1815.044815982,
+          "request_throughput_rps": 2.3184000543387855,
+          "input_token_throughput": 9371.157588082762,
+          "output_token_throughput": 391.78095975292547,
+          "total_token_throughput": 9762.938547835687,
+          "total_input_tokens": 17009071,
+          "total_output_tokens": 711100,
+          "ttft_seconds": {
+            "avg": 0.7909011905579831,
+            "min": 0.104164285,
+            "max": 36.603104736,
+            "p50": 0.396401811,
+            "p95": 2.080111988,
+            "p99": 4.916846351,
+            "n": 3570
+          },
+          "request_e2e_seconds": {
+            "avg": 3.0885117145081233,
+            "min": 0.421333808,
+            "max": 117.079531778,
+            "p50": 2.020865065,
+            "p95": 6.396403705,
+            "p99": 28.631984186,
+            "n": 3570
+          },
+          "itl_ms": {
+            "avg": 12.621952904164626,
+            "min": 2.841367515151515,
+            "max": 83.36797952755904,
+            "p50": 11.345583047244094,
+            "p95": 22.24224657480315,
+            "p99": 31.821934519685037,
+            "n": 3570
+          },
+          "decode_tokens_per_second": {
+            "avg": 90.35005511506857,
+            "min": 11.99501302138945,
+            "max": 351.9432085668352,
+            "p50": 88.1461641581926,
+            "p95": 138.1256120324287,
+            "p99": 140.563494633998,
+            "n": 3570
+          },
+          "input_tokens": {
+            "avg": 4764.445658263306,
+            "min": 11.0,
+            "max": 32583.0,
+            "p50": 18.0,
+            "p95": 21558.0,
+            "p99": 26815.0,
+            "n": 3570
+          },
+          "output_tokens": {
+            "avg": 199.187675070028,
+            "min": 8.0,
+            "max": 10405.0,
+            "p50": 128.0,
+            "p95": 248.0,
+            "p99": 2447.0,
+            "n": 3570
+          },
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T03:20:59.815841Z",
+          "stopped_at": "2026-05-05T03:52:10.203374Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 4205,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 4205,
+          "first_event_ts": "2026-05-05T03:21:08.496145Z",
+          "last_event_ts": "2026-05-05T03:51:48.909406Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_simple-session-affinity/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 4205,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 4205,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 21.1086854
+      },
+      "elapsed_seconds": 1875.0799307823181
+    },
+    {
+      "policy": "gorgo",
+      "label": "gorgo-static",
+      "proxy_url": "https://ta-01kqv2cs2f1xnrskky3sbcrmnt-8000-heu2ijlgtbjbms6ly0gsaggoy.w.modal.host",
+      "run_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-static",
+      "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-static",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-static",
+        "started_at": "2026-05-05T03:21:00.388427Z",
+        "finished_at": "2026-05-05T03:52:08.148179Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_0100_to_0130.jsonl",
+          "run_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-static",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_gorgo-static.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T03:21:25.990640Z"
+        },
+        "stats": {
+          "sent": 4208,
+          "ok": 3573,
+          "fail": 635,
+          "success_rate": 0.8490969581749049,
+          "status_breakdown": {
+            "400": 609,
+            "200": 3573,
+            "0": 1,
+            "502": 25
+          },
+          "elapsed_seconds": 1838.178839604,
+          "request_throughput_rps": 2.289222304890928,
+          "input_token_throughput": 9250.899658742323,
+          "output_token_throughput": 382.96654538339413,
+          "total_token_throughput": 9633.866204125716,
+          "total_input_tokens": 17004808,
+          "total_output_tokens": 703961,
+          "ttft_seconds": {
+            "avg": 0.525590804311503,
+            "min": 0.09337888,
+            "max": 15.260072752,
+            "p50": 0.293975067,
+            "p95": 1.509617947,
+            "p99": 2.79052477,
+            "n": 3573
+          },
+          "request_e2e_seconds": {
+            "avg": 2.7254513188539047,
+            "min": 0.437721325,
+            "max": 124.86741876,
+            "p50": 1.776308345,
+            "p95": 5.382066062,
+            "p99": 22.539755965,
+            "n": 3573
+          },
+          "itl_ms": {
+            "avg": 11.99934406997938,
+            "min": 0.34546657142857146,
+            "max": 114.7679614883721,
+            "p50": 10.517365566929135,
+            "p95": 21.665540488188977,
+            "p99": 31.554311401574804,
+            "n": 3573
+          },
+          "decode_tokens_per_second": {
+            "avg": 95.10209369816431,
+            "min": 8.713233092506542,
+            "max": 2894.6360739472,
+            "p50": 95.08084449820836,
+            "p95": 136.9894608010472,
+            "p99": 140.3415218669993,
+            "n": 3573
+          },
+          "input_tokens": {
+            "avg": 4759.25216904562,
+            "min": 11.0,
+            "max": 32583.0,
+            "p50": 18.0,
+            "p95": 21558.0,
+            "p99": 26815.0,
+            "n": 3573
+          },
+          "output_tokens": {
+            "avg": 197.02239014833472,
+            "min": 8.0,
+            "max": 12734.0,
+            "p50": 128.0,
+            "p95": 251.0,
+            "p99": 2090.0,
+            "n": 3573
+          },
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_gorgo-static.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_gorgo-static.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-static",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T03:21:00.175863Z",
+          "stopped_at": "2026-05-05T03:52:10.375156Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-static/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-static/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-static/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 4207,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 4207,
+          "first_event_ts": "2026-05-05T03:21:08.635540Z",
+          "last_event_ts": "2026-05-05T03:51:46.412680Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-static/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-static/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-static/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 4207,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 4207,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 21.328153276000002
+      },
+      "elapsed_seconds": 1874.7728033065796
+    },
+    {
+      "policy": "gorgo",
+      "label": "gorgo-autotune",
+      "proxy_url": "https://ta-01kqv2cs8caxcpzwnwa6jt0zpd-8000-iq7pr0b02rwyx6vy8a3cob41k.w.modal.host",
+      "run_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune",
+      "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune",
+      "auto_tune": {
+        "config": {
+          "enabled": true,
+          "window_size": 64,
+          "hop_size": 16,
+          "apply": true,
+          "mode": "fit"
+        },
+        "hyperparameters": {
+          "defaults": {
+            "t_prefill": 0.005945338465595173,
+            "queued_tokens_weight": 0.0124740828671875
+          },
+          "per_target": {
+            "https://ta-01kqv292eqryvm84nbyr13437m-8000-jy22fgepoixxlrqejy7a8x5wi.w.modal.host": {
+              "t_prefill": 0.0,
+              "queued_tokens_weight": 0.011492490274509807
+            },
+            "https://ta-01kqv28y2a4tk6t7fv5yz07k29-8000-icpo4t6daf402wegzq77v8hzl.w.modal.host": {
+              "t_prefill": 0.007227194995913724,
+              "queued_tokens_weight": 0.0124740828671875
+            },
+            "https://ta-01kqv29398jt79gawn275ht265-8000-mnemevc8sxx30ijqloy3olylz.w.modal.host": {
+              "t_prefill": 0.023250362423009232,
+              "queued_tokens_weight": 0.01729000579120879
+            }
+          }
+        }
+      },
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune",
+        "started_at": "2026-05-05T03:21:00.428134Z",
+        "finished_at": "2026-05-05T03:52:05.045319Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_0100_to_0130.jsonl",
+          "run_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T03:21:25.990640Z"
+        },
+        "stats": {
+          "sent": 4208,
+          "ok": 3578,
+          "fail": 630,
+          "success_rate": 0.8502851711026616,
+          "status_breakdown": {
+            "400": 609,
+            "200": 3578,
+            "502": 18,
+            "0": 3
+          },
+          "elapsed_seconds": 1834.8847974770001,
+          "request_throughput_rps": 2.2933319878098484,
+          "input_token_throughput": 9238.273717951211,
+          "output_token_throughput": 380.3404992834422,
+          "total_token_throughput": 9618.614217234654,
+          "total_input_tokens": 16951168,
+          "total_output_tokens": 697881,
+          "ttft_seconds": {
+            "avg": 0.6296830058001677,
+            "min": 0.110935404,
+            "max": 5.697850987,
+            "p50": 0.368123408,
+            "p95": 1.88777815,
+            "p99": 3.001423267,
+            "n": 3578
+          },
+          "request_e2e_seconds": {
+            "avg": 3.0520105480667974,
+            "min": 0.4110312,
+            "max": 101.418921884,
+            "p50": 2.023626987,
+            "p95": 6.32496909,
+            "p99": 24.37562993,
+            "n": 3578
+          },
+          "itl_ms": {
+            "avg": 13.968912476572397,
+            "min": 3.30988078125,
+            "max": 67.12980486153846,
+            "p50": 11.7296641496063,
+            "p95": 28.093268384615385,
+            "p99": 48.8311828503937,
+            "n": 3578
+          },
+          "decode_tokens_per_second": {
+            "avg": 85.40879525130134,
+            "min": 14.89651283900786,
+            "max": 302.12568551255885,
+            "p50": 85.25489406189271,
+            "p95": 134.76340718150846,
+            "p99": 139.98622041781428,
+            "n": 3578
+          },
+          "input_tokens": {
+            "avg": 4737.609837898267,
+            "min": 11.0,
+            "max": 32583.0,
+            "p50": 18.0,
+            "p95": 21548.0,
+            "p99": 26815.0,
+            "n": 3578
+          },
+          "output_tokens": {
+            "avg": 195.0477920626048,
+            "min": 6.0,
+            "max": 10663.0,
+            "p50": 128.0,
+            "p95": 230.0,
+            "p99": 2113.0,
+            "n": 3578
+          },
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T03:21:00.208046Z",
+          "stopped_at": "2026-05-05T03:52:10.969519Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 4205,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 4205,
+          "first_event_ts": "2026-05-05T03:21:09.214269Z",
+          "last_event_ts": "2026-05-05T03:51:49.215558Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-autotune/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 4205,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 4205,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 20.780326978000005
+      },
+      "elapsed_seconds": 1875.6715891361237
+    },
+    {
+      "policy": "gorgo",
+      "label": "gorgo-hillclimb",
+      "proxy_url": "https://ta-01kqv2csr1esccvxc70b0b1tph-8000-c5wo3oy6tkjt9oob5gfso0g7u.w.modal.host",
+      "run_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb",
+      "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb",
+      "auto_tune": {
+        "config": {
+          "enabled": true,
+          "window_size": 64,
+          "hop_size": 16,
+          "apply": true,
+          "mode": "online-es",
+          "objective_metric": "neg_p95_ttft"
+        },
+        "hyperparameters": {
+          "defaults": {
+            "t_prefill": 0.15024633163226367,
+            "queued_tokens_weight": 0.0001537852185418029
+          },
+          "per_target": {}
+        }
+      },
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb",
+        "started_at": "2026-05-05T03:21:00.377540Z",
+        "finished_at": "2026-05-05T03:51:40.776311Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_0100_to_0130.jsonl",
+          "run_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T03:21:25.990640Z"
+        },
+        "stats": {
+          "sent": 4208,
+          "ok": 3583,
+          "fail": 625,
+          "success_rate": 0.8514733840304183,
+          "status_breakdown": {
+            "400": 604,
+            "200": 3583,
+            "502": 20,
+            "0": 1
+          },
+          "elapsed_seconds": 1810.714699508,
+          "request_throughput_rps": 2.3239442420958865,
+          "input_token_throughput": 9413.8971780765,
+          "output_token_throughput": 398.1030253942638,
+          "total_token_throughput": 9812.000203470765,
+          "total_input_tokens": 17045882,
+          "total_output_tokens": 720851,
+          "ttft_seconds": {
+            "avg": 0.5403091994786492,
+            "min": 0.109936771,
+            "max": 12.678401614,
+            "p50": 0.333510425,
+            "p95": 1.534552346,
+            "p99": 2.594920043,
+            "n": 3583
+          },
+          "request_e2e_seconds": {
+            "avg": 3.016386705259838,
+            "min": 0.392333911,
+            "max": 166.385913107,
+            "p50": 1.824066852,
+            "p95": 8.324215363,
+            "p99": 24.411921917,
+            "n": 3583
+          },
+          "itl_ms": {
+            "avg": 13.89122575214817,
+            "min": 3.5668212253521125,
+            "max": 104.46573816535432,
+            "p50": 10.680793795454546,
+            "p95": 25.91872243037975,
+            "p99": 91.45682567716536,
+            "n": 3583
+          },
+          "decode_tokens_per_second": {
+            "avg": 92.25834254649384,
+            "min": 9.572516478246131,
+            "max": 280.36168252342986,
+            "p50": 93.6260000099967,
+            "p95": 138.08276490874556,
+            "p99": 143.35447015228937,
+            "n": 3583
+          },
+          "input_tokens": {
+            "avg": 4757.432877476975,
+            "min": 11.0,
+            "max": 32583.0,
+            "p50": 18.0,
+            "p95": 21557.0,
+            "p99": 26815.0,
+            "n": 3583
+          },
+          "output_tokens": {
+            "avg": 201.18643594753001,
+            "min": 6.0,
+            "max": 16000.0,
+            "p50": 128.0,
+            "p95": 240.0,
+            "p99": 2043.0,
+            "n": 3583
+          },
+          "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T03:21:00.163839Z",
+          "stopped_at": "2026-05-05T03:52:10.890088Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 4207,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 4207,
+          "first_event_ts": "2026-05-05T03:21:09.584396Z",
+          "last_event_ts": "2026-05-05T03:51:43.726970Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_w2_000_glm5_0100_to_0130_gorgo-hillclimb/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 4207,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 4207,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 20.367389013999997
+      },
+      "elapsed_seconds": 1875.4627726078033
+    }
+  ]
+}

@@ -50,7 +50,9 @@ def _load_policies(results_dir: Path, run_prefix: str) -> list[dict]:
             if r.get("ttft_ns") and r.get("request_id")
         ]
         targets = Counter()
+        ttft_over_time: list[tuple[float, float]] = []
         rt_path = trace_dir / f"{run_prefix}_{label}" / "requests.jsonl"
+        min_monotonic: float | None = None
         if rt_path.exists():
             for line in rt_path.open():
                 line = line.strip()
@@ -63,6 +65,13 @@ def _load_policies(results_dir: Path, run_prefix: str) -> list[dict]:
                 t = row.get("target")
                 if t:
                     targets[t] += 1
+                mono = row.get("monotonic_s")
+                ttft_ns = row.get("ttft_ns")
+                if mono is not None and ttft_ns is not None and row.get("status") == 200:
+                    if min_monotonic is None:
+                        min_monotonic = mono
+                    ttft_over_time.append((mono - min_monotonic, ttft_ns / 1e9))
+        ttft_over_time.sort()
         out.append(
             {
                 "label": label,
@@ -75,6 +84,7 @@ def _load_policies(results_dir: Path, run_prefix: str) -> list[dict]:
                 "ttft_max": max(ttfts) if ttfts else 0.0,
                 "e2e_p95": _percentile(e2e, 0.95),
                 "ttfts_indexed": ttfts_indexed,
+                "ttft_over_time": ttft_over_time,
                 "targets": targets,
             }
         )
@@ -197,55 +207,83 @@ def main() -> None:
     ax_route.set_ylim(0, max(100, max(most_used) * 1.12))
     ax_route.grid(axis="y", alpha=0.3)
 
-    # Panel 3: TTFT vs request index (warm-up curve), one line per policy.
+    # Panel 3: smoothed median TTFT over elapsed time. Uses a sliding
+    # window (30s) with dense evaluation points for a continuous curve.
+    WINDOW_S = 30
+    EVAL_POINTS = 1000
     for p in policies:
-        if not p["ttft_by_index"]:
+        data = p.get("ttft_over_time") or []
+        if len(data) < 10:
             continue
-        idx, vals = zip(*p["ttft_by_index"])
+        times = np.array([t for t, _ in data])
+        vals = np.array([v for _, v in data])
+        t_min, t_max = times.min(), times.max()
+        eval_t = np.linspace(t_min, t_max, EVAL_POINTS)
+        smoothed = np.full_like(eval_t, np.nan)
+        for i, t in enumerate(eval_t):
+            mask = np.abs(times - t) <= WINDOW_S / 2
+            if mask.sum() >= 5:
+                smoothed[i] = np.median(vals[mask])
+        valid = ~np.isnan(smoothed)
         color = "#d62728" if p["label"] == args.highlight else None
-        lw = 2.0 if p["label"] == args.highlight else 0.9
-        alpha = 0.95 if p["label"] == args.highlight else 0.55
-        ax_curve.scatter(
-            idx,
-            vals,
-            s=4,
-            alpha=alpha,
-            label=p["label"],
-            color=color,
-            linewidths=0,
-        )
-    ax_curve.set_xlabel("Request index (shared across policies)")
-    ax_curve.set_ylabel("TTFT (s)")
-    ax_curve.set_title("TTFT per request - prefix cache warm-up curve")
-    ax_curve.set_yscale("log")
-    ax_curve.grid(alpha=0.3)
-    ax_curve.legend(loc="upper right", ncols=2, fontsize=8, markerscale=3)
-
-    # Panel 4: bucketed p95 TTFT per policy, 50-request buckets, log-y.
-    BUCKET = 50
-    for p in policies:
-        if not p["ttft_by_index"]:
-            continue
-        xs, ys = _bucket_p95(p["ttft_by_index"], BUCKET)
-        color = "#d62728" if p["label"] == args.highlight else None
-        lw = 2.4 if p["label"] == args.highlight else 1.2
+        lw = 2.5 if p["label"] == args.highlight else 1.3
         alpha = 1.0 if p["label"] == args.highlight else 0.7
-        ax_bucket.plot(
-            xs,
-            ys,
-            marker="o",
-            markersize=3,
+        ax_curve.plot(
+            eval_t[valid] / 60.0,
+            smoothed[valid],
             label=p["label"],
             color=color,
             linewidth=lw,
             alpha=alpha,
         )
-    ax_bucket.set_xlabel(f"Request index ({BUCKET}-request buckets)")
-    ax_bucket.set_ylabel("p95 TTFT in bucket (s)")
-    ax_bucket.set_title(f"Rolling p95 TTFT per {BUCKET} requests")
-    ax_bucket.set_yscale("log")
+    ax_curve.set_xlabel("Elapsed time (minutes)")
+    ax_curve.set_ylabel("Median TTFT (s)")
+    ax_curve.set_title(f"Smoothed median TTFT over time ({WINDOW_S}s sliding window)")
+    ax_curve.grid(alpha=0.3)
+    ax_curve.legend(loc="upper right", ncols=2, fontsize=8)
+    # Clip y-axis to 2× the cross-policy median p99 so outliers don't
+    # squash the interesting range.
+    all_p99 = [p["ttft_p99"] for p in policies if p["ttft_p99"] > 0]
+    if all_p99:
+        clip = sorted(all_p99)[len(all_p99) // 2] * 2.0
+        ax_curve.set_ylim(0, clip)
+
+    # Panel 4: smoothed p95 TTFT over time. Same sliding window approach
+    # but takes the 95th percentile within each window.
+    for p in policies:
+        data = p.get("ttft_over_time") or []
+        if len(data) < 10:
+            continue
+        times = np.array([t for t, _ in data])
+        vals = np.array([v for _, v in data])
+        t_min, t_max = times.min(), times.max()
+        eval_t = np.linspace(t_min, t_max, EVAL_POINTS)
+        smoothed = np.full_like(eval_t, np.nan)
+        for i, t in enumerate(eval_t):
+            mask = np.abs(times - t) <= WINDOW_S / 2
+            if mask.sum() >= 5:
+                window_vals = np.sort(vals[mask])
+                smoothed[i] = window_vals[int(len(window_vals) * 0.95)]
+        valid = ~np.isnan(smoothed)
+        color = "#d62728" if p["label"] == args.highlight else None
+        lw = 2.5 if p["label"] == args.highlight else 1.3
+        alpha = 1.0 if p["label"] == args.highlight else 0.7
+        ax_bucket.plot(
+            eval_t[valid] / 60.0,
+            smoothed[valid],
+            label=p["label"],
+            color=color,
+            linewidth=lw,
+            alpha=alpha,
+        )
+    ax_bucket.set_xlabel("Elapsed time (minutes)")
+    ax_bucket.set_ylabel("p95 TTFT (s)")
+    ax_bucket.set_title(f"Smoothed p95 TTFT over time ({WINDOW_S}s sliding window)")
     ax_bucket.grid(alpha=0.3)
     ax_bucket.legend(loc="upper right", ncols=2, fontsize=8)
+    if all_p99:
+        clip_p95 = sorted(all_p99)[-1] * 1.5
+        ax_bucket.set_ylim(0, clip_p95)
 
     fig.suptitle(
         f"{args.run_prefix}\n"
