@@ -1,14 +1,32 @@
-"""Convert GLM 5.1 parquet shards into a Mooncake FAST '25 trace JSONL.
+"""Convert GLM 5.1 parquet shards or HF chat datasets (LMSYS-Chat-1M /
+WildChat-4.8M) into a Mooncake FAST '25 trace JSONL.
 
-Walks the GLM 5.1 ClickHouse export on the ``GORGO-glm5-completions`` volume
-(mounted at ``/data``) starting from ``--start-time`` and consumes up to
-``--num-requests`` rows. Each row is converted to one Mooncake FAST '25
-trace entry::
+Three sources, selected with ``--source``:
+
+* ``glm5`` (default) -- walks the GLM 5.1 ClickHouse export on the
+  ``GORGO-glm5-completions`` volume (mounted at ``/data``) starting from
+  ``--start-time`` and consumes up to ``--num-requests`` rows. Real
+  per-request timestamps come from the parquet ``timestamp`` column.
+
+* ``lmsys`` -- walks the LMSYS-Chat-1M HF ``save_to_disk`` dataset on the
+  ``GORGO-lmsys-chat-1m`` volume (mounted at ``/lmsys``). LMSYS has no
+  per-request timestamps; arrivals are synthesized via a Poisson process
+  at ``--arrival-rate-per-second`` (with ``--arrival-seed`` for
+  reproducibility). Each row's conversation is split at its last
+  ``assistant`` turn: everything before becomes the replay request; the
+  assistant's content becomes the synthetic response used for
+  ``output_length`` and (when ``--include-bodies``) the embedded body.
+
+* ``wildchat`` -- walks the allenai/WildChat-4.8M HF ``save_to_disk``
+  dataset on the ``GORGO-hf-datasets`` volume (mounted at ``/datasets``).
+  WildChat has a ``timestamp`` column, so real arrivals are honored when
+  present; rows without a parseable timestamp fall back to the Poisson
+  synthesizer (matching the LMSYS code path).
+
+Common output format (per https://github.com/kvcache-ai/Mooncake FAST25-release)::
 
     {"timestamp": 0,    "input_length": 6955, "output_length": 52, "hash_ids": [0, 1, 2, ...]}
     {"timestamp": 3053, "input_length": 6472, "output_length": 26, "hash_ids": [0, 1, 2, ...]}
-
-Format (per https://github.com/kvcache-ai/Mooncake FAST25-release):
 
 - ``timestamp``       request arrival time in milliseconds, relative to the
                       first emitted row (which is always ``0``).
@@ -20,16 +38,35 @@ Format (per https://github.com/kvcache-ai/Mooncake FAST25-release):
                       ``ceil(K / block_size)`` ids, which is what makes
                       these traces useful for KV-cache replay simulation.
 
-Walking matches ``proxy/workload.py`` (filename-timestamp file selection
+GLM5 walking matches ``proxy/workload.py`` (filename-timestamp file selection
 plus a row-level timestamp filter), and tokenization uses tiktoken
 ``gpt-4o`` for parity with ``data_processing/build_eval_dataset.py``. The
 exact tokenizer doesn't matter for replay -- what matters is that input
 and output lengths are consistent across the trace.
 
+``--target-input-tokens`` (when > 0) standardizes traces across datasets
+to the same total prefill work: collection stops as soon as accumulated
+``input_length`` reaches the target. Combined with chronological
+selection this yields directly-comparable traces across datasets with
+wildly different prompt-length distributions (LMSYS ~500 tok/req,
+WildChat ~3k, GLM5 ~17k chronological / ~6k token-hash-filtered).
+
 Usage::
 
+    # GLM5 (existing):
     modal run data_processing/build_mooncake_trace.py \\
         --start-time 2026-04-01T12:00:00 --num-requests 10000
+
+    # LMSYS-Chat-1M with synthetic Poisson at 60 req/s:
+    modal run data_processing/build_mooncake_trace.py \\
+        --source lmsys --num-requests 60000 \\
+        --arrival-rate-per-second 60 --include-bodies
+
+    # WildChat-4.8M, target 30M total input tokens:
+    modal run data_processing/build_mooncake_trace.py \\
+        --source wildchat --num-requests 50000 \\
+        --target-input-tokens 30000000 \\
+        --arrival-rate-per-second 11 --include-bodies
 
 Output JSONL is written to the ``GORGO-glm5-completions`` volume (default
 ``/data/mooncake_traces/mooncake_<UTC-timestamp>.jsonl``).
@@ -39,31 +76,59 @@ from __future__ import annotations
 
 import modal
 
-from app import app, completions_volume
+from app import app, completions_volume, hf_datasets_volume, lmsys_chat_1m_volume
 
 image = (
     modal.Image.debian_slim()
-    .pip_install("duckdb", "pyarrow", "tiktoken")
+    .pip_install("duckdb", "pyarrow", "tiktoken", "datasets>=3.0")
     .add_local_python_source("app")
 )
 
 DEFAULT_BLOCK_SIZE = 512
 DEFAULT_DATA_DIR = "/data"
 
+# ---- Source selection ----
+SOURCE_GLM5 = "glm5"
+SOURCE_LMSYS = "lmsys"
+SOURCE_WILDCHAT = "wildchat"
+SUPPORTED_SOURCES = (SOURCE_GLM5, SOURCE_LMSYS, SOURCE_WILDCHAT)
+
+# Default per-source dataset roots. ``glm5`` lives on the completions
+# volume directly; the HF datasets are on their own volumes.
+LMSYS_DEFAULT_PATH = "/lmsys/lmsys-chat-1m"
+WILDCHAT_DEFAULT_PATH = "/datasets/datasets/allenai__WildChat-4.8M"
+
+# HF column-detection vocab (in priority order).
+HF_CONV_COLUMNS = ("conversation", "messages", "conversations")
+HF_TIMESTAMP_COLUMNS = ("timestamp", "created_at", "ts")
+
+# Group-by columns valid as a per-row "user" key for the
+# token-hash-filter / top-users selection modes on HF sources. Anything
+# outside this set is allowed but warned (degraded to per-row key).
+HF_GROUP_BY_LMSYS = frozenset({"model", "language", "conversation_id"})
+HF_GROUP_BY_WILDCHAT = frozenset({"model", "language", "country", "hashed_ip", "conversation_hash"})
+
+_VALID_ROLES = frozenset({"system", "user", "assistant", "tool", "function"})
+
 
 @app.function(
     image=image,
     timeout=4 * 60 * 60,
     memory=1024 * 16,
-    volumes={"/data": completions_volume},
+    volumes={
+        "/data": completions_volume,
+        "/lmsys": lmsys_chat_1m_volume,
+        "/datasets": hf_datasets_volume,
+    },
 )
 def build_mooncake_trace(
-    start_time: str,
     num_requests: int,
+    source: str = SOURCE_GLM5,
+    start_time: str | None = None,
     output_path: str | None = None,
     end_time: str | None = None,
     block_size: int = DEFAULT_BLOCK_SIZE,
-    data_dir: str = DEFAULT_DATA_DIR,
+    data_dir: str | None = None,
     include_bodies: bool = False,
     include_raw_bodies: bool = False,
     time_scale: float = 1.0,
@@ -75,41 +140,106 @@ def build_mooncake_trace(
     max_total_tokens: int = 0,
     min_input_tokens: int = 0,
     output_sidecar_path: str | None = None,
+    lmsys_group_by: str = "model",
+    wildchat_group_by: str = "model",
+    arrival_rate_per_second: float = 1.0,
+    arrival_seed: int = 0,
+    target_input_tokens: int = 0,
+    target_unique_input_tokens: int = 0,
+    force_synthetic_arrivals: bool = False,
+    skip_rows: int = 0,
 ) -> dict:
-    """Walk GLM 5.1 parquet shards and emit a Mooncake FAST '25 trace JSONL.
+    """Walk a chat dataset and emit a Mooncake FAST '25 trace JSONL.
 
     Args:
-        start_time: ISO 8601 timestamp -- only rows with ``timestamp >=
-            start_time`` are emitted. Required (the GLM dataset is large
-            enough that an unbounded scan is rarely what you want).
-        num_requests: Cap on emitted rows. Walking stops as soon as this
-            many valid (request + response parsed, prompt non-empty) rows
-            have been collected.
+        num_requests: Upper bound on emitted rows. Walking stops as soon
+            as this many valid candidates have been collected (or as soon
+            as ``target_input_tokens`` is reached, whichever is first).
+        source: One of ``glm5`` (default; parquet shards) / ``lmsys`` (HF
+            ``save_to_disk`` LMSYS-Chat-1M) / ``wildchat`` (HF
+            ``save_to_disk`` allenai/WildChat-4.8M).
+        start_time: ISO 8601 timestamp. Required for ``glm5``; ignored
+            for ``lmsys`` (no row timestamps) and currently ignored for
+            ``wildchat`` (full-dataset filter is too expensive on 4.8M
+            rows; truncate the trace via ``num_requests`` /
+            ``target_input_tokens`` instead).
         output_path: Where to write the JSONL inside the volume. Relative
             paths are resolved under ``/data``. ``None`` (default) ->
             auto-generated ``mooncake_traces/mooncake_<UTC-timestamp>.jsonl``.
-        end_time: Optional ISO 8601 upper bound (half-open ``[start, end)``).
+        end_time: Optional ISO 8601 upper bound for ``glm5``; ignored for
+            HF sources (see ``start_time``).
         block_size: Token count per KV-cache block when hashing the prompt.
             Mooncake uses 512 in their published traces.
-        data_dir: Directory holding the GLM 5.1 ``llm_responses_*.parquet``
-            shards. Defaults to the ``/data`` mount.
+        data_dir: Source-specific dataset root. Defaults: ``/data`` for
+            ``glm5``, ``/lmsys/lmsys-chat-1m`` for ``lmsys``,
+            ``/datasets/datasets/allenai__WildChat-4.8M`` for ``wildchat``.
         include_bodies: Include parsed request/response JSON objects so the
             trace can be replayed against the proxy.
         include_raw_bodies: Include raw request/response strings for exact
-            debugging/archival payloads.
+            debugging/archival payloads. ``glm5`` only -- HF sources don't
+            preserve original API payloads.
         time_scale: Multiply all relative timestamps by this factor.
         target_duration_ms: Alternative to ``time_scale``; when positive,
             compress/expand the selected trace to this total duration.
         selection_mode: ``chronological`` (default), ``top-users``,
             ``high-overlap``, ``mixed-overlap``, or ``token-hash-filter``.
+            Required to be ``chronological`` when ``target_input_tokens > 0``.
         candidate_multiplier: Scan up to ``num_requests * candidate_multiplier``
             valid candidates before selecting the final trace.
         top_token_hashes: For ``token-hash-filter``, keep requests from the
             top-K token_hash values in the candidate pool. ``0`` picks a small
-            default based on candidate diversity.
+            default based on candidate diversity. For HF sources, the
+            "token_hash" comes from the source's ``*_group_by`` knob.
         max_input_tokens / max_total_tokens / min_input_tokens: Context-length
             filters applied before selection. Positive values enable checks.
         output_sidecar_path: Optional summary JSON path inside the volume.
+        lmsys_group_by: Column to use as the per-row "user" key for the
+            ``token-hash-filter`` and ``top-users`` modes when
+            ``source=lmsys``. One of ``model``, ``language``,
+            ``conversation_id``. ``conversation_id`` is unique per row,
+            so it degrades token-hash-filter to chronological.
+        wildchat_group_by: Same but for ``source=wildchat``. One of
+            ``model``, ``language``, ``country``, ``hashed_ip``,
+            ``conversation_hash``.
+        arrival_rate_per_second: Synthetic Poisson arrival rate (req/sec)
+            applied to the selected rows for HF sources without usable
+            real timestamps (always for LMSYS; for WildChat only when the
+            row's timestamp column is missing or unparseable).
+        arrival_seed: PRNG seed for the Poisson process so the same
+            ``(num_requests, selection_mode, arrival_rate, seed)`` always
+            produces identical timestamps.
+        target_input_tokens: When > 0, treat as a stop criterion during
+            collection: stop scanning as soon as accumulated
+            ``input_length`` over kept candidates reaches this target.
+            Standardizes total prefill work across datasets with
+            different prompt-length distributions. Only valid with
+            ``selection_mode=chronological`` (other modes oversample
+            then truncate, which doesn't compose with a token target).
+        target_unique_input_tokens: When > 0, treat as a stop criterion
+            using only *unique* prefill work -- tokens belonging to
+            block-hash digests not already seen in any earlier accepted
+            candidate. This is the "post-cache-reuse" metric: in a
+            multi-turn conversation, request N+1 typically encodes
+            request N as its prompt prefix, so naively counting
+            ``input_length`` double-counts the cached portion. Stopping
+            on unique tokens equates fleet load across high-reuse
+            (e.g. GLM5 ~82%) and low-reuse (e.g. WildChat ~5%) datasets
+            so policies are stress-tested on comparable real prefill
+            work. Same chronological-only restriction as
+            ``target_input_tokens``. When both are set, collection stops
+            on whichever is reached first.
+        skip_rows: Number of dataset rows to skip before starting
+            collection (HF sources only). ``0`` (default) starts from
+            the first row. Use to grab non-overlapping windows from the
+            same dataset: window 1 = ``skip_rows=0, num_requests=N``;
+            window 2 = ``skip_rows=N, num_requests=N``.
+        force_synthetic_arrivals: When True (HF sources only), ignore
+            any per-row timestamp column on the dataset and always use
+            the synthetic Poisson process. Useful for WildChat -- whose
+            real ``timestamp`` column spans days across the dataset
+            (~0.02 req/s natural rate, useless for saturation testing)
+            -- so the arrival rate matches ``arrival_rate_per_second``
+            instead of the dataset's collection cadence.
 
     Returns:
         Dict with the resolved output path plus a few summary stats. The
@@ -118,20 +248,53 @@ def build_mooncake_trace(
     import hashlib
     import json
     import os
+    import random
     import statistics
     import time
     from collections import Counter
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
 
     import duckdb
     import tiktoken
 
+    if source not in SUPPORTED_SOURCES:
+        raise SystemExit(f"--source must be one of {list(SUPPORTED_SOURCES)} (got {source!r})")
+
+    if data_dir is None:
+        data_dir = {
+            SOURCE_GLM5: DEFAULT_DATA_DIR,
+            SOURCE_LMSYS: LMSYS_DEFAULT_PATH,
+            SOURCE_WILDCHAT: WILDCHAT_DEFAULT_PATH,
+        }[source]
+
+    # Reload only the volume(s) we read from. Output always lands on
+    # completions_volume so reload that one too in case a sibling job
+    # just dropped a sidecar there.
+    if source == SOURCE_GLM5:
+        completions_volume.reload()
+    elif source == SOURCE_LMSYS:
+        lmsys_chat_1m_volume.reload()
+        completions_volume.reload()
+    elif source == SOURCE_WILDCHAT:
+        hf_datasets_volume.reload()
     completions_volume.reload()
 
     start_dt = _parse_iso(start_time)
-    if start_dt is None:
-        raise SystemExit(f"--start-time is required (got {start_time!r})")
-    end_dt = _parse_iso(end_time)
+    if source == SOURCE_GLM5 and start_dt is None:
+        raise SystemExit(f"--start-time is required for source=glm5 (got {start_time!r})")
+    if source != SOURCE_GLM5 and (start_time or end_time):
+        # HF sources don't filter on row timestamps in this builder
+        # (LMSYS has none; WildChat would require a full-dataset
+        # ``ds.filter`` scan over 4.8M rows). Truncate via num_requests
+        # / target_input_tokens instead. Warn rather than error so
+        # callers retargeting an existing GLM5 invocation just lose the
+        # filter cleanly.
+        print(
+            f"[mooncake] note: --start-time / --end-time ignored for source={source!r} "
+            f"(use --num-requests / --target-input-tokens to bound the trace)",
+            flush=True,
+        )
+    end_dt = _parse_iso(end_time) if source == SOURCE_GLM5 else None
     if num_requests <= 0:
         raise SystemExit(f"--num-requests must be > 0 (got {num_requests})")
     if block_size <= 0:
@@ -142,6 +305,27 @@ def build_mooncake_trace(
         raise SystemExit(f"--target-duration-ms must be >= 0 (got {target_duration_ms})")
     if candidate_multiplier <= 0:
         raise SystemExit(f"--candidate-multiplier must be > 0 (got {candidate_multiplier})")
+    if target_input_tokens < 0:
+        raise SystemExit(f"--target-input-tokens must be >= 0 (got {target_input_tokens})")
+    if target_unique_input_tokens < 0:
+        raise SystemExit(
+            f"--target-unique-input-tokens must be >= 0 (got {target_unique_input_tokens})"
+        )
+    if source in (SOURCE_LMSYS, SOURCE_WILDCHAT) and arrival_rate_per_second <= 0:
+        raise SystemExit(
+            f"--arrival-rate-per-second must be > 0 for HF sources (got {arrival_rate_per_second})"
+        )
+    if skip_rows < 0:
+        raise SystemExit(f"--skip-rows must be >= 0 (got {skip_rows})")
+    if skip_rows > 0 and source not in (SOURCE_LMSYS, SOURCE_WILDCHAT):
+        raise SystemExit(
+            f"--skip-rows only applies to HF sources (lmsys / wildchat); got source={source!r}"
+        )
+    if force_synthetic_arrivals and source not in (SOURCE_LMSYS, SOURCE_WILDCHAT):
+        raise SystemExit(
+            f"--force-synthetic-arrivals only applies to HF sources "
+            f"(lmsys / wildchat); got source={source!r}"
+        )
     supported_modes = {
         "chronological",
         "top-users",
@@ -151,10 +335,36 @@ def build_mooncake_trace(
     }
     if selection_mode not in supported_modes:
         raise SystemExit(f"--selection-mode must be one of {sorted(supported_modes)}")
+    if target_input_tokens > 0 and selection_mode != "chronological":
+        # Other modes oversample then truncate by overlap/user score,
+        # which doesn't compose with a token target -- you'd either
+        # under-fill (target reached pre-selection) or over-shoot
+        # (selection picks longer prompts). Restrict to keep semantics
+        # simple and reproducible.
+        raise SystemExit(
+            "--target-input-tokens > 0 requires --selection-mode chronological "
+            f"(got {selection_mode!r})"
+        )
+    if target_unique_input_tokens > 0 and selection_mode != "chronological":
+        # Same reasoning as ``target_input_tokens`` plus an extra:
+        # the "unique" set is order-dependent (the first request to
+        # carry a block defines it as cached), so non-chronological
+        # selection would re-order the unique attribution.
+        raise SystemExit(
+            "--target-unique-input-tokens > 0 requires "
+            f"--selection-mode chronological (got {selection_mode!r})"
+        )
 
-    files = _select_files(data_dir, start_dt, end_dt)
-    if not files:
-        raise SystemExit(f"no GLM5 parquet files match the requested time range under {data_dir!r}")
+    if source == SOURCE_GLM5:
+        files = _select_files(data_dir, start_dt, end_dt)
+        if not files:
+            raise SystemExit(
+                f"no GLM5 parquet files match the requested time range under {data_dir!r}"
+            )
+    else:
+        if not os.path.isdir(data_dir):
+            raise SystemExit(f"HF dataset path not found: {data_dir!r}")
+        files = []  # not used by HF path; kept for sidecar bookkeeping
 
     if output_path is None:
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -303,14 +513,29 @@ def build_mooncake_trace(
         # mega-user when cross-user system-prompt reuse is present.
         return overlap + min(user_score, 25.0)
 
-    # First pass: walk parquets, tokenize, collect candidates with absolute
-    # timestamps. We scan more than we emit for overlap-based curation.
-    print(
-        f"[mooncake] walking {len(files)} parquet file(s) under {data_dir!r}; "
-        f"start={start_time} end={end_time or '-'} target={num_requests} rows "
-        f"mode={selection_mode} candidates={num_requests * candidate_multiplier}",
-        flush=True,
-    )
+    # First pass: walk source rows, tokenize, collect candidates with
+    # (real or placeholder) timestamps. We scan more than we emit for
+    # overlap-based curation; ``target_input_tokens > 0`` overrides the
+    # candidate cap with a token-budget stop criterion (chronological
+    # only, validated above).
+    if source == SOURCE_GLM5:
+        print(
+            f"[mooncake] walking {len(files)} parquet file(s) under {data_dir!r}; "
+            f"start={start_time} end={end_time or '-'} target={num_requests} rows "
+            f"mode={selection_mode} candidates={num_requests * candidate_multiplier} "
+            f"target_input_tokens={target_input_tokens}",
+            flush=True,
+        )
+    else:
+        group_by = lmsys_group_by if source == SOURCE_LMSYS else wildchat_group_by
+        print(
+            f"[mooncake] walking HF dataset at {data_dir!r}; "
+            f"source={source} target={num_requests} rows mode={selection_mode} "
+            f"group_by={group_by} arrival_rate={arrival_rate_per_second}/s "
+            f"candidates={num_requests * candidate_multiplier} "
+            f"target_input_tokens={target_input_tokens}",
+            flush=True,
+        )
     t0 = time.perf_counter()
     target_candidates = max(num_requests, num_requests * candidate_multiplier)
     candidates: list[dict] = []
@@ -318,96 +543,288 @@ def build_mooncake_trace(
     skipped_over_max_input = 0
     skipped_over_max_total = 0
     skipped_under_min_input = 0
-    con = duckdb.connect()
-    for filename in files:
-        if len(candidates) >= target_candidates:
-            break
-        path = os.path.join(data_dir, filename)
-        # ORDER BY timestamp so the in-window scan (and the early-exit on
-        # the first row past ``end_dt``) is correct even when the parquet
-        # row groups aren't time-sorted -- which they often aren't, since
-        # ingestion writes rows in arrival order rather than event order.
-        cursor = con.execute(
-            """
-            SELECT
-                uuid,
-                timestamp,
-                request_metadata.token_hash AS token_hash,
-                request,
-                response
-            FROM read_parquet(?)
-            WHERE request NOT LIKE '%keep-alive%'
-            ORDER BY timestamp
-            """,
-            [path],
-        )
-        while True:
-            chunk = cursor.fetchmany(2048)
-            if not chunk:
+    accumulated_input_tokens = 0  # for target_input_tokens stop criterion
+    accumulated_unique_input_tokens = 0  # for target_unique_input_tokens
+    # Block-id set for incremental "unique" accounting. A block id is
+    # the prefix-aware sha256-derived integer assigned by ``_block_ids``;
+    # the first time a digest is seen across collected candidates it
+    # gets a fresh id, and that id stays the same for any subsequent
+    # candidate carrying the same prefix block. Tracking the set here
+    # (rather than recomputing from the final ``candidates`` list)
+    # lets us early-stop on ``target_unique_input_tokens``.
+    seen_block_ids: set[int] = set()
+
+    def _token_target_reached() -> bool:
+        if target_input_tokens > 0 and accumulated_input_tokens >= target_input_tokens:
+            return True
+        if (
+            target_unique_input_tokens > 0
+            and accumulated_unique_input_tokens >= target_unique_input_tokens
+        ):
+            return True
+        return False
+
+    def _record_unique_for(block_ids: list[int], input_length: int) -> int:
+        """Return the unique-token contribution of a candidate's block list
+        and update ``seen_block_ids`` in place.
+
+        Counts ``block_size`` per new block, but caps the total at
+        ``input_length`` so short prompts (< block_size) don't inflate
+        the unique-token count beyond their actual token count."""
+        new_ids = [b for b in block_ids if b not in seen_block_ids]
+        seen_block_ids.update(block_ids)
+        return min(len(new_ids) * block_size, input_length)
+
+    if source == SOURCE_GLM5:
+        con = duckdb.connect()
+        for filename in files:
+            if len(candidates) >= target_candidates or _token_target_reached():
                 break
-            for uuid, ts, token_hash, request_raw, response_raw in chunk:
-                ts_dt = _to_naive_dt(ts)
-                if ts_dt is None:
-                    skipped_rows += 1
-                    continue
-                if ts_dt < start_dt:
-                    continue
-                if end_dt is not None and ts_dt >= end_dt:
+            path = os.path.join(data_dir, filename)
+            cursor = con.execute(
+                """
+                SELECT
+                    uuid,
+                    timestamp,
+                    request_metadata.token_hash AS token_hash,
+                    request,
+                    response
+                FROM read_parquet(?)
+                WHERE request NOT LIKE '%keep-alive%'
+                ORDER BY timestamp
+                """,
+                [path],
+            )
+            while True:
+                chunk = cursor.fetchmany(2048)
+                if not chunk:
                     break
-                body = _parse_json_maybe(request_raw)
-                if not isinstance(body, dict):
-                    skipped_rows += 1
+                for uuid, ts, token_hash, request_raw, response_raw in chunk:
+                    ts_dt = _to_naive_dt(ts)
+                    if ts_dt is None:
+                        skipped_rows += 1
+                        continue
+                    if ts_dt < start_dt:
+                        continue
+                    if end_dt is not None and ts_dt >= end_dt:
+                        break
+                    body = _parse_json_maybe(request_raw)
+                    if not isinstance(body, dict):
+                        skipped_rows += 1
+                        continue
+                    msgs = body.get("messages")
+                    if not isinstance(msgs, list) or not msgs:
+                        skipped_rows += 1
+                        continue
+                    prompt_ids = _tokenize_messages(msgs)
+                    if not prompt_ids:
+                        skipped_rows += 1
+                        continue
+                    output_length = _response_token_count(response_raw)
+                    input_length = len(prompt_ids)
+                    if min_input_tokens > 0 and input_length < min_input_tokens:
+                        skipped_under_min_input += 1
+                        continue
+                    if max_input_tokens > 0 and input_length > max_input_tokens:
+                        skipped_over_max_input += 1
+                        continue
+                    if max_total_tokens > 0 and input_length + output_length > max_total_tokens:
+                        skipped_over_max_total += 1
+                        continue
+                    response_body = _parse_json_maybe(response_raw)
+                    block_ids = _block_ids(prompt_ids)
+                    unique_input_tokens = _record_unique_for(block_ids, input_length)
+                    candidates.append(
+                        {
+                            "uuid": uuid,
+                            "ts_dt": ts_dt,
+                            "token_hash": token_hash or "",
+                            "input_length": input_length,
+                            "output_length": output_length,
+                            "unique_input_tokens": unique_input_tokens,
+                            "hash_ids": block_ids,
+                            "request": body,
+                            "response": response_body,
+                            "request_raw": request_raw,
+                            "response_raw": response_raw,
+                        }
+                    )
+                    accumulated_input_tokens += input_length
+                    accumulated_unique_input_tokens += unique_input_tokens
+                    if len(candidates) >= target_candidates or _token_target_reached():
+                        break
+                else:
                     continue
-                msgs = body.get("messages")
-                if not isinstance(msgs, list) or not msgs:
-                    skipped_rows += 1
-                    continue
-                prompt_ids = _tokenize_messages(msgs)
-                if not prompt_ids:
-                    skipped_rows += 1
-                    continue
-                output_length = _response_token_count(response_raw)
-                input_length = len(prompt_ids)
-                if min_input_tokens > 0 and input_length < min_input_tokens:
-                    skipped_under_min_input += 1
-                    continue
-                if max_input_tokens > 0 and input_length > max_input_tokens:
-                    skipped_over_max_input += 1
-                    continue
-                if max_total_tokens > 0 and input_length + output_length > max_total_tokens:
-                    skipped_over_max_total += 1
-                    continue
-                response_body = _parse_json_maybe(response_raw)
-                block_ids = _block_ids(prompt_ids)
-                candidates.append(
-                    {
-                        "uuid": uuid,
-                        "ts_dt": ts_dt,
-                        "token_hash": token_hash or "",
-                        "input_length": input_length,
-                        "output_length": output_length,
-                        "hash_ids": block_ids,
-                        "request": body,
-                        "response": response_body,
-                        "request_raw": request_raw,
-                        "response_raw": response_raw,
-                    }
+                break
+            print(
+                f"[mooncake]   {filename}: collected {len(candidates)}/{target_candidates} "
+                f"candidates ({accumulated_input_tokens:,} input tokens, "
+                f"{accumulated_unique_input_tokens:,} unique, "
+                f"{time.perf_counter() - t0:.1f}s elapsed)",
+                flush=True,
+            )
+        con.close()
+    else:
+        # ---- HF source (LMSYS / WildChat) ----
+        from datasets import Dataset, DatasetDict, load_from_disk
+
+        dsd = load_from_disk(data_dir)
+        if isinstance(dsd, DatasetDict):
+            ds = dsd["train"] if "train" in dsd else dsd[next(iter(dsd))]
+        elif isinstance(dsd, Dataset):
+            ds = dsd
+        else:
+            raise SystemExit(f"unsupported HF dataset object at {data_dir!r}: {type(dsd)!r}")
+        columns = set(ds.column_names)
+        conv_col: str | None = None
+        for k in HF_CONV_COLUMNS:
+            if k in columns:
+                conv_col = k
+                break
+        if conv_col is None:
+            raise SystemExit(
+                f"HF dataset at {data_dir!r} has none of {HF_CONV_COLUMNS}; "
+                f"available columns: {sorted(columns)}"
+            )
+        ts_col: str | None = None
+        if source == SOURCE_WILDCHAT:
+            for k in HF_TIMESTAMP_COLUMNS:
+                if k in columns:
+                    ts_col = k
+                    break
+            if ts_col is None:
+                print(
+                    f"[mooncake] note: WildChat dataset at {data_dir!r} has no "
+                    f"timestamp column from {HF_TIMESTAMP_COLUMNS}; falling back "
+                    f"to synthetic Poisson arrivals",
+                    flush=True,
                 )
-                if len(candidates) >= target_candidates:
-                    break
-            else:
-                continue
-            break
+        group_by_col = lmsys_group_by if source == SOURCE_LMSYS else wildchat_group_by
+        if group_by_col not in columns:
+            print(
+                f"[mooncake] warning: --{source}-group-by={group_by_col!r} not in "
+                f"dataset columns {sorted(columns)}; falling back to per-row key "
+                f"(token-hash-filter / top-users will degrade to chronological)",
+                flush=True,
+            )
         print(
-            f"[mooncake]   {filename}: collected {len(candidates)}/{target_candidates} candidates "
-            f"({time.perf_counter() - t0:.1f}s elapsed)",
+            f"[mooncake]   dataset has {len(ds)} rows; conv_col={conv_col!r} "
+            f"ts_col={ts_col!r} group_by={group_by_col!r}",
             flush=True,
         )
-    con.close()
+        # Placeholder timestamps preserve dataset row order under
+        # chronological selection; real (or synthetic) timestamps are
+        # assigned post-selection.
+        placeholder_origin = datetime(2026, 1, 1)
+        for row_idx, row in enumerate(ds):
+            if row_idx < skip_rows:
+                continue
+            if len(candidates) >= target_candidates or _token_target_reached():
+                break
+            raw_conv = row[conv_col]
+            msgs_full = _normalize_chat_messages(raw_conv)
+            if not msgs_full:
+                skipped_rows += 1
+                continue
+            request_msgs, response_text = _split_at_last_assistant(msgs_full)
+            if not request_msgs:
+                skipped_rows += 1
+                continue
+            prompt_ids = _tokenize_messages(request_msgs)
+            if not prompt_ids:
+                skipped_rows += 1
+                continue
+            output_length = (
+                len(enc.encode(response_text, disallowed_special=())) if response_text else 0
+            )
+            input_length = len(prompt_ids)
+            if min_input_tokens > 0 and input_length < min_input_tokens:
+                skipped_under_min_input += 1
+                continue
+            if max_input_tokens > 0 and input_length > max_input_tokens:
+                skipped_over_max_input += 1
+                continue
+            if max_total_tokens > 0 and input_length + output_length > max_total_tokens:
+                skipped_over_max_total += 1
+                continue
+            block_ids = _block_ids(prompt_ids)
+            unique_input_tokens = _record_unique_for(block_ids, input_length)
+            uuid = str(
+                row.get("conversation_id")
+                or row.get("conversation_hash")
+                or f"{source}_row{row_idx}"
+            )
+            if group_by_col in columns:
+                v = row.get(group_by_col)
+                group_key = "" if v is None else str(v)
+            else:
+                # No grouping column -> per-row key so token-hash-filter
+                # still works (degraded to chronological).
+                group_key = uuid
+            # Real timestamp from WildChat ``timestamp`` column when
+            # available; else placeholder (overwritten post-selection
+            # with Poisson). We tag rows here with whether the ts is
+            # real so the post-selection step knows which to overwrite.
+            real_ts = False
+            if ts_col is not None:
+                ts_dt = _to_naive_dt(row.get(ts_col))
+                if ts_dt is not None:
+                    real_ts = True
+            if not real_ts:
+                ts_dt = placeholder_origin + timedelta(seconds=row_idx)
+            request_body = {"messages": request_msgs}
+            response_body = (
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": response_text,
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": input_length,
+                        "completion_tokens": output_length,
+                        "total_tokens": input_length + output_length,
+                    },
+                }
+                if response_text
+                else None
+            )
+            candidates.append(
+                {
+                    "uuid": uuid,
+                    "ts_dt": ts_dt,
+                    "token_hash": group_key,
+                    "input_length": input_length,
+                    "output_length": output_length,
+                    "unique_input_tokens": unique_input_tokens,
+                    "hash_ids": block_ids,
+                    "request": request_body,
+                    "response": response_body,
+                    "request_raw": "",
+                    "response_raw": "",
+                    "real_ts": real_ts,
+                }
+            )
+            accumulated_input_tokens += input_length
+            accumulated_unique_input_tokens += unique_input_tokens
+            if (row_idx + 1) % 5000 == 0:
+                print(
+                    f"[mooncake]   scanned {row_idx + 1} rows; "
+                    f"collected {len(candidates)}/{target_candidates} candidates "
+                    f"({accumulated_input_tokens:,} input tokens, "
+                    f"{accumulated_unique_input_tokens:,} unique, "
+                    f"{time.perf_counter() - t0:.1f}s elapsed)",
+                    flush=True,
+                )
 
     if not candidates:
         raise SystemExit(
-            f"no rows matched start_time={start_time!r} end_time={end_time!r} under {data_dir!r}"
+            f"no rows matched source={source!r} data_dir={data_dir!r} "
+            f"start_time={start_time!r} end_time={end_time!r}"
         )
 
     block_freq = Counter()
@@ -420,7 +837,16 @@ def build_mooncake_trace(
 
     selected_token_hashes: list[str] = []
     if selection_mode == "chronological":
-        selected = sorted(candidates, key=lambda e: e["ts_dt"])[:num_requests]
+        # When ``target_input_tokens`` or ``target_unique_input_tokens``
+        # drove collection we already stopped at the right total; take
+        # all candidates in the natural sort order rather than
+        # truncating to ``num_requests`` (which might under-fill the
+        # token target). When neither target is set the historical
+        # truncate-to-num_requests behavior is preserved.
+        if target_input_tokens > 0 or target_unique_input_tokens > 0:
+            selected = sorted(candidates, key=lambda e: e["ts_dt"])
+        else:
+            selected = sorted(candidates, key=lambda e: e["ts_dt"])[:num_requests]
     elif selection_mode == "token-hash-filter":
         # Pick active users, then preserve original timestamp order. This
         # curates for intra-user KV reuse without fabricating request order or
@@ -441,6 +867,37 @@ def build_mooncake_trace(
     if not selected:
         raise SystemExit("selection produced no rows")
 
+    # Post-selection Poisson timestamp synthesis for HF sources without
+    # real per-row timestamps. LMSYS always synthesizes (no source ts);
+    # WildChat synthesizes only for rows missing a parseable timestamp
+    # *unless* ``force_synthetic_arrivals`` is set, in which case the
+    # real timestamps are dropped and Poisson is used unconditionally.
+    # The placeholder ``ts_dt`` (datetime(2026,1,1) + row-index seconds)
+    # gets overwritten in selection order so earlier-selected rows get
+    # earlier wall times.
+    if force_synthetic_arrivals and source in (SOURCE_LMSYS, SOURCE_WILDCHAT):
+        # Override per-row ``real_ts`` so the loop below rewrites every
+        # selected row's timestamp from the Poisson process. Also clear
+        # the placeholder ts_dt to make the override obvious in any
+        # debugger output.
+        for c in selected:
+            c["real_ts"] = False
+    needs_synthetic_ts = source in (SOURCE_LMSYS, SOURCE_WILDCHAT) and any(
+        not c.get("real_ts", False) for c in selected
+    )
+    if needs_synthetic_ts:
+        rng = random.Random(arrival_seed)
+        synthetic_base = datetime(2026, 1, 1)
+        elapsed_ms = 0.0
+        for c in selected:
+            if not c.get("real_ts", False):
+                c["ts_dt"] = synthetic_base + timedelta(milliseconds=elapsed_ms)
+                gap_s = rng.expovariate(arrival_rate_per_second)
+                elapsed_ms += gap_s * 1000.0
+        # Re-sort after overwriting in case any real-ts rows were
+        # interleaved (defensive; shouldn't happen with current sources).
+        selected.sort(key=lambda e: e["ts_dt"])
+
     base_ts = selected[0]["ts_dt"]
     original_duration_ms = int((selected[-1]["ts_dt"] - base_ts).total_seconds() * 1000)
     effective_scale = (
@@ -451,8 +908,16 @@ def build_mooncake_trace(
 
     total_input = 0
     total_output = 0
+    total_unique_input_tokens = 0
     total_blocks = 0
     selected_blocks: set[int] = set()
+    # Re-accumulate unique tokens in EMIT order: per-candidate
+    # ``unique_input_tokens`` was computed in COLLECTION order, which
+    # only matches the emit set when chronological selection picks all
+    # collected rows. Recomputing here keeps the JSONL row's
+    # ``unique_input_tokens`` and the sidecar aggregate canonical for
+    # whatever selection path actually ran.
+    emit_seen_block_ids: set[int] = set()
     token_hash_counts = Counter(c.get("token_hash") or "" for c in selected)
     token_hash_tokens = Counter()
     tmp_path = resolved_output_path + ".tmp"
@@ -460,11 +925,15 @@ def build_mooncake_trace(
         for idx, c in enumerate(selected):
             relative_ms = int((c["ts_dt"] - base_ts).total_seconds() * 1000)
             delta_ms = int(relative_ms * effective_scale)
-            request_id = f"glm5_{base_ts.strftime('%Y%m%dT%H%M%S')}_{idx:06d}"
+            request_id = f"{source}_{base_ts.strftime('%Y%m%dT%H%M%S')}_{idx:06d}"
+            new_block_count = sum(1 for b in c["hash_ids"] if b not in emit_seen_block_ids)
+            unique_input_tokens = min(new_block_count * block_size, c["input_length"])
+            emit_seen_block_ids.update(c["hash_ids"])
             row = {
                 "timestamp": delta_ms,
                 "input_length": c["input_length"],
                 "output_length": c["output_length"],
+                "unique_input_tokens": unique_input_tokens,
                 "hash_ids": c["hash_ids"],
             }
             if include_bodies or include_raw_bodies:
@@ -486,6 +955,7 @@ def build_mooncake_trace(
             f.write(json.dumps(row, separators=(",", ":")) + "\n")
             total_input += c["input_length"]
             total_output += c["output_length"]
+            total_unique_input_tokens += unique_input_tokens
             total_blocks += len(c["hash_ids"])
             selected_blocks.update(c["hash_ids"])
             token_hash_tokens[c.get("token_hash") or ""] += c["input_length"]
@@ -493,6 +963,19 @@ def build_mooncake_trace(
 
     sidecar = {
         "output_path": resolved_output_path,
+        "source": source,
+        "data_dir": data_dir,
+        "lmsys_group_by": lmsys_group_by if source == SOURCE_LMSYS else None,
+        "wildchat_group_by": wildchat_group_by if source == SOURCE_WILDCHAT else None,
+        "arrival_rate_per_second": (
+            arrival_rate_per_second if source in (SOURCE_LMSYS, SOURCE_WILDCHAT) else None
+        ),
+        "arrival_seed": (arrival_seed if source in (SOURCE_LMSYS, SOURCE_WILDCHAT) else None),
+        "synthetic_arrivals_used": needs_synthetic_ts,
+        "force_synthetic_arrivals": force_synthetic_arrivals,
+        "skip_rows": skip_rows or None,
+        "target_input_tokens": target_input_tokens or None,
+        "target_unique_input_tokens": target_unique_input_tokens or None,
         "rows": len(selected),
         "candidate_rows": len(candidates),
         "skipped_rows": skipped_rows,
@@ -510,8 +993,8 @@ def build_mooncake_trace(
             "system/harness prefixes by block-id frequency while still emitting "
             "selected rows in source timestamp order."
         ),
-        "start_time": start_time,
-        "end_time": end_time,
+        "start_time": start_time if source == SOURCE_GLM5 else None,
+        "end_time": end_time if source == SOURCE_GLM5 else None,
         "base_timestamp": base_ts.isoformat(),
         "original_duration_ms": original_duration_ms,
         "scaled_duration_ms": int(original_duration_ms * effective_scale),
@@ -524,6 +1007,10 @@ def build_mooncake_trace(
         ),
         "total_input_tokens": total_input,
         "total_output_tokens": total_output,
+        "total_unique_input_tokens": total_unique_input_tokens,
+        "unique_token_share_pct": (
+            100.0 * total_unique_input_tokens / total_input if total_input else 0.0
+        ),
         "include_bodies": include_bodies,
         "include_raw_bodies": include_raw_bodies,
         "context_filters": {
@@ -569,6 +1056,8 @@ def build_mooncake_trace(
         "block_reuse_pct": sidecar["block_reuse_pct"],
         "total_input_tokens": total_input,
         "total_output_tokens": total_output,
+        "total_unique_input_tokens": total_unique_input_tokens,
+        "unique_token_share_pct": sidecar["unique_token_share_pct"],
         "original_duration_ms": original_duration_ms,
         "scaled_duration_ms": sidecar["scaled_duration_ms"],
         "time_scale": effective_scale,
@@ -576,8 +1065,11 @@ def build_mooncake_trace(
     }
     print(
         f"[mooncake] wrote {summary['rows']} rows to {resolved_output_path} "
-        f"({summary['total_input_tokens']:,} input / {summary['total_output_tokens']:,} "
-        f"output tokens, {summary['unique_blocks']:,} unique {block_size}-token blocks, "
+        f"({summary['total_input_tokens']:,} input / "
+        f"{summary['total_output_tokens']:,} output tokens, "
+        f"{summary['total_unique_input_tokens']:,} unique input "
+        f"({summary['unique_token_share_pct']:.1f}% of input), "
+        f"{summary['unique_blocks']:,} unique {block_size}-token blocks, "
         f"{summary['elapsed_seconds']:.1f}s)"
     )
     return summary
@@ -655,6 +1147,65 @@ def _select_files(data_dir, start_dt, end_dt):
     return selected
 
 
+def _normalize_chat_messages(raw) -> list[dict]:
+    """Normalize a HF row's conversation column into a chat-completions
+    ``messages`` list. Mirrors ``proxy.workload_core._hf_normalize_messages``
+    so traces built here replay identically to live HF reads.
+
+    Drops empty messages; coerces unrecognized roles to ``user``.
+    Accepts JSON-string columns (parses them) and lists of dicts/strings.
+    """
+    import json as _json
+
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw)
+        except _json.JSONDecodeError:
+            return []
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for msg in raw:
+        if isinstance(msg, str):
+            text = msg
+            role = "user"
+        elif isinstance(msg, dict):
+            role = str(msg.get("role") or "user").lower()
+            text = _content_to_str(msg.get("content"))
+        else:
+            continue
+        if not text:
+            continue
+        if role not in _VALID_ROLES:
+            role = "user"
+        out.append({"role": role, "content": text})
+    return out
+
+
+def _split_at_last_assistant(msgs: list[dict]) -> tuple[list[dict], str]:
+    """Split a normalized message list at its last ``assistant`` turn.
+
+    Returns ``(request_messages, response_text)``. The request is
+    everything *before* the last assistant turn (so ``messages`` ends
+    with a ``user`` or ``system`` turn, ready for chat-completions).
+    The response is the assistant's content (used for ``output_length``
+    and the embedded synthetic response body).
+
+    If there's no assistant turn, returns the full conversation as the
+    request and an empty response. If the only assistant turn is the
+    very first message, also returns the full conversation -- an empty
+    "before" prefix isn't replayable.
+    """
+    last_assistant_idx: int | None = None
+    for i in range(len(msgs) - 1, -1, -1):
+        if msgs[i].get("role") == "assistant":
+            last_assistant_idx = i
+            break
+    if last_assistant_idx is None or last_assistant_idx == 0:
+        return msgs, ""
+    return msgs[:last_assistant_idx], msgs[last_assistant_idx].get("content", "")
+
+
 def _content_to_str(content) -> str:
     """Flatten an OpenAI ``message.content`` value to a plain string.
 
@@ -680,12 +1231,13 @@ def _content_to_str(content) -> str:
 
 @app.local_entrypoint()
 def main(
-    start_time: str,
     num_requests: int,
+    source: str = SOURCE_GLM5,
+    start_time: str = "",
     output_path: str = "",
     end_time: str = "",
     block_size: int = DEFAULT_BLOCK_SIZE,
-    data_dir: str = DEFAULT_DATA_DIR,
+    data_dir: str = "",
     include_bodies: bool = False,
     include_raw_bodies: bool = False,
     time_scale: float = 1.0,
@@ -697,17 +1249,35 @@ def main(
     max_total_tokens: int = 0,
     min_input_tokens: int = 0,
     output_sidecar_path: str = "",
+    lmsys_group_by: str = "model",
+    wildchat_group_by: str = "model",
+    arrival_rate_per_second: float = 1.0,
+    arrival_seed: int = 0,
+    target_input_tokens: int = 0,
+    target_unique_input_tokens: int = 0,
+    force_synthetic_arrivals: bool = False,
+    skip_rows: int = 0,
 ):
     """CLI wrapper for ``build_mooncake_trace``. Empty-string sentinels map
     to ``None`` because Modal local_entrypoints don't accept ``Optional``
-    natively."""
+    natively. ``--source glm5`` (default) keeps existing GLM5 behavior;
+    ``--source lmsys`` and ``--source wildchat`` read HF datasets and
+    synthesize Poisson arrivals where needed.
+
+    ``--target-unique-input-tokens`` standardizes traces by post-cache-reuse
+    prefill work (avoids double-counting cached prefixes in multi-turn
+    conversations); ``--force-synthetic-arrivals`` overrides any real
+    timestamp column on HF sources so the trace's arrival rate matches
+    ``--arrival-rate-per-second`` (useful for WildChat, whose real
+    timestamps span days)."""
     build_mooncake_trace.remote(
-        start_time=start_time,
         num_requests=num_requests,
+        source=source,
+        start_time=start_time or None,
         output_path=output_path or None,
         end_time=end_time or None,
         block_size=block_size,
-        data_dir=data_dir,
+        data_dir=data_dir or None,
         include_bodies=include_bodies,
         include_raw_bodies=include_raw_bodies,
         time_scale=time_scale,
@@ -719,4 +1289,12 @@ def main(
         max_total_tokens=max_total_tokens,
         min_input_tokens=min_input_tokens,
         output_sidecar_path=output_sidecar_path or None,
+        lmsys_group_by=lmsys_group_by,
+        wildchat_group_by=wildchat_group_by,
+        arrival_rate_per_second=arrival_rate_per_second,
+        arrival_seed=arrival_seed,
+        target_input_tokens=target_input_tokens,
+        target_unique_input_tokens=target_unique_input_tokens,
+        force_synthetic_arrivals=force_synthetic_arrivals,
+        skip_rows=skip_rows,
     )

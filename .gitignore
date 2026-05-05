@@ -28,3 +28,14 @@ uv.lock
 
 # data
 data/
+
+# Downloaded experiment results (large JSONL traces + per-request results).
+# Manifests under results/policy_matrix_sweep/ are small and worth keeping;
+# the bulk is in proxy_traces/ and workload_runs/ which are re-downloadable
+# from the GORGO-bench-results Modal volume.
+results/proxy_traces/
+results/workload_runs/
+results/*.png
+
+# Temp traces pulled for ad-hoc analysis
+/tmp/gorgo_*

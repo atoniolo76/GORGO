@@ -1,0 +1,599 @@
+{
+  "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M",
+  "trace_path": "/data/mooncake_traces/bench/lmsys_chronological_100M.jsonl",
+  "start_at_wall_time": "2026-05-04T21:04:39.900865Z",
+  "policies": [
+    "random",
+    "least-load",
+    "prefix-cache",
+    "gorgo-static",
+    "gorgo-autotune",
+    "gorgo-hillclimb"
+  ],
+  "results": [
+    {
+      "policy": "random",
+      "label": "random",
+      "proxy_url": "https://ta-01kqtcvc5g3dbsx80yxd6y6d1s-8000-c70h5ew05fzz2xtuoellt44k7.w.modal.host",
+      "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_random",
+      "trace_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_random",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "cancelled",
+        "phase": "cancelled",
+        "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_random",
+        "started_at": "2026-05-04T21:04:11.941011Z",
+        "finished_at": "2026-05-04T21:23:48.718178Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/bench/lmsys_chronological_100M.jsonl",
+          "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_random",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": 81343,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/bench_lmsys_chronological_000_lmsys_chronological_100M_random.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-04T21:04:39.900865Z"
+        },
+        "stats": null,
+        "output_path": null,
+        "error": "cancelled",
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_random",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-04T21:04:11.922426Z",
+          "stopped_at": "2026-05-04T21:24:12.575123Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_random/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_random/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_random/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 9386,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 111,
+          "request_events": 9386,
+          "first_event_ts": "2026-05-04T21:04:38.064815Z",
+          "last_event_ts": "2026-05-04T21:23:28.526836Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_random/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_random/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_random/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 9386,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 9386,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 3.837724360000003
+      },
+      "elapsed_seconds": 1202.1231019496918
+    },
+    {
+      "policy": "least-load",
+      "label": "least-load",
+      "proxy_url": "https://ta-01kqtcvcbcwt8xq5mwsqzsr895-8000-jl75cvs95c5qvlnjqo3j8fbwf.w.modal.host",
+      "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_least-load",
+      "trace_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_least-load",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "cancelled",
+        "phase": "cancelled",
+        "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_least-load",
+        "started_at": "2026-05-04T21:04:11.679392Z",
+        "finished_at": "2026-05-04T21:23:39.053583Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/bench/lmsys_chronological_100M.jsonl",
+          "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_least-load",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": 81343,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/bench_lmsys_chronological_000_lmsys_chronological_100M_least-load.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-04T21:04:39.900865Z"
+        },
+        "stats": null,
+        "output_path": null,
+        "error": "cancelled",
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_least-load",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-04T21:04:11.666174Z",
+          "stopped_at": "2026-05-04T21:24:12.218479Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_least-load/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_least-load/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_least-load/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 8210,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 111,
+          "request_events": 8210,
+          "first_event_ts": "2026-05-04T21:04:38.386408Z",
+          "last_event_ts": "2026-05-04T21:23:16.727989Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_least-load/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_least-load/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_least-load/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 8210,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 8210,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 3.268141180999997
+      },
+      "elapsed_seconds": 1202.4074091911316
+    },
+    {
+      "policy": "prefix-cache",
+      "label": "prefix-cache",
+      "proxy_url": "https://ta-01kqtcvd968en1g9mde1gnq7cf-8000-071lxg6pm3heh08r6lw5risye.w.modal.host",
+      "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_prefix-cache",
+      "trace_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_prefix-cache",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "cancelled",
+        "phase": "cancelled",
+        "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_prefix-cache",
+        "started_at": "2026-05-04T21:04:11.990815Z",
+        "finished_at": "2026-05-04T21:23:43.798669Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/bench/lmsys_chronological_100M.jsonl",
+          "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_prefix-cache",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": 81343,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/bench_lmsys_chronological_000_lmsys_chronological_100M_prefix-cache.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-04T21:04:39.900865Z"
+        },
+        "stats": null,
+        "output_path": null,
+        "error": "cancelled",
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_prefix-cache",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-04T21:04:11.956750Z",
+          "stopped_at": "2026-05-04T21:24:12.877451Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_prefix-cache/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_prefix-cache/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_prefix-cache/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 9537,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 111,
+          "request_events": 9537,
+          "first_event_ts": "2026-05-04T21:04:38.446099Z",
+          "last_event_ts": "2026-05-04T21:23:23.022498Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_prefix-cache/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_prefix-cache/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_prefix-cache/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 9537,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 9537,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 3.468984139
+      },
+      "elapsed_seconds": 1205.1491804122925
+    },
+    {
+      "policy": "gorgo",
+      "label": "gorgo-static",
+      "proxy_url": "https://ta-01kqtcvcnnk9skhmv175wrdpza-8000-heu2ijlgtbjbms6ly0gsaggoy.w.modal.host",
+      "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-static",
+      "trace_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-static",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "cancelled",
+        "phase": "cancelled",
+        "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-static",
+        "started_at": "2026-05-04T21:04:11.759295Z",
+        "finished_at": "2026-05-04T21:23:29.548973Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/bench/lmsys_chronological_100M.jsonl",
+          "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-static",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": 81343,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-static.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-04T21:04:39.900865Z"
+        },
+        "stats": null,
+        "output_path": null,
+        "error": "cancelled",
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-static",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-04T21:04:11.738535Z",
+          "stopped_at": "2026-05-04T21:24:12.434184Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-static/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-static/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-static/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 8250,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 111,
+          "request_events": 8250,
+          "first_event_ts": "2026-05-04T21:04:38.806131Z",
+          "last_event_ts": "2026-05-04T21:23:10.374967Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-static/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-static/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-static/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 8250,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 8250,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 2.9076754259999973
+      },
+      "elapsed_seconds": 1205.3546578884125
+    },
+    {
+      "policy": "gorgo",
+      "label": "gorgo-autotune",
+      "proxy_url": "https://ta-01kqtcvcwdhf29js7w8sgzjhee-8000-70c5fikse2br1s8omsrx63ach.w.modal.host",
+      "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-autotune",
+      "trace_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-autotune",
+      "auto_tune": {
+        "config": {
+          "enabled": true,
+          "window_size": 64,
+          "hop_size": 16,
+          "apply": true,
+          "mode": "fit"
+        },
+        "hyperparameters": {
+          "defaults": {
+            "t_prefill": 0.0012540913840926227,
+            "queued_tokens_weight": 0.0162920314921875
+          },
+          "per_target": {
+            "https://ta-01kqtcpjxxvppzdtwrbmgp7884-8000-kuyh3owu5280n7fasbtmlurwr.w.modal.host": {
+              "t_prefill": 0.008715741871703934,
+              "queued_tokens_weight": 0.01617246071875
+            },
+            "https://ta-01kqtcpkbqwaqfazhq9hr52rs9-8000-qb1pkpxd92fb1lsshssu5fy5l.w.modal.host": {
+              "t_prefill": 0.0012540913840926227,
+              "queued_tokens_weight": 0.017099559140624998
+            },
+            "https://ta-01kqtcpqffcg7pas0htyvzq6s0-8000-2uqwf6by1cvng6oj1lzti0ers.w.modal.host": {
+              "t_prefill": 0.0,
+              "queued_tokens_weight": 0.0170319095390625
+            }
+          }
+        }
+      },
+      "workload": {
+        "running": false,
+        "status": "cancelled",
+        "phase": "cancelled",
+        "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-autotune",
+        "started_at": "2026-05-04T21:04:11.920075Z",
+        "finished_at": "2026-05-04T21:23:16.735237Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/bench/lmsys_chronological_100M.jsonl",
+          "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-autotune",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": 81343,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-autotune.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-04T21:04:39.900865Z"
+        },
+        "stats": null,
+        "output_path": null,
+        "error": "cancelled",
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-autotune",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-04T21:04:11.890318Z",
+          "stopped_at": "2026-05-04T21:24:12.951623Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-autotune/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-autotune/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-autotune/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 6861,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 108,
+          "request_events": 6861,
+          "first_event_ts": "2026-05-04T21:04:39.348016Z",
+          "last_event_ts": "2026-05-04T21:23:03.140106Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-autotune/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-autotune/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-autotune/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 6861,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 6861,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 2.5010784239999992
+      },
+      "elapsed_seconds": 1205.6081454753876
+    },
+    {
+      "policy": "gorgo",
+      "label": "gorgo-hillclimb",
+      "proxy_url": "https://ta-01kqtcvd4asag2tp5jg8ae35pm-8000-bks1504trf218fbznwvrd6em4.w.modal.host",
+      "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-hillclimb",
+      "trace_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-hillclimb",
+      "auto_tune": {
+        "config": {
+          "enabled": true,
+          "window_size": 64,
+          "hop_size": 16,
+          "apply": true,
+          "mode": "online-es",
+          "objective_metric": "neg_p95_ttft"
+        },
+        "hyperparameters": {
+          "defaults": {
+            "t_prefill": 0.15786817422576088,
+            "queued_tokens_weight": 0.01586197499053734
+          },
+          "per_target": {}
+        }
+      },
+      "workload": {
+        "running": false,
+        "status": "cancelled",
+        "phase": "cancelled",
+        "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-hillclimb",
+        "started_at": "2026-05-04T21:04:11.941441Z",
+        "finished_at": "2026-05-04T21:23:30.311587Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/bench/lmsys_chronological_100M.jsonl",
+          "run_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-hillclimb",
+          "concurrency": 32,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": 81343,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-hillclimb.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-04T21:04:39.900865Z"
+        },
+        "stats": null,
+        "output_path": null,
+        "error": "cancelled",
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-hillclimb",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-04T21:04:11.906780Z",
+          "stopped_at": "2026-05-04T21:24:16.777643Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-hillclimb/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-hillclimb/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-hillclimb/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 7945,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 108,
+          "request_events": 7945,
+          "first_event_ts": "2026-05-04T21:04:40.348149Z",
+          "last_event_ts": "2026-05-04T21:23:07.796067Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-hillclimb/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-hillclimb/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/bench_lmsys_chronological_000_lmsys_chronological_100M_gorgo-hillclimb/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 7945,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 7945,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 1.5138491140000028
+      },
+      "elapsed_seconds": 1210.1414499282837
+    }
+  ]
+}

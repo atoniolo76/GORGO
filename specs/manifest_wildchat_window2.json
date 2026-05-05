@@ -1,0 +1,10 @@
+{
+  "_note": "WildChat window 2: next 20520 rows (rows 20520-41039). 30 min at 11.4 req/s synthetic Poisson.",
+  "top": [
+    {
+      "result": {
+        "output_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/wildchat_window2.jsonl"
+      }
+    }
+  ]
+}

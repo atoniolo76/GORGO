@@ -181,82 +181,6 @@ ONLINE_SCORE_FUNCTIONS: dict[str, Callable[[list[dict]], float]] = {
 SUPPORTED_AUTO_TUNE_MODES: frozenset[str] = frozenset({"fit", "online-es"})
 
 
-class HillClimbTuner:
-    """Coordinate hill-climb with shrinking multiplicative step."""
-
-    name = "coordinate-hill-climb-shrink"
-
-    def __init__(
-        self,
-        initial_params: dict[str, float],
-        ranges: dict[str, tuple[float, float]],
-        *,
-        initial_step: float = 0.5,
-        min_step: float = 0.05,
-        tol: float = 0.005,
-        max_steps: int = 16,
-    ) -> None:
-        self.ranges = ranges
-        self.best_params: dict[str, float] = {
-            k: self._clamp(k, float(initial_params.get(k, sum(ranges[k]) / 2))) for k in ranges
-        }
-        self.best_score: float | None = None
-        self.step = float(initial_step)
-        self.min_step = float(min_step)
-        self.tol = float(tol)
-        self.max_steps = int(max_steps)
-        self.evaluated_after_baseline = 0
-        self._sweep: list[tuple[str, int]] = []
-        self._sweep_improved = False
-        self._build_sweep()
-
-    def _clamp(self, key: str, v: float) -> float:
-        lo, hi = self.ranges[key]
-        return max(lo, min(hi, v))
-
-    def _build_sweep(self) -> None:
-        self._sweep = [(key, sign) for key in self.ranges for sign in (+1, -1)]
-        self._sweep_improved = False
-
-    @property
-    def state(self) -> dict:
-        return {"step": self.step, "sweep_improved": self._sweep_improved}
-
-    def propose(self) -> dict[str, float] | None:
-        if self.best_score is None:
-            return dict(self.best_params)
-        if self.evaluated_after_baseline >= self.max_steps:
-            return None
-        while True:
-            while self._sweep:
-                key, sign = self._sweep.pop(0)
-                factor = 1.0 + sign * self.step
-                candidate_val = self._clamp(key, self.best_params[key] * factor)
-                if abs(candidate_val - self.best_params[key]) < 1e-12:
-                    continue
-                cand = dict(self.best_params)
-                cand[key] = candidate_val
-                return cand
-            if not self._sweep_improved:
-                self.step *= 0.5
-                if self.step < self.min_step:
-                    return None
-            self._build_sweep()
-
-    def report(self, candidate: dict[str, float], score: float) -> bool:
-        if self.best_score is None:
-            self.best_score = score
-            self.best_params = dict(candidate)
-            return True
-        self.evaluated_after_baseline += 1
-        if score > self.best_score * (1.0 + self.tol):
-            self.best_score = score
-            self.best_params = dict(candidate)
-            self._sweep_improved = True
-            return True
-        return False
-
-
 class GaussianESTuner:
     """(1+1)-Evolution Strategy with Rechenberg's 1/5 success rule."""
 
@@ -342,42 +266,25 @@ class GaussianESTuner:
         }
 
 
-TunerLike = HillClimbTuner | GaussianESTuner
-
-
 def build_tuner(
-    algorithm: str,
     *,
     initial_params: dict[str, float],
     ranges: dict[str, tuple[float, float]],
     max_steps: int,
     relative_tolerance: float,
-    initial_step: float,
-    min_step: float,
     sigma: float,
     sigma_min: float,
     seed: int | None,
-) -> TunerLike:
-    if algorithm == "hill-climb":
-        return HillClimbTuner(
-            initial_params=initial_params,
-            ranges=ranges,
-            initial_step=initial_step,
-            min_step=min_step,
-            tol=relative_tolerance,
-            max_steps=max_steps,
-        )
-    if algorithm == "gaussian-es":
-        return GaussianESTuner(
-            initial_params=initial_params,
-            ranges=ranges,
-            sigma=sigma,
-            sigma_min=sigma_min,
-            tol=relative_tolerance,
-            max_steps=max_steps,
-            seed=seed,
-        )
-    raise ValueError(f"unknown algorithm {algorithm!r}; choices: 'hill-climb', 'gaussian-es'")
+) -> GaussianESTuner:
+    return GaussianESTuner(
+        initial_params=initial_params,
+        ranges=ranges,
+        sigma=sigma,
+        sigma_min=sigma_min,
+        tol=relative_tolerance,
+        max_steps=max_steps,
+        seed=seed,
+    )
 
 
 def build_summary(
@@ -963,6 +870,64 @@ def proxy(registry_key: str = ""):
             "fallback_rate": (fallback / total) if total else 0.0,
             "single_replica_count": single_replica,
             "by_effective_policy": by_eff,
+        }
+
+    def _compute_workload_stats_from_trace() -> dict:
+        """Compute TTFT/E2E stats from the in-memory request trace buffer.
+
+        Called on workload cancellation or failure so the manifest gets
+        partial stats instead of ``null``. Mirrors the summary shape
+        that ``run_replay_async`` produces on success, minus fields
+        that require the workload's internal bookkeeping (throughput,
+        progress log, per-request saved JSON).
+        """
+        ok_rows = [
+            r for r in request_trace_events if r.get("kind") == "request" and r.get("status") == 200
+        ]
+        fail_rows = [
+            r
+            for r in request_trace_events
+            if r.get("kind") == "request" and r.get("status") and r["status"] != 200
+        ]
+        n = len(ok_rows) + len(fail_rows)
+        ttfts = [r["ttft_ns"] / NS_PER_S for r in ok_rows if r.get("ttft_ns")]
+        e2es = [r["total_ns"] / NS_PER_S for r in ok_rows if r.get("total_ns")]
+
+        def _pct(xs, p):
+            if not xs:
+                return 0.0
+            s = sorted(xs)
+            return s[max(0, min(len(s) - 1, int(round(p * (len(s) - 1)))))]
+
+        def _stat_block(xs):
+            if not xs:
+                return {
+                    "avg": 0.0,
+                    "min": 0.0,
+                    "max": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "n": 0,
+                }
+            return {
+                "avg": sum(xs) / len(xs),
+                "min": min(xs),
+                "max": max(xs),
+                "p50": _pct(xs, 0.50),
+                "p95": _pct(xs, 0.95),
+                "p99": _pct(xs, 0.99),
+                "n": len(xs),
+            }
+
+        return {
+            "partial": True,
+            "n": n,
+            "ok": len(ok_rows),
+            "fail": len(fail_rows),
+            "success_rate": len(ok_rows) / n if n else 0.0,
+            "ttft_seconds": _stat_block(ttfts),
+            "request_e2e_seconds": _stat_block(e2es),
         }
 
     def _save_trace_to_volume() -> dict:
@@ -1824,9 +1789,7 @@ def proxy(registry_key: str = ""):
         metric = _parse_optional_str(data, "metric", "output_throughput")
         if metric not in SCORE_FUNCTIONS:
             raise ValueError(f"unknown metric {metric!r}; choices: {sorted(SCORE_FUNCTIONS)}")
-        algorithm = _parse_optional_str(data, "algorithm", "hill-climb")
-        if algorithm not in ("hill-climb", "gaussian-es"):
-            raise ValueError("algorithm must be 'hill-climb' or 'gaussian-es'")
+        algorithm = _parse_optional_str(data, "algorithm", "gaussian-es")
         ranges = validated_ranges(
             {
                 "t_prefill": (
@@ -1854,10 +1817,7 @@ def proxy(registry_key: str = ""):
             "max_tokens": (_parse_int(data, "max_tokens", 0) or None),
             "max_input_tokens": _parse_int(data, "max_input_tokens", 0),
             "metric": metric,
-            "algorithm": algorithm,
             "max_steps": _parse_int(data, "max_steps", 16),
-            "initial_step": _parse_float(data, "initial_step", 0.5),
-            "min_step": _parse_float(data, "min_step", 0.05),
             "sigma": _parse_float(data, "sigma", 0.5),
             "sigma_min": _parse_float(data, "sigma_min", 0.02),
             "seed": (_parse_int(data, "seed", -1)),
@@ -1904,13 +1864,10 @@ def proxy(registry_key: str = ""):
         active_policy = state["policy"]
         current_hp = dict((state["hyperparameters"] or {}).get("defaults") or {})
         tuner = build_tuner(
-            config["algorithm"],
             initial_params=current_hp,
             ranges=config["ranges"],
             max_steps=config["max_steps"],
             relative_tolerance=config["relative_tolerance"],
-            initial_step=config["initial_step"],
-            min_step=config["min_step"],
             sigma=config["sigma"],
             sigma_min=config["sigma_min"],
             seed=None if config["seed"] < 0 else config["seed"],
@@ -2120,6 +2077,7 @@ def proxy(registry_key: str = ""):
             "stream": _parse_optional_bool(data, "stream"),
             "max_tokens": (_parse_int(data, "max_tokens", 0) or None),
             "max_input_tokens": _parse_int(data, "max_input_tokens", 0),
+            "num_requests": (_parse_int(data, "num_requests", 0) or None),
             "arrival_mode": _parse_optional_str(data, "arrival_mode", "open-loop"),
             "time_scale": _parse_float(data, "time_scale", 1.0),
             "output_path": _parse_optional_str(data, "output_path", ""),
@@ -2158,6 +2116,7 @@ def proxy(registry_key: str = ""):
                 stream=config["stream"],
                 max_tokens=config["max_tokens"],
                 max_input_tokens=config["max_input_tokens"],
+                num_requests=config.get("num_requests"),
                 output_path=output_path,
                 save_per_request=config["save_per_request"],
                 run_id=run_id,
@@ -2177,14 +2136,20 @@ def proxy(registry_key: str = ""):
             wr["phase"] = "cancelled"
             wr["finished_at"] = finished_at.isoformat().replace("+00:00", "Z")
             wr["error"] = "cancelled"
-            _log(f"workload {run_id} cancelled")
+            wr["stats"] = _compute_workload_stats_from_trace()
+            _log(
+                f"workload {run_id} cancelled (partial stats from {wr['stats'].get('n', 0)} trace events)"
+            )
         except Exception as e:
             finished_at = datetime.now(timezone.utc)
             wr["status"] = "failed"
             wr["phase"] = "failed"
             wr["finished_at"] = finished_at.isoformat().replace("+00:00", "Z")
             wr["error"] = f"{type(e).__name__}: {e}"
-            _log(f"workload {run_id} failed: {wr['error']}")
+            wr["stats"] = _compute_workload_stats_from_trace()
+            _log(
+                f"workload {run_id} failed: {wr['error']} (partial stats from {wr['stats'].get('n', 0)} trace events)"
+            )
         finally:
             wr["running"] = False
             wr["task"] = None

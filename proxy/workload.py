@@ -155,15 +155,15 @@ def _approx_input_tokens(messages) -> int:
         if isinstance(msg, dict):
             content = msg.get("content")
             if isinstance(content, str):
-                total += len(enc.encode(content))
+                total += len(enc.encode(content, disallowed_special=()))
             elif isinstance(content, list):
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "text":
                         text = block.get("text") or ""
                         if text:
-                            total += len(enc.encode(text))
+                            total += len(enc.encode(text, disallowed_special=()))
         elif isinstance(msg, str):
-            total += len(enc.encode(msg))
+            total += len(enc.encode(msg, disallowed_special=()))
     return total
 
 

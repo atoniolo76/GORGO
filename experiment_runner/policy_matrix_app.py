@@ -14,6 +14,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -252,8 +253,21 @@ def _start_at_wall_time(spec: dict) -> str:
 
 
 def _with_bodies_path(path: str) -> str:
+    """Resolve the body-included variant of a trace path.
+
+    Legacy sweep traces stored body-free and body-included variants in
+    sibling directories (``<dir>/foo.jsonl`` + ``<dir>/with_bodies/foo.jsonl``).
+    Newer bench traces are stored flat (no ``with_bodies/`` nesting) with
+    bodies already included. This function handles both layouts:
+      * path already under ``with_bodies/`` -> return as-is
+      * path ends with ``.jsonl`` and is NOT under ``with_bodies/`` ->
+        return as-is (assumed to be a flat bench trace with bodies inline)
+      * otherwise -> inject ``with_bodies/`` (legacy compat)
+    """
     p = Path(path)
     if p.parent.name == "with_bodies":
+        return path
+    if p.suffix == ".jsonl":
         return path
     return str(p.parent / "with_bodies" / p.name)
 
@@ -292,32 +306,49 @@ def _homogeneity_config(spec: dict) -> dict:
 
     Knobs:
       ``enabled``: master switch (default ``False``).
-      ``warmup_requests_per_replica``: per-replica request count.
-        First ``warmup_requests`` of those are discarded as warm-up;
-        the remainder are kept for stats.
+      ``warmup_requests_per_replica``: per-replica request count
+        (default ``16``). First ``warmup_requests`` are discarded as
+        warm-up; the remainder are kept for stats. Defaults sized so
+        the post-warmup tail (12 samples by default) is large enough
+        for a stable P50 -- earlier defaults of 6 total / 4 measured
+        gave wide P50 confidence intervals and a meaningless P95.
       ``warmup_requests``: how many of the first per-replica requests
-        to discard. Must be < ``warmup_requests_per_replica``. The
-        engine's own ``wait_ready`` already issues one warmup chat
+        to discard (default ``4``). Must be < ``warmup_requests_per_replica``.
+        The engine's own ``wait_ready`` already issues one warmup chat
         before declaring ready, but the *first* probe here pays
-        TCP/TLS handshake on the controller -> tunnel route, so a
-        discard >= 1 is recommended; the default 2 leaves a safety
-        margin for any first-batch CUDA-graph capture SGLang does.
-      ``max_tokens``: cap on output tokens per probe (small to keep
-        the check fast; we only care about TTFT).
+        TCP/TLS handshake on the controller -> tunnel route, and the
+        first batch at a given prompt shape pays one-time CUDA-graph
+        capture; a discard of 4 covers both comfortably.
+      ``max_tokens``: cap on output tokens per probe (default ``16``;
+        small to keep the check fast since we only care about TTFT).
+      ``prompt_size_tokens``: target prompt size in tokens for each
+        probe (default ``0`` = tiny ``"ping"`` prompt, RTT-dominated).
+        Set to a value close to your workload's typical input size
+        (e.g. ``4000`` or ``8000``) to also catch *prefill-shape*
+        heterogeneity -- a replica that's CUDA-graph-warm for tiny
+        prompts but cold for large ones will pass a ``"ping"`` probe
+        and still skew the workload. The probe content is filler
+        text padded to roughly this size, with a unique per-probe
+        counter prefix so SGLang's prefix cache misses on every probe
+        (worst-case prefill, which is the heterogeneity signal we want).
       ``max_ttft_ratio``: per-pool max-P50 / min-P50 TTFT ratio above
         which ``on_violation`` fires. ``0`` disables the gate (still
         records stats in the manifest).
       ``on_violation``: ``"warn"`` (default; logs and continues) or
         ``"abort"`` (raises ``RuntimeError``). Use ``"abort"`` when
-        you want a clean fail-fast for paper-grade comparisons.
+        you want a clean fail-fast for paper-grade comparisons. On
+        abort the controller cancels the spawned engine + proxy
+        FunctionCalls so GPUs are freed immediately rather than
+        idling until each engine's ``scaledown_window`` expires.
       ``request_timeout_seconds``: per-probe upstream timeout.
     """
     cfg = dict(spec.get("replica_homogeneity_check") or {})
     out = {
         "enabled": bool(cfg.get("enabled", False)),
-        "warmup_requests_per_replica": int(cfg.get("warmup_requests_per_replica", 6)),
-        "warmup_requests": int(cfg.get("warmup_requests", 2)),
+        "warmup_requests_per_replica": int(cfg.get("warmup_requests_per_replica", 16)),
+        "warmup_requests": int(cfg.get("warmup_requests", 4)),
         "max_tokens": int(cfg.get("max_tokens", 16)),
+        "prompt_size_tokens": int(cfg.get("prompt_size_tokens", 0)),
         "max_ttft_ratio": float(cfg.get("max_ttft_ratio", 0.0)),
         "on_violation": str(cfg.get("on_violation", "warn")).lower(),
         "request_timeout_seconds": float(cfg.get("request_timeout_seconds", 60.0)),
@@ -332,7 +363,41 @@ def _homogeneity_config(spec: dict) -> dict:
             "replica_homogeneity_check.warmup_requests must be strictly less than "
             "warmup_requests_per_replica (otherwise no measurement requests remain)"
         )
+    if out["prompt_size_tokens"] < 0:
+        raise ValueError(
+            f"replica_homogeneity_check.prompt_size_tokens must be >= 0, "
+            f"got {out['prompt_size_tokens']}"
+        )
     return out
+
+
+# Approximate token count of one repetition of ``_PROBE_FILLER_BASE``
+# under the gpt-4o tokenizer (used by the workload's input filter).
+# Doesn't need to be exact -- ``prompt_size_tokens`` is a target, not a
+# hard cap, and the per-probe counter prefix dominates only for tiny
+# sizes. ``"the quick brown fox jumps over the lazy dog. "`` ≈ 10
+# cl100k tokens; we round to 9 to slightly over-pad rather than under.
+_PROBE_FILLER_BASE = "the quick brown fox jumps over the lazy dog. "
+_PROBE_FILLER_TOKENS_PER_REP = 9
+
+
+def _build_probe_prompt(prompt_size_tokens: int, probe_index: int) -> str:
+    """Return a probe message ``content`` of approximately ``prompt_size_tokens``
+    tokens, with a unique per-probe counter so SGLang's radix cache
+    misses on every probe.
+
+    ``prompt_size_tokens <= 0`` returns the original tiny ``"ping"``
+    prompt (RTT-dominated; backwards-compatible default behavior).
+    """
+    if prompt_size_tokens <= 0:
+        return "ping"
+    # Unique prefix forces the prefix cache to miss across probes so we
+    # measure the worst-case prefill cost at this prompt shape, which is
+    # the level-shift signal we want. The prefix is also small enough
+    # not to perturb the target token count for typical sizes (>=512).
+    prefix = f"probe-{probe_index:06d}: "
+    reps = max(1, prompt_size_tokens // _PROBE_FILLER_TOKENS_PER_REP)
+    return prefix + (_PROBE_FILLER_BASE * reps).rstrip()
 
 
 async def _measure_replica_ttft(
@@ -343,6 +408,7 @@ async def _measure_replica_ttft(
     warmup_requests: int,
     max_tokens: int,
     request_timeout_seconds: float,
+    prompt_size_tokens: int = 0,
 ) -> dict:
     """Send ``total_requests`` short streaming chats directly to a
     replica and return TTFT stats over the post-warmup tail.
@@ -352,21 +418,31 @@ async def _measure_replica_ttft(
     measurement window. Hits ``{replica_url}/v1/chat/completions``
     directly -- no proxy, no policy, no metrics interaction -- so the
     measurement is independent of any routing logic under test.
+
+    ``prompt_size_tokens`` controls the probe prompt shape (see
+    :func:`_build_probe_prompt`); ``0`` keeps the original tiny
+    ``"ping"`` prompt (RTT-dominated). Each probe gets a unique counter
+    prefix so SGLang's radix cache misses, giving worst-case prefill
+    latency at the chosen prompt shape -- which is what we want for
+    detecting per-replica prefill heterogeneity.
     """
-    body = {
-        "model": HF_REPO_ID,
-        "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": max_tokens,
-        "stream": True,
-        "stream_options": {"include_usage": True},
-    }
-    payload = json.dumps(body).encode()
     headers = {"accept-encoding": "identity", "content-type": "application/json"}
     measurement_ttfts_ms: list[float] = []
     measurement_total_ms: list[float] = []
     error_count = 0
     last_error: str | None = None
     for i in range(total_requests):
+        # Rebuild per-probe so each request has a unique cache-busting
+        # prefix; for the tiny-ping default this is identical bytes
+        # every iteration, which is fine.
+        body = {
+            "model": HF_REPO_ID,
+            "messages": [{"role": "user", "content": _build_probe_prompt(prompt_size_tokens, i)}],
+            "max_tokens": max_tokens,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        payload = json.dumps(body).encode()
         started_ns = time.perf_counter_ns()
         ttft_ns: int | None = None
         try:
@@ -456,107 +532,150 @@ async def _measure_replica_ttft(
     }
 
 
-async def _check_replica_homogeneity(fleet_manifest: dict, cfg: dict) -> dict:
+async def _process_homogeneity_pool(
+    client: httpx.AsyncClient, pool: dict, cfg: dict
+) -> tuple[dict, list[str]]:
+    """Measure TTFT for one pool's replicas in parallel and build the
+    per-pool report + per-pool violation list.
+
+    Returns ``(pool_report, violations)``. Replica probes within the
+    pool fan out via ``asyncio.gather``; the caller fans pools out the
+    same way so the whole gate runs in roughly one pool's worth of
+    wall time regardless of pool count.
+    """
+    label = pool["label"]
+    replica_urls = pool["replica_urls"]
+    per_replica = await asyncio.gather(
+        *[
+            _measure_replica_ttft(
+                client,
+                url,
+                total_requests=cfg["warmup_requests_per_replica"],
+                warmup_requests=cfg["warmup_requests"],
+                max_tokens=cfg["max_tokens"],
+                request_timeout_seconds=cfg["request_timeout_seconds"],
+                prompt_size_tokens=cfg["prompt_size_tokens"],
+            )
+            for url in replica_urls
+        ]
+    )
+    valid_p50s = [r["ttft_ms_p50"] for r in per_replica if r["ttft_ms_p50"] is not None]
+    unmeasurable_urls = [r["replica_url"] for r in per_replica if r["ttft_ms_p50"] is None]
+    ratio: float | None = None
+    if len(valid_p50s) >= 2:
+        lo = min(valid_p50s)
+        hi = max(valid_p50s)
+        if lo > 0:
+            ratio = hi / lo
+    measured_ns = sorted({r["measured_n"] for r in per_replica})
+    uneven_sample = len(measured_ns) > 1
+    pool_report = {
+        "label": label,
+        "policy": pool["policy"],
+        "replica_count": len(replica_urls),
+        "replicas": per_replica,
+        "ttft_ms_p50_min": min(valid_p50s) if valid_p50s else None,
+        "ttft_ms_p50_max": max(valid_p50s) if valid_p50s else None,
+        "max_ttft_ratio_observed": ratio,
+        "uneven_sample_sizes": uneven_sample,
+        "unmeasurable_replicas": unmeasurable_urls,
+    }
+    print(
+        f"[homogeneity] pool={label!r} "
+        f"per_replica_p50_ms="
+        f"{[round(r['ttft_ms_p50']) if r['ttft_ms_p50'] else None for r in per_replica]} "
+        f"ratio={ratio if ratio is not None else 'n/a'}",
+        flush=True,
+    )
+    if uneven_sample:
+        # Per-replica error counts diverged, so the ratio is
+        # comparing an unequal number of samples per replica.
+        # Surface it so the operator knows the gate verdict
+        # rests on noisier-than-expected stats.
+        print(
+            f"[homogeneity][warn] pool {label!r} uneven measurement counts "
+            f"per replica: {measured_ns} (some probes failed)",
+            flush=True,
+        )
+    pool_violations: list[str] = []
+    # Unmeasurable replicas (every probe failed -> ttft_ms_p50 is None)
+    # always count as a violation. Without this check, a totally-dead
+    # replica produces a "homogeneous" 2-replica ratio that can pass
+    # the gate -- the operator would think a 3-replica pool is healthy
+    # when it's silently down to 2.
+    if unmeasurable_urls:
+        pool_violations.append(
+            f"pool {label!r} has {len(unmeasurable_urls)} unmeasurable "
+            f"replica(s) (every probe failed): {unmeasurable_urls}"
+        )
+    if cfg["max_ttft_ratio"] > 0 and ratio is not None and ratio > cfg["max_ttft_ratio"]:
+        pool_violations.append(
+            f"pool {label!r} ratio={ratio:.2f} > max_ttft_ratio={cfg['max_ttft_ratio']}"
+        )
+    return pool_report, pool_violations
+
+
+async def _check_replica_homogeneity(
+    fleet_manifest: dict,
+    cfg: dict,
+    *,
+    cleanup_callback: Callable[[], Awaitable[None]] | None = None,
+) -> dict:
     """Pre-flight per-pool TTFT measurement and homogeneity gate.
 
     Hits each replica directly so the result is independent of the
     routing policy that will later run against the same pool. Returns
     a manifest the caller can stash inside ``fleet_manifest``; raises
     ``RuntimeError`` when ``on_violation == "abort"`` and any pool's
-    P50 TTFT spread exceeds ``max_ttft_ratio``.
+    P50 TTFT spread exceeds ``max_ttft_ratio``, or when any replica
+    is fully unmeasurable.
 
     What this catches: level-shift heterogeneity -- one replica is
     routinely slower than its siblings (cold/wrong-tier instance,
     noisy neighbor, model still loading after ``wait_ready`` returned).
     This was the confound behind the spurious least-request advantage
     in ``moon_neurips_main_000_quick200``, where one of three shared
-    backends was ~10x faster than the others.
+    backends was ~10x faster than the others. Also catches
+    silently-dead replicas via the ``unmeasurable_replicas`` violation.
 
-    What this does NOT catch: prefill-shape heterogeneity. The probe
-    uses a tiny ``"ping"`` prompt (TTFT dominated by RTT + minimal
-    prefill), while real Mooncake-replay workloads carry up to 24k
-    input tokens (TTFT dominated by full-prompt prefill). A replica
-    that's CUDA-graph-warm for tiny prompts but not for 24k can pass
-    this gate and still skew the workload. "Ratio green" means
-    "replicas are equivalent at the probe shape," not "end-to-end TTFT
-    will be uniform."
+    What this does NOT catch (default config): prefill-shape
+    heterogeneity. The default probe uses a tiny ``"ping"`` prompt
+    (TTFT dominated by RTT + minimal prefill), while real Mooncake-
+    replay workloads carry up to 24k input tokens (TTFT dominated by
+    full-prompt prefill). To extend the gate to large-prompt prefill,
+    set ``prompt_size_tokens`` to a value close to your workload's
+    typical input size.
 
-    On abort: this raises mid-experiment with the engine fleet still
-    spawned. They idle until Modal's ``scaledown_window`` expires
-    (set in each ``engine_*`` decorator) -- not a regression vs the
-    success path, which also doesn't tear them down, but worth knowing
-    when you're paying for GPUs.
+    On abort: ``cleanup_callback`` (if provided) is awaited before the
+    ``RuntimeError`` is raised. The matrix controller passes a callback
+    that cancels the spawned engine + proxy ``FunctionCall`` futures so
+    GPUs are freed immediately rather than idling until each engine's
+    ``scaledown_window`` expires.
     """
     if not cfg["enabled"]:
         return {"enabled": False}
+    n_replicas = sum(len(p["replica_urls"]) for p in fleet_manifest["fleets"])
+    n_pools = len(fleet_manifest["fleets"])
     print(
-        f"[homogeneity] checking {sum(len(p['replica_urls']) for p in fleet_manifest['fleets'])} "
-        f"replicas across {len(fleet_manifest['fleets'])} pools "
+        f"[homogeneity] checking {n_replicas} replicas across {n_pools} pools "
         f"(probes={cfg['warmup_requests_per_replica']}, "
-        f"warmup_discarded={cfg['warmup_requests']})",
+        f"warmup_discarded={cfg['warmup_requests']}, "
+        f"prompt_size_tokens={cfg['prompt_size_tokens']})",
         flush=True,
     )
     started = time.time()
-    pools_report: list[dict] = []
-    violations: list[str] = []
     async with httpx.AsyncClient() as client:
-        for pool in fleet_manifest["fleets"]:
-            label = pool["label"]
-            replica_urls = pool["replica_urls"]
-            per_replica = await asyncio.gather(
-                *[
-                    _measure_replica_ttft(
-                        client,
-                        url,
-                        total_requests=cfg["warmup_requests_per_replica"],
-                        warmup_requests=cfg["warmup_requests"],
-                        max_tokens=cfg["max_tokens"],
-                        request_timeout_seconds=cfg["request_timeout_seconds"],
-                    )
-                    for url in replica_urls
-                ]
-            )
-            valid_p50s = [r["ttft_ms_p50"] for r in per_replica if r["ttft_ms_p50"] is not None]
-            ratio: float | None = None
-            if len(valid_p50s) >= 2:
-                lo = min(valid_p50s)
-                hi = max(valid_p50s)
-                if lo > 0:
-                    ratio = hi / lo
-            measured_ns = sorted({r["measured_n"] for r in per_replica})
-            uneven_sample = len(measured_ns) > 1
-            pool_report = {
-                "label": label,
-                "policy": pool["policy"],
-                "replica_count": len(replica_urls),
-                "replicas": per_replica,
-                "ttft_ms_p50_min": min(valid_p50s) if valid_p50s else None,
-                "ttft_ms_p50_max": max(valid_p50s) if valid_p50s else None,
-                "max_ttft_ratio_observed": ratio,
-                "uneven_sample_sizes": uneven_sample,
-            }
-            pools_report.append(pool_report)
-            print(
-                f"[homogeneity] pool={label!r} "
-                f"per_replica_p50_ms="
-                f"{[round(r['ttft_ms_p50']) if r['ttft_ms_p50'] else None for r in per_replica]} "
-                f"ratio={ratio if ratio is not None else 'n/a'}",
-                flush=True,
-            )
-            if uneven_sample:
-                # Per-replica error counts diverged, so the ratio is
-                # comparing an unequal number of samples per replica.
-                # Surface it so the operator knows the gate verdict
-                # rests on noisier-than-expected stats.
-                print(
-                    f"[homogeneity][warn] pool {label!r} uneven measurement counts "
-                    f"per replica: {measured_ns} (some probes failed)",
-                    flush=True,
-                )
-            if cfg["max_ttft_ratio"] > 0 and ratio is not None and ratio > cfg["max_ttft_ratio"]:
-                violations.append(
-                    f"pool {label!r} ratio={ratio:.2f} > max_ttft_ratio={cfg['max_ttft_ratio']}"
-                )
+        # Fan out across pools so total wall time ~ one pool's worth
+        # rather than n_pools-times-one. Within a pool, replicas already
+        # fan out via _process_homogeneity_pool's inner gather.
+        per_pool = await asyncio.gather(
+            *[_process_homogeneity_pool(client, pool, cfg) for pool in fleet_manifest["fleets"]]
+        )
+    pools_report = [r for r, _ in per_pool]
+    violations: list[str] = []
+    for _, pool_violations in per_pool:
+        violations.extend(pool_violations)
+
     elapsed = time.time() - started
     print(
         f"[homogeneity] done in {elapsed:.1f}s "
@@ -572,12 +691,27 @@ async def _check_replica_homogeneity(fleet_manifest: dict, cfg: dict) -> dict:
     }
     if violations:
         if cfg["on_violation"] == "abort":
-            print(
-                f"[homogeneity][abort] {len(fleet_manifest['fleets'])} pools spawned; "
-                "engine fleet will idle until each engine_* function's scaledown_window "
-                "expires (no controller-side teardown today; matches the success path)",
-                flush=True,
-            )
+            if cleanup_callback is not None:
+                print(
+                    f"[homogeneity][abort] cancelling spawned engine + proxy "
+                    f"FunctionCalls to free GPUs immediately",
+                    flush=True,
+                )
+                try:
+                    await cleanup_callback()
+                except Exception as e:
+                    print(
+                        f"[homogeneity][abort][warn] cleanup_callback raised "
+                        f"{type(e).__name__}: {e}",
+                        flush=True,
+                    )
+            else:
+                print(
+                    f"[homogeneity][abort] {n_pools} pools spawned; "
+                    "no cleanup_callback provided -- engine fleet will idle "
+                    "until each engine_* function's scaledown_window expires",
+                    flush=True,
+                )
             raise RuntimeError(
                 "replica homogeneity check failed: "
                 + "; ".join(violations)
@@ -586,6 +720,31 @@ async def _check_replica_homogeneity(fleet_manifest: dict, cfg: dict) -> dict:
         for v in violations:
             print(f"[homogeneity][warn] {v}", flush=True)
     return report
+
+
+async def _cancel_spawns(calls: list, kind: str = "spawn") -> None:
+    """Best-effort cancel a list of Modal ``FunctionCall`` futures.
+
+    Logs but doesn't raise on per-call cancel failures so we always
+    iterate the full list -- a partial failure on one engine
+    shouldn't keep us from cancelling the rest. Used by the homogeneity
+    abort path to free GPUs immediately instead of waiting for each
+    engine's ``scaledown_window`` to expire.
+    """
+    cancelled = 0
+    for call in calls:
+        try:
+            await call.cancel.aio()
+            cancelled += 1
+        except Exception as e:
+            print(
+                f"[cancel-spawns][warn] failed to cancel {kind}: {type(e).__name__}: {e}",
+                flush=True,
+            )
+    print(
+        f"[cancel-spawns] cancelled {cancelled}/{len(calls)} {kind} FunctionCall(s)",
+        flush=True,
+    )
 
 
 async def _wait_for_keys(dct, keys: list[str], timeout_s: float) -> dict[str, str]:
@@ -675,6 +834,9 @@ def _workload_payload(
         "output_path": output_path,
         "save_per_request": bool(spec.get("save_per_request", True)),
     }
+    num = int(spec.get("num_requests", 0))
+    if num > 0:
+        payload["num_requests"] = num
     if start_at_wall_time:
         payload["start_at_wall_time"] = start_at_wall_time
     return payload
@@ -989,7 +1151,16 @@ async def _run_policy_matrix_experiment(
         )
 
     homogeneity_cfg = _homogeneity_config(base_spec)
-    homogeneity_report = await _check_replica_homogeneity(fleet_manifest, homogeneity_cfg)
+
+    async def _abort_cleanup() -> None:
+        await _cancel_spawns(proxy_calls, kind="proxy")
+        await _cancel_spawns(engine_calls, kind="engine")
+
+    homogeneity_report = await _check_replica_homogeneity(
+        fleet_manifest,
+        homogeneity_cfg,
+        cleanup_callback=_abort_cleanup,
+    )
     fleet_manifest["homogeneity_check"] = homogeneity_report
 
     matrix = await _run_sweep_matrix(
