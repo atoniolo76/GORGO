@@ -293,7 +293,7 @@ def build_summary(
     proxy_url: str,
     workload_kwargs: dict,
     metric: str,
-    tuner: TunerLike,
+    tuner: GaussianESTuner,
     baseline_score: float | None,
     history: list[dict],
     active_policy: str | None,
