@@ -1,0 +1,1207 @@
+{
+  "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100",
+  "trace_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_0030_to_0100.jsonl",
+  "start_at_wall_time": "2026-05-05T22:45:38.193389Z",
+  "policies": [
+    "random",
+    "least-request",
+    "least-load",
+    "prefix-cache",
+    "simple-session-affinity",
+    "gorgo-static",
+    "gorgo-autotune",
+    "gorgo-hillclimb"
+  ],
+  "results": [
+    {
+      "policy": "random",
+      "label": "random",
+      "proxy_url": "https://ta-01kqx50jbpjnj9gc60qp1jss16-8000-yfjeyucy5ftm5wmnykjsx1nl1.w.modal.host",
+      "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_random",
+      "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_random",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_random",
+        "started_at": "2026-05-05T22:45:12.099153Z",
+        "finished_at": "2026-05-05T23:16:10.291033Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_0030_to_0100.jsonl",
+          "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_random",
+          "concurrency": 64,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_random.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T22:45:38.193389Z"
+        },
+        "stats": {
+          "sent": 2754,
+          "ok": 2460,
+          "fail": 294,
+          "success_rate": 0.8932461873638344,
+          "status_breakdown": {
+            "200": 2460,
+            "400": 277,
+            "502": 17
+          },
+          "elapsed_seconds": 1827.9763514019999,
+          "request_throughput_rps": 1.5065840419039171,
+          "input_token_throughput": 4469.776096246198,
+          "output_token_throughput": 207.06449495897232,
+          "total_token_throughput": 4676.84059120517,
+          "total_input_tokens": 8170645,
+          "total_output_tokens": 378509,
+          "ttft_seconds": {
+            "avg": 0.519869404403252,
+            "min": 0.093306709,
+            "max": 4.001227906,
+            "p50": 0.287467704,
+            "p95": 1.723526853,
+            "p99": 2.356574342,
+            "n": 2460
+          },
+          "request_e2e_seconds": {
+            "avg": 1.9492253455613822,
+            "min": 0.57514685,
+            "max": 71.394301106,
+            "p50": 1.405572158,
+            "p95": 3.82650211,
+            "p99": 12.780686907,
+            "n": 2460
+          },
+          "itl_ms": {
+            "avg": 9.586374609991788,
+            "min": 5.59233125984252,
+            "max": 46.369042058139534,
+            "p50": 8.314961192660551,
+            "p95": 17.11227978666667,
+            "p99": 26.890505086614173,
+            "n": 2460
+          },
+          "decode_tokens_per_second": {
+            "avg": 113.7738564796655,
+            "min": 21.566112984308717,
+            "max": 178.81630281467983,
+            "p50": 120.30148814674315,
+            "p95": 140.14907228647144,
+            "p99": 140.78367144242867,
+            "n": 2460
+          },
+          "input_tokens": {
+            "avg": 3321.400406504065,
+            "min": 11.0,
+            "max": 32117.0,
+            "p50": 18.0,
+            "p95": 19802.0,
+            "p99": 24368.0,
+            "n": 2460
+          },
+          "output_tokens": {
+            "avg": 153.86544715447155,
+            "min": 6.0,
+            "max": 8737.0,
+            "p50": 128.0,
+            "p95": 189.0,
+            "p99": 1206.0,
+            "n": 2460
+          },
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_random.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_random.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_random",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T22:45:12.080424Z",
+          "stopped_at": "2026-05-05T23:16:12.865402Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_random/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_random/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_random/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 2754,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 2754,
+          "first_event_ts": "2026-05-05T22:45:22.439604Z",
+          "last_event_ts": "2026-05-05T23:15:52.421734Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_random/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_random/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_random/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 2754,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 2754,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 19.625083940000003
+      },
+      "elapsed_seconds": 1864.7858545780182
+    },
+    {
+      "policy": "least-request",
+      "label": "least-request",
+      "proxy_url": "https://ta-01kqx50j5n69jcznexrb53js4p-8000-izk7b3wf4rdlu9e8jd7vo5h0u.w.modal.host",
+      "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request",
+      "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request",
+        "started_at": "2026-05-05T22:45:12.062301Z",
+        "finished_at": "2026-05-05T23:15:56.361390Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_0030_to_0100.jsonl",
+          "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request",
+          "concurrency": 64,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T22:45:38.193389Z"
+        },
+        "stats": {
+          "sent": 2754,
+          "ok": 2465,
+          "fail": 289,
+          "success_rate": 0.8950617283950617,
+          "status_breakdown": {
+            "400": 277,
+            "200": 2465,
+            "502": 9,
+            "0": 3
+          },
+          "elapsed_seconds": 1813.920678924,
+          "request_throughput_rps": 1.5182582303618954,
+          "input_token_throughput": 4522.782663719626,
+          "output_token_throughput": 203.89480328290364,
+          "total_token_throughput": 4726.677467002529,
+          "total_input_tokens": 8203969,
+          "total_output_tokens": 369849,
+          "ttft_seconds": {
+            "avg": 0.48273782067423937,
+            "min": 0.095088354,
+            "max": 4.159928297,
+            "p50": 0.280512398,
+            "p95": 1.604755906,
+            "p99": 2.268105167,
+            "n": 2465
+          },
+          "request_e2e_seconds": {
+            "avg": 1.800647758130629,
+            "min": 0.577867469,
+            "max": 50.381350384,
+            "p50": 1.342306823,
+            "p95": 3.324795861,
+            "p99": 11.239595941,
+            "n": 2465
+          },
+          "itl_ms": {
+            "avg": 8.99389546502807,
+            "min": 5.708362952755905,
+            "max": 119.11359107692307,
+            "p50": 8.179562062992126,
+            "p95": 14.313026826771653,
+            "p99": 21.2377665,
+            "n": 2465
+          },
+          "decode_tokens_per_second": {
+            "avg": 118.11084569468996,
+            "min": 8.395347591814305,
+            "max": 175.1815727689873,
+            "p50": 122.25593403397869,
+            "p95": 142.562418389891,
+            "p99": 144.12355033341083,
+            "n": 2465
+          },
+          "input_tokens": {
+            "avg": 3328.1821501014197,
+            "min": 11.0,
+            "max": 32117.0,
+            "p50": 18.0,
+            "p95": 19802.0,
+            "p99": 24368.0,
+            "n": 2465
+          },
+          "output_tokens": {
+            "avg": 150.0401622718053,
+            "min": 8.0,
+            "max": 6373.0,
+            "p50": 128.0,
+            "p95": 184.0,
+            "p99": 1109.0,
+            "n": 2465
+          },
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T22:45:12.045703Z",
+          "stopped_at": "2026-05-05T23:16:12.886399Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 2751,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 2751,
+          "first_event_ts": "2026-05-05T22:45:22.455627Z",
+          "last_event_ts": "2026-05-05T23:15:56.504823Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-request/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 2751,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 2751,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 19.576012577
+      },
+      "elapsed_seconds": 1864.9892091751099
+    },
+    {
+      "policy": "least-load",
+      "label": "least-load",
+      "proxy_url": "https://ta-01kqx50j1j8mx9zc3dm4cmnmz8-8000-x0b4rb4874rg4605vaf6o6a7k.w.modal.host",
+      "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load",
+      "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load",
+        "started_at": "2026-05-05T22:45:12.135030Z",
+        "finished_at": "2026-05-05T23:15:42.394068Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_0030_to_0100.jsonl",
+          "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load",
+          "concurrency": 64,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T22:45:38.193389Z"
+        },
+        "stats": {
+          "sent": 2754,
+          "ok": 2465,
+          "fail": 289,
+          "success_rate": 0.8950617283950617,
+          "status_breakdown": {
+            "400": 276,
+            "200": 2465,
+            "0": 1,
+            "502": 12
+          },
+          "elapsed_seconds": 1800.1252453020002,
+          "request_throughput_rps": 1.5298935489002443,
+          "input_token_throughput": 4532.465738866516,
+          "output_token_throughput": 208.59159715689967,
+          "total_token_throughput": 4741.057336023417,
+          "total_input_tokens": 8159006,
+          "total_output_tokens": 375491,
+          "ttft_seconds": {
+            "avg": 0.5011987864300202,
+            "min": 0.094540722,
+            "max": 2.984247704,
+            "p50": 0.28108327,
+            "p95": 1.700117828,
+            "p99": 2.290259393,
+            "n": 2465
+          },
+          "request_e2e_seconds": {
+            "avg": 2.1136906733878296,
+            "min": 0.564431779,
+            "max": 44.822952419,
+            "p50": 1.63850208,
+            "p95": 3.658966717,
+            "p99": 13.099946022,
+            "n": 2465
+          },
+          "itl_ms": {
+            "avg": 11.060400962140553,
+            "min": 6.374246362204724,
+            "max": 38.80805495238095,
+            "p50": 9.584311897637795,
+            "p95": 20.882770267716538,
+            "p99": 26.06105312,
+            "n": 2465
+          },
+          "decode_tokens_per_second": {
+            "avg": 101.04843265656075,
+            "min": 25.767846423301563,
+            "max": 156.88129124242383,
+            "p50": 104.33717210793878,
+            "p95": 139.4733792042681,
+            "p99": 140.73689062432078,
+            "n": 2465
+          },
+          "input_tokens": {
+            "avg": 3309.9415821501016,
+            "min": 11.0,
+            "max": 32117.0,
+            "p50": 18.0,
+            "p95": 19600.0,
+            "p99": 24368.0,
+            "n": 2465
+          },
+          "output_tokens": {
+            "avg": 152.3290060851927,
+            "min": 8.0,
+            "max": 5196.0,
+            "p50": 128.0,
+            "p95": 188.0,
+            "p99": 1344.0,
+            "n": 2465
+          },
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T22:45:12.115464Z",
+          "stopped_at": "2026-05-05T23:16:12.925759Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 2753,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 2753,
+          "first_event_ts": "2026-05-05T22:45:22.853345Z",
+          "last_event_ts": "2026-05-05T23:16:06.004417Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_least-load/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 2753,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 2753,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 19.245036864999996
+      },
+      "elapsed_seconds": 1865.1090757846832
+    },
+    {
+      "policy": "prefix-cache",
+      "label": "prefix-cache",
+      "proxy_url": "https://ta-01kqx50jgmeffaserkz2dj08mt-8000-x0b4rb4874rg4605vaf6o6a7k.w.modal.host",
+      "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache",
+      "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache",
+        "started_at": "2026-05-05T22:45:12.183021Z",
+        "finished_at": "2026-05-05T23:15:41.095422Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_0030_to_0100.jsonl",
+          "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache",
+          "concurrency": 64,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T22:45:38.193389Z"
+        },
+        "stats": {
+          "sent": 2754,
+          "ok": 2468,
+          "fail": 286,
+          "success_rate": 0.8961510530137982,
+          "status_breakdown": {
+            "200": 2468,
+            "400": 276,
+            "502": 9,
+            "0": 1
+          },
+          "elapsed_seconds": 1798.78775874,
+          "request_throughput_rps": 1.5310310994828533,
+          "input_token_throughput": 4558.9708736645525,
+          "output_token_throughput": 207.61815738706096,
+          "total_token_throughput": 4766.589031051613,
+          "total_input_tokens": 8200621,
+          "total_output_tokens": 373461,
+          "ttft_seconds": {
+            "avg": 0.45949758254943274,
+            "min": 0.106313539,
+            "max": 2.945377343,
+            "p50": 0.287900172,
+            "p95": 1.393858852,
+            "p99": 1.991589209,
+            "n": 2468
+          },
+          "request_e2e_seconds": {
+            "avg": 1.9410071999376013,
+            "min": 0.465634607,
+            "max": 74.361618437,
+            "p50": 1.492076025,
+            "p95": 3.58523558,
+            "p99": 13.02469121,
+            "n": 2468
+          },
+          "itl_ms": {
+            "avg": 10.078590585834931,
+            "min": 4.647839866141732,
+            "max": 65.77795441935484,
+            "p50": 8.834663415730336,
+            "p95": 17.53236564566929,
+            "p99": 25.988886204724412,
+            "n": 2468
+          },
+          "decode_tokens_per_second": {
+            "avg": 108.92062789120173,
+            "min": 15.202661877027829,
+            "max": 215.15371200387776,
+            "p50": 113.30525296089154,
+            "p95": 142.54289705858162,
+            "p99": 144.67886969289012,
+            "n": 2468
+          },
+          "input_tokens": {
+            "avg": 3322.7799837925445,
+            "min": 11.0,
+            "max": 32117.0,
+            "p50": 18.0,
+            "p95": 19802.0,
+            "p99": 24368.0,
+            "n": 2468
+          },
+          "output_tokens": {
+            "avg": 151.32131280388978,
+            "min": 8.0,
+            "max": 7551.0,
+            "p50": 128.0,
+            "p95": 183.0,
+            "p99": 1160.0,
+            "n": 2468
+          },
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T22:45:12.168906Z",
+          "stopped_at": "2026-05-05T23:16:12.947493Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 2753,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 2753,
+          "first_event_ts": "2026-05-05T22:45:22.896385Z",
+          "last_event_ts": "2026-05-05T23:15:59.292095Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_prefix-cache/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 2753,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 2753,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 19.259007546
+      },
+      "elapsed_seconds": 1864.8776223659515
+    },
+    {
+      "policy": "simple-session-affinity",
+      "label": "simple-session-affinity",
+      "proxy_url": "https://ta-01kqx50jnbzsjg1vw8yqndp5gf-8000-igiwh4j2cg38ob54hb3lzyonw.w.modal.host",
+      "error": "ConnectError: [Errno -5] No address associated with hostname"
+    },
+    {
+      "policy": "gorgo",
+      "label": "gorgo-static",
+      "proxy_url": "https://ta-01kqx50jywm6c4aptw26f72nf7-8000-mofqxfs3xjea1g6r0qgheggbc.w.modal.host",
+      "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static",
+      "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static",
+        "started_at": "2026-05-05T22:45:11.732434Z",
+        "finished_at": "2026-05-05T23:15:59.499523Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_0030_to_0100.jsonl",
+          "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static",
+          "concurrency": 64,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T22:45:38.193389Z"
+        },
+        "stats": {
+          "sent": 2754,
+          "ok": 2472,
+          "fail": 282,
+          "success_rate": 0.8976034858387799,
+          "status_breakdown": {
+            "200": 2472,
+            "400": 274,
+            "0": 1,
+            "502": 7
+          },
+          "elapsed_seconds": 1817.279747722,
+          "request_throughput_rps": 1.5154518744030463,
+          "input_token_throughput": 4481.500446042421,
+          "output_token_throughput": 205.23807656335376,
+          "total_token_throughput": 4686.738522605774,
+          "total_input_tokens": 8144140,
+          "total_output_tokens": 372975,
+          "ttft_seconds": {
+            "avg": 0.39156259917030745,
+            "min": 0.108766434,
+            "max": 4.064308643,
+            "p50": 0.178530507,
+            "p95": 1.42715318,
+            "p99": 2.3023205,
+            "n": 2472
+          },
+          "request_e2e_seconds": {
+            "avg": 1.950790950194175,
+            "min": 0.521707225,
+            "max": 63.978371314,
+            "p50": 1.565901278,
+            "p95": 3.339949411,
+            "p99": 10.462955566,
+            "n": 2472
+          },
+          "itl_ms": {
+            "avg": 10.610491753897843,
+            "min": 2.2673046220472437,
+            "max": 37.3912776744186,
+            "p50": 9.764734267716534,
+            "p95": 16.816022653543307,
+            "p99": 20.8722000137931,
+            "n": 2472
+          },
+          "decode_tokens_per_second": {
+            "avg": 101.9736211923057,
+            "min": 26.74420512471961,
+            "max": 441.05233600990863,
+            "p50": 102.4246952953626,
+            "p95": 138.22353439673662,
+            "p99": 139.74337961502758,
+            "n": 2472
+          },
+          "input_tokens": {
+            "avg": 3294.55501618123,
+            "min": 11.0,
+            "max": 32117.0,
+            "p50": 18.0,
+            "p95": 19595.0,
+            "p99": 24368.0,
+            "n": 2472
+          },
+          "output_tokens": {
+            "avg": 150.87985436893203,
+            "min": 6.0,
+            "max": 6403.0,
+            "p50": 128.0,
+            "p95": 181.0,
+            "p99": 1002.0,
+            "n": 2472
+          },
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T22:45:11.715715Z",
+          "stopped_at": "2026-05-05T23:16:12.562397Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 2753,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 2753,
+          "first_event_ts": "2026-05-05T22:45:23.411175Z",
+          "last_event_ts": "2026-05-05T23:16:05.651643Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-static/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 2753,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 2753,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 18.292402933999995
+      },
+      "elapsed_seconds": 1865.0073645114899
+    },
+    {
+      "policy": "gorgo",
+      "label": "gorgo-autotune",
+      "proxy_url": "https://ta-01kqx50k2kfc6fq5kftmem61xp-8000-8bu2qq6pc7no9ymrkhq2j2usf.w.modal.host",
+      "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune",
+      "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune",
+      "auto_tune": {
+        "config": {
+          "enabled": true,
+          "window_size": 64,
+          "hop_size": 16,
+          "apply": true,
+          "mode": "fit"
+        },
+        "hyperparameters": {
+          "defaults": {
+            "t_prefill": 7.10486739037387e-05,
+            "queued_tokens_weight": 0.011006281159292038
+          },
+          "per_target": {
+            "https://ta-01kqx4wks3dwqasbja58ptt08c-8000-86i7qjvqs4pjqax5g2tfv0ls1.w.modal.host": {
+              "t_prefill": 0.008487161895761227,
+              "queued_tokens_weight": 0.0116905854765625
+            },
+            "https://ta-01kqx4wk6yfg3whqa5vxwtb7jj-8000-78rnc60uvgg8ubhvbbssshi0m.w.modal.host": {
+              "t_prefill": 0.0,
+              "queued_tokens_weight": 0.010354303265625
+            },
+            "https://ta-01kqx4wj7yja9w4hjrs3msjnee-8000-rocv3099yh0f20qjqvbffvuec.w.modal.host": {
+              "t_prefill": 0.0,
+              "queued_tokens_weight": 0.0105964269453125
+            }
+          }
+        }
+      },
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune",
+        "started_at": "2026-05-05T22:45:12.038646Z",
+        "finished_at": "2026-05-05T23:16:03.153808Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_0030_to_0100.jsonl",
+          "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune",
+          "concurrency": 64,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T22:45:38.193389Z"
+        },
+        "stats": {
+          "sent": 2754,
+          "ok": 2469,
+          "fail": 285,
+          "success_rate": 0.8965141612200436,
+          "status_breakdown": {
+            "200": 2469,
+            "400": 277,
+            "502": 7,
+            "0": 1
+          },
+          "elapsed_seconds": 1820.750487845,
+          "request_throughput_rps": 1.5125630987799836,
+          "input_token_throughput": 4500.217385468323,
+          "output_token_throughput": 213.50316948705,
+          "total_token_throughput": 4713.720554955374,
+          "total_input_tokens": 8193773,
+          "total_output_tokens": 388736,
+          "ttft_seconds": {
+            "avg": 0.49524503322397734,
+            "min": 0.090954379,
+            "max": 18.835727743,
+            "p50": 0.280210025,
+            "p95": 1.689546227,
+            "p99": 2.297739169,
+            "n": 2469
+          },
+          "request_e2e_seconds": {
+            "avg": 2.1029752484341837,
+            "min": 0.457996227,
+            "max": 59.117934151,
+            "p50": 1.604311631,
+            "p95": 3.441325951,
+            "p99": 13.580330481,
+            "n": 2469
+          },
+          "itl_ms": {
+            "avg": 10.645973186912382,
+            "min": 2.644127125,
+            "max": 60.546333733333334,
+            "p50": 9.417034503937007,
+            "p95": 18.90637116535433,
+            "p99": 24.504883322834647,
+            "n": 2469
+          },
+          "decode_tokens_per_second": {
+            "avg": 103.35256139661038,
+            "min": 16.51627668166235,
+            "max": 378.1966421149286,
+            "p50": 106.19054221176815,
+            "p95": 139.863396279857,
+            "p99": 140.87369838900577,
+            "n": 2469
+          },
+          "input_tokens": {
+            "avg": 3318.6605913325234,
+            "min": 11.0,
+            "max": 32117.0,
+            "p50": 18.0,
+            "p95": 19802.0,
+            "p99": 24368.0,
+            "n": 2469
+          },
+          "output_tokens": {
+            "avg": 157.44673957067639,
+            "min": 8.0,
+            "max": 6964.0,
+            "p50": 128.0,
+            "p95": 178.0,
+            "p99": 1225.0,
+            "n": 2469
+          },
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T22:45:12.019880Z",
+          "stopped_at": "2026-05-05T23:16:12.860775Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 2753,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 2753,
+          "first_event_ts": "2026-05-05T22:45:23.476552Z",
+          "last_event_ts": "2026-05-05T23:16:03.154523Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-autotune/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 2753,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 2753,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 18.514827485999994
+      },
+      "elapsed_seconds": 1869.1661384105682
+    },
+    {
+      "policy": "gorgo",
+      "label": "gorgo-hillclimb",
+      "proxy_url": "https://ta-01kqx50k7f2fqe22ndyeaf1edk-8000-hzaovnuqkjk9t8bu62m1alyk3.w.modal.host",
+      "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb",
+      "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb",
+      "auto_tune": {
+        "config": {
+          "enabled": true,
+          "window_size": 64,
+          "hop_size": 16,
+          "apply": true,
+          "mode": "online-es",
+          "objective_metric": "neg_p95_ttft"
+        },
+        "hyperparameters": {
+          "defaults": {
+            "t_prefill": 0.0426480389978525,
+            "queued_tokens_weight": 6.027991935600666e-05
+          },
+          "per_target": {}
+        }
+      },
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb",
+        "started_at": "2026-05-05T22:45:11.936576Z",
+        "finished_at": "2026-05-05T23:15:40.897780Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_0030_to_0100.jsonl",
+          "run_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb",
+          "concurrency": 64,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-05T22:45:38.193389Z"
+        },
+        "stats": {
+          "sent": 2754,
+          "ok": 2466,
+          "fail": 288,
+          "success_rate": 0.8954248366013072,
+          "status_breakdown": {
+            "200": 2466,
+            "400": 275,
+            "502": 12,
+            "0": 1
+          },
+          "elapsed_seconds": 1798.7589714609999,
+          "request_throughput_rps": 1.5310556020538582,
+          "input_token_throughput": 4534.28954596146,
+          "output_token_throughput": 208.31807148438978,
+          "total_token_throughput": 4742.607617445849,
+          "total_input_tokens": 8156094,
+          "total_output_tokens": 374714,
+          "ttft_seconds": {
+            "avg": 0.42032743879278184,
+            "min": 0.107662603,
+            "max": 3.050104188,
+            "p50": 0.280843477,
+            "p95": 1.330767277,
+            "p99": 1.831508651,
+            "n": 2466
+          },
+          "request_e2e_seconds": {
+            "avg": 1.9701550061516626,
+            "min": 0.491409348,
+            "max": 51.304962027,
+            "p50": 1.590803059,
+            "p95": 3.286760501,
+            "p99": 11.156059842,
+            "n": 2466
+          },
+          "itl_ms": {
+            "avg": 10.602161088078383,
+            "min": 4.761966716535433,
+            "max": 39.42584051162791,
+            "p50": 9.589750881188118,
+            "p95": 17.375196858267717,
+            "p99": 25.688719085714286,
+            "n": 2466
+          },
+          "decode_tokens_per_second": {
+            "avg": 102.82324405041743,
+            "min": 25.364075616981935,
+            "max": 209.99726783633415,
+            "p50": 104.29586256761075,
+            "p95": 139.19407494269058,
+            "p99": 141.07644847097018,
+            "n": 2466
+          },
+          "input_tokens": {
+            "avg": 3307.418491484185,
+            "min": 11.0,
+            "max": 32117.0,
+            "p50": 18.0,
+            "p95": 19600.0,
+            "p99": 24319.0,
+            "n": 2466
+          },
+          "output_tokens": {
+            "avg": 151.9521492295215,
+            "min": 6.0,
+            "max": 5789.0,
+            "p50": 128.0,
+            "p95": 183.0,
+            "p99": 1178.0,
+            "n": 2466
+          },
+          "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-05T22:45:11.923010Z",
+          "stopped_at": "2026-05-05T23:16:12.744778Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb/requests.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 2753,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 2753,
+          "first_event_ts": "2026-05-05T22:45:23.585872Z",
+          "last_event_ts": "2026-05-05T23:16:05.796950Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb/requests.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_stress_000_glm5_apr2_0030_to_0100_gorgo-hillclimb/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 2753,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 2753,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 18.322772467
+      },
+      "elapsed_seconds": 1864.9746153354645
+    }
+  ]
+}

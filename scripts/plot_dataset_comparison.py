@@ -17,9 +17,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
 
-sns.set_theme(style="whitegrid", context="paper", font_scale=1.1)
 
 DATASETS = {
     "GLM-5.1": "data_processing/prefix_trie_results/glm-5.1-completions/stats.json",
@@ -27,11 +25,10 @@ DATASETS = {
     "WildChat-4.8M": "data_processing/prefix_trie_results/wildchat/stats.json",
 }
 
-PALETTE = sns.color_palette("Blues", n_colors=5)
 COLORS = {
-    "GLM-5.1": PALETTE[4],
-    "LMSYS-Chat-1M": PALETTE[2],
-    "WildChat-4.8M": PALETTE[3],
+    "GLM-5.1": "#d62728",
+    "LMSYS-Chat-1M": "#1f77b4",
+    "WildChat-4.8M": "#2ca02c",
 }
 
 
@@ -66,12 +63,12 @@ def main() -> None:
     names = list(stats.keys())
     x = np.arange(len(names))
 
-    # Figure 1: 3-panel dataset overview
+    # ---- Figure 1: 3-panel dataset overview ----
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
     # Panel 1: Avg tokens per request
     vals = [stats[n]["avg_tokens"] for n in names]
-    bars = axes[0].bar(x, vals, color=[COLORS[n] for n in names], edgecolor="white", linewidth=0.5)
+    bars = axes[0].bar(x, vals, color=[COLORS[n] for n in names])
     axes[0].set_xticks(x)
     axes[0].set_xticklabels(names, fontsize=9)
     axes[0].set_ylabel("Avg tokens / request")
@@ -86,10 +83,11 @@ def main() -> None:
             fontsize=9,
         )
     axes[0].set_yscale("log")
+    axes[0].grid(axis="y", alpha=0.3)
 
     # Panel 2: Requests per user
     vals = [stats[n]["requests_per_user"] for n in names]
-    bars = axes[1].bar(x, vals, color=[COLORS[n] for n in names], edgecolor="white", linewidth=0.5)
+    bars = axes[1].bar(x, vals, color=[COLORS[n] for n in names])
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(names, fontsize=9)
     axes[1].set_ylabel("Requests / user")
@@ -105,19 +103,12 @@ def main() -> None:
             fontsize=9,
         )
     axes[1].set_yscale("log")
+    axes[1].grid(axis="y", alpha=0.3)
 
     # Panel 3: Reuse breakdown (stacked: intra + cross)
     intra = [stats[n]["intra_user_reuse"] for n in names]
     cross = [stats[n]["cross_user_reuse"] for n in names]
-    bars1 = axes[2].bar(
-        x,
-        intra,
-        color=[COLORS[n] for n in names],
-        alpha=0.9,
-        label="Intra-user",
-        edgecolor="white",
-        linewidth=0.5,
-    )
+    bars1 = axes[2].bar(x, intra, color=[COLORS[n] for n in names], alpha=0.9, label="Intra-user")
     bars2 = axes[2].bar(
         x,
         cross,
@@ -126,8 +117,6 @@ def main() -> None:
         alpha=0.5,
         label="Cross-user",
         hatch="//",
-        edgecolor="white",
-        linewidth=0.5,
     )
     axes[2].set_xticks(x)
     axes[2].set_xticklabels(names, fontsize=9)
@@ -165,49 +154,26 @@ def main() -> None:
             )
     axes[2].legend(fontsize=8, loc="upper right")
     axes[2].set_ylim(0, 70)
+    axes[2].grid(axis="y", alpha=0.3)
 
     fig.suptitle("Dataset Characteristics: GLM-5.1 vs Public Chat Datasets", fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     path1 = args.out_dir / "dataset_comparison.png"
-    fig.savefig(path1, dpi=180, bbox_inches="tight")
+    fig.savefig(path1, dpi=180)
     plt.close(fig)
     print(f"wrote {path1}")
 
-    # Figure 2: Reuse composition (horizontal stacked bars)
+    # ---- Figure 2: Reuse composition (horizontal stacked bars) ----
     fig, ax = plt.subplots(figsize=(10, 4))
     y = np.arange(len(names))
     unique_pct = [100 - stats[n]["global_reuse"] for n in names]
     intra_pct = [stats[n]["intra_user_reuse"] for n in names]
     cross_pct = [stats[n]["cross_user_reuse"] for n in names]
 
-    blue_light = sns.color_palette("Blues", 6)[1]
-    blue_mid = sns.color_palette("Blues", 6)[3]
-    blue_dark = sns.color_palette("Blues", 6)[5]
-
-    ax.barh(
-        y, unique_pct, color=blue_light, label="Unique (no reuse)", edgecolor="white", linewidth=0.5
-    )
-    ax.barh(
-        y,
-        intra_pct,
-        left=unique_pct,
-        color=blue_dark,
-        alpha=0.9,
-        label="Intra-user reuse",
-        edgecolor="white",
-        linewidth=0.5,
-    )
+    ax.barh(y, unique_pct, color="#cccccc", label="Unique (no reuse)")
+    ax.barh(y, intra_pct, left=unique_pct, color="#d62728", alpha=0.8, label="Intra-user reuse")
     left2 = [u + i for u, i in zip(unique_pct, intra_pct)]
-    ax.barh(
-        y,
-        cross_pct,
-        left=left2,
-        color=blue_mid,
-        alpha=0.85,
-        label="Cross-user reuse",
-        edgecolor="white",
-        linewidth=0.5,
-    )
+    ax.barh(y, cross_pct, left=left2, color="#1f77b4", alpha=0.8, label="Cross-user reuse")
 
     ax.set_yticks(y)
     ax.set_yticklabels(names, fontsize=11)
@@ -215,6 +181,7 @@ def main() -> None:
     ax.set_title("Where do tokens come from? (Unique vs Reusable)")
     ax.legend(loc="lower right", fontsize=9)
     ax.set_xlim(0, 100)
+    ax.grid(axis="x", alpha=0.3)
 
     for i, n in enumerate(names):
         s = stats[n]
@@ -244,11 +211,11 @@ def main() -> None:
 
     fig.tight_layout()
     path2 = args.out_dir / "dataset_reuse_composition.png"
-    fig.savefig(path2, dpi=180, bbox_inches="tight")
+    fig.savefig(path2, dpi=180)
     plt.close(fig)
     print(f"wrote {path2}")
 
-    # Summary table
+    # ---- Figure 3: Summary table as text ----
     print(
         f"\n{'Dataset':<18} {'Sequences':>12} {'Users':>12} {'Avg tok':>10} {'Req/user':>10} {'Intra':>8} {'Cross':>8} {'Global':>8}"
     )

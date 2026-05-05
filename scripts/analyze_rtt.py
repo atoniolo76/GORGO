@@ -181,23 +181,16 @@ def _analyze(per_replica: dict[str, list[dict]], label: str, out_dir: Path) -> N
     # Plot
     try:
         import matplotlib.pyplot as plt
-        import seaborn as sns
 
-        sns.set_theme(style="whitegrid", context="paper", font_scale=1.1)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
 
-        sorted_replicas = sorted(
+        for replica in sorted(
             per_replica,
             key=lambda r: np.mean(
                 [s["network_rtt_ms"] for s in per_replica[r] if s["network_rtt_ms"] is not None]
                 or [0]
             ),
-        )
-        n_replicas = len(sorted_replicas)
-        palette = sns.color_palette("Blues_d", n_colors=max(n_replicas, 3))
-
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
-
-        for ri, replica in enumerate(sorted_replicas):
+        ):
             samples = per_replica[replica]
             times = [s["elapsed_min"] for s in samples if s["network_rtt_ms"] is not None]
             rtts = [s["network_rtt_ms"] for s in samples if s["network_rtt_ms"] is not None]
@@ -215,10 +208,8 @@ def _analyze(per_replica: dict[str, list[dict]], label: str, out_dir: Path) -> N
             region = samples[0].get("region", "?")
             short_label = f"{replica[:15]}… ({region})"
 
-            ax1.plot(times, rtts, linewidth=1.5, alpha=0.9, label=short_label, color=palette[ri])
-            ax2.plot(
-                times, rtts, linewidth=1.5, alpha=0.9, label=f"RTT {short_label}", color=palette[ri]
-            )
+            ax1.plot(times, rtts, linewidth=1.5, alpha=0.9, label=short_label)
+            ax2.plot(times, rtts, linewidth=1.5, alpha=0.9, label=f"RTT {short_label}")
             if scrapes:
                 ax2.plot(
                     scrape_times,
@@ -227,21 +218,22 @@ def _analyze(per_replica: dict[str, list[dict]], label: str, out_dir: Path) -> N
                     alpha=0.5,
                     linestyle="--",
                     label=f"Scrape {short_label}",
-                    color=palette[ri],
                 )
 
         ax1.set_ylabel("Network RTT (ms)")
         ax1.set_title(f"{label} — Per-replica network RTT over time")
         ax1.legend(fontsize=8, loc="upper right")
+        ax1.grid(alpha=0.3)
 
         ax2.set_xlabel("Elapsed time (minutes)")
         ax2.set_ylabel("Latency (ms)")
         ax2.set_title("RTT probe (solid) vs /metrics scrape (dashed)")
         ax2.legend(fontsize=7, loc="upper right", ncols=2)
+        ax2.grid(alpha=0.3)
 
         fig.tight_layout()
         plot_path = out_dir / f"rtt_over_time_{slug}.png"
-        fig.savefig(plot_path, dpi=180, bbox_inches="tight")
+        fig.savefig(plot_path, dpi=180)
         plt.close(fig)
         print(f"  Plot: {plot_path}")
     except ImportError:

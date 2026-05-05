@@ -1,4 +1,4 @@
-# GLM5 Apr2 (cross-day)
+# GLM5 Apr2 (c=32)
 
 | Policy | OK | Succ% | TTFT p50 | p95 | p99 | max | E2E p95 | E2E p99 | req/s |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
