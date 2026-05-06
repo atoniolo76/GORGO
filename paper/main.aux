@@ -2,67 +2,80 @@
 \providecommand\hyper@newdestlabel[2]{}
 \providecommand\HyField@AuxAddToFields[1]{}
 \providecommand\HyField@AuxAddToCoFields[2]{}
-\citation{sglang2024}
-\citation{vllm2023}
+\citation{skywalker,skyserve}
+\citation{aibrix2024,nginx2024}
+\citation{orca}
+\citation{sglang2024,vllm2023}
+\citation{skywalker,qin2024mooncake}
 \citation{nginx2024}
+\citation{aibrix2024}
 \@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
 \newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}
 \citation{lmsys2024}
 \citation{wildchat2024}
-\citation{orca}
-\citation{vllm2023}
-\citation{sglang2024}
-\citation{preble}
-\citation{dlpm2025}
-\citation{skyserve}
 \citation{skywalker}
+\citation{sglang2024}
+\citation{vllm2023}
+\citation{orca}
+\citation{sglang2024}
+\citation{sglang2024,orca}
+\citation{aibrix2024}
+\citation{nginx2024}
+\citation{aws_bedrock_xregion}
+\citation{skywalker,qin2024mooncake}
 \citation{vulimiri2015}
+\@writefile{toc}{\contentsline {paragraph}{Contributions.}{2}{section*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Background}{2}{section.2}\protected@file@percent }
+\newlabel{sec:background}{{2}{2}{Background}{section.2}{}}
+\citation{aibrix2024}
 \citation{aws_bedrock_xregion}
 \citation{gke_gateway}
 \citation{modal_prefix_caching}
 \citation{skypilot}
-\@writefile{toc}{\contentsline {paragraph}{Contributions.}{2}{section*.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {2}Background}{2}{section.2}\protected@file@percent }
-\newlabel{sec:background}{{2}{2}{Background}{section.2}{}}
+\citation{skyserve}
+\citation{skywalker}
 \citation{lmsys2024}
 \citation{wildchat2024}
+\citation{skywalker}
 \citation{glm2024}
-\citation{qin2024mooncake}
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Workload characterization. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings as described in \S  \ref {sec:characterization}.}}{3}{table.caption.4}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings.}}{3}{table.caption.3}\protected@file@percent }
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
-\newlabel{tab:datasets}{{1}{3}{Workload characterization. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings as described in \S \ref {sec:characterization}}{table.caption.4}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {3}Workload Characterization}{3}{section.3}\protected@file@percent }
-\newlabel{sec:characterization}{{3}{3}{Workload Characterization}{section.3}{}}
-\@writefile{toc}{\contentsline {paragraph}{Datasets.}{3}{section*.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Experimental windows.}{3}{section*.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Trace format and driver.}{3}{section*.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4}GORGO}{3}{section.4}\protected@file@percent }
-\newlabel{sec:method}{{4}{3}{GORGO}{section.4}{}}
-\newlabel{eq:ttft}{{1}{3}{GORGO}{equation.4.1}{}}
+\newlabel{tab:datasets}{{1}{3}{Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings}{table.caption.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Dataset}{3}{section.3}\protected@file@percent }
+\newlabel{sec:dataset}{{3}{3}{Dataset}{section.3}{}}
+\citation{qin2024mooncake}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Token-weighted prefix-reuse breakdown for the three datasets. GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS has no per-user signal at all.}}{4}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:reuse_composition}{{1}{4}{Token-weighted prefix-reuse breakdown for the three datasets. GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS has no per-user signal at all}{figure.caption.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}GORGO}{4}{section.4}\protected@file@percent }
+\newlabel{sec:method}{{4}{4}{GORGO}{section.4}{}}
+\newlabel{eq:score}{{1}{4}{GORGO}{equation.4.1}{}}
+\citation{rechenberg1973}
 \citation{rechenberg1973}
 \citation{nginx2024}
 \citation{aibrix2024}
 \citation{sglang2024}
 \citation{qwen3technical}
-\newlabel{eq:score}{{2}{4}{GORGO}{equation.4.2}{}}
-\@writefile{toc}{\contentsline {paragraph}{Three weight-selection variants.}{4}{section*.7}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {5}Baselines}{4}{section.5}\protected@file@percent }
-\newlabel{sec:baselines}{{5}{4}{Baselines}{section.5}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {6}Experimental Setup}{4}{section.6}\protected@file@percent }
-\newlabel{sec:setup}{{6}{4}{Experimental Setup}{section.6}{}}
-\@writefile{toc}{\contentsline {paragraph}{Hardware and software.}{4}{section*.8}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%.}}{5}{table.caption.9}\protected@file@percent }
-\newlabel{tab:w1}{{2}{5}{GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%}{table.caption.9}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {7}Results}{5}{section.7}\protected@file@percent }
-\newlabel{sec:results}{{7}{5}{Results}{section.7}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Baselines}{5}{section.5}\protected@file@percent }
+\newlabel{sec:baselines}{{5}{5}{Baselines}{section.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Experimental Setup}{5}{section.6}\protected@file@percent }
+\newlabel{sec:setup}{{6}{5}{Experimental Setup}{section.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{Hardware and software.}{5}{section*.5}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Cross-region RTT over W1 (probe from \texttt  {us-ashburn} proxy). The local replica stays near 26\,ms; the Frankfurt and Seoul legs vary by hundreds of ms within the window.}}{6}{figure.caption.6}\protected@file@percent }
+\newlabel{fig:rtt}{{2}{6}{Cross-region RTT over W1 (probe from \texttt {us-ashburn} proxy). The local replica stays near 26\,ms; the Frankfurt and Seoul legs vary by hundreds of ms within the window}{figure.caption.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Results}{6}{section.7}\protected@file@percent }
+\newlabel{sec:results}{{7}{6}{Results}{section.7}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%.}}{7}{table.caption.7}\protected@file@percent }
+\newlabel{tab:w1}{{2}{7}{GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%}{table.caption.7}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GLM-5.1 W2 (April 2 00:30--01:00 UTC, $c{=}32$, cross-day evaluation). \texttt  {gorgo-static} deploys the W1-learned per-replica weights and does not adjust them. Bold is best in column.}}{7}{table.caption.8}\protected@file@percent }
+\newlabel{tab:w2}{{3}{7}{GLM-5.1 W2 (April 2 00:30--01:00 UTC, $c{=}32$, cross-day evaluation). \texttt {gorgo-static} deploys the W1-learned per-replica weights and does not adjust them. Bold is best in column}{table.caption.8}{}}
 \citation{distserve2024,splitwise2024}
 \citation{kvflow2025,lpc2025}
-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GLM-5.1 W2 (held-out evaluation window, 01:00--01:30 UTC). \texttt  {gorgo-static} deploys the W1-learned weights and does not adjust them. Bold is best in column.}}{6}{table.caption.10}\protected@file@percent }
-\newlabel{tab:w2}{{3}{6}{GLM-5.1 W2 (held-out evaluation window, 01:00--01:30 UTC). \texttt {gorgo-static} deploys the W1-learned weights and does not adjust them. Bold is best in column}{table.caption.10}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces TTFT distributions for all eight policies on the GLM-5.1 trace. \texttt  {gorgo-hillclimb} sweeps p50/p95/p99 in W1; in W2 \texttt  {gorgo-static} (W1-learned weights, frozen) leads at p50/p95 and \texttt  {gorgo-hillclimb} leads at p99.}}{6}{figure.caption.11}\protected@file@percent }
-\newlabel{fig:percentiles}{{1}{6}{TTFT distributions for all eight policies on the GLM-5.1 trace. \texttt {gorgo-hillclimb} sweeps p50/p95/p99 in W1; in W2 \texttt {gorgo-static} (W1-learned weights, frozen) leads at p50/p95 and \texttt {gorgo-hillclimb} leads at p99}{figure.caption.11}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {8}Limitations}{6}{section.8}\protected@file@percent }
-\newlabel{sec:limitations}{{8}{6}{Limitations}{section.8}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces GLM-5.1 Stress (April 2 00:30--01:00 UTC, $c{=}64$). Same trace as W2, replayed at 2$\times $ the in-flight-request cap. Bold is best in column. \texttt  {simple-session-affinity} did not complete its sweep at $c{=}64$ and is omitted.}}{8}{table.caption.9}\protected@file@percent }
+\newlabel{tab:stress}{{4}{8}{GLM-5.1 Stress (April 2 00:30--01:00 UTC, $c{=}64$). Same trace as W2, replayed at 2$\times $ the in-flight-request cap. Bold is best in column. \texttt {simple-session-affinity} did not complete its sweep at $c{=}64$ and is omitted}{table.caption.9}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces TTFT distributions on the GLM-5.1 trace across the three windows. In each window, two GORGO variants together cover the lowest TTFT at p50, p95, and p99 against all baseline policies.}}{8}{figure.caption.10}\protected@file@percent }
+\newlabel{fig:percentiles}{{3}{8}{TTFT distributions on the GLM-5.1 trace across the three windows. In each window, two GORGO variants together cover the lowest TTFT at p50, p95, and p99 against all baseline policies}{figure.caption.10}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {8}Limitations}{8}{section.8}\protected@file@percent }
+\newlabel{sec:limitations}{{8}{8}{Limitations}{section.8}{}}
 \citation{sglang2024}
 \citation{vllm2023}
 \citation{kvlink2025}
@@ -86,15 +99,15 @@
 \citation{mitzenmacher}
 \citation{karger1997}
 \citation{aibrix2024,nginx2024}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Diagnostic intermediates. (a) GORGO variants sustain higher and steadier prefix-hit rates than load-only baselines and avoid the \texttt  {prefix-cache} spike-and-collapse pattern. (b) Rechenberg's 1/5-success rule produces fast initial descent followed by stable refinement of the rolling-window p95 TTFT objective.}}{9}{figure.caption.11}\protected@file@percent }
+\newlabel{fig:cache_convergence}{{4}{9}{Diagnostic intermediates. (a) GORGO variants sustain higher and steadier prefix-hit rates than load-only baselines and avoid the \texttt {prefix-cache} spike-and-collapse pattern. (b) Rechenberg's 1/5-success rule produces fast initial descent followed by stable refinement of the rolling-window p95 TTFT objective}{figure.caption.11}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {9}Related Work}{9}{section.9}\protected@file@percent }
+\newlabel{sec:related}{{9}{9}{Related Work}{section.9}{}}
 \bibstyle{plainnat}
 \bibdata{references}
 \bibcite{sarathi_serve}{{1}{2024}{{Agrawal et~al.}}{{Agrawal, Kedia, Panwar, Mohan, Kwatra, Gulavani, Ramjee, and Tumanov}}}
 \bibcite{aibrix2024}{{2}{2024}{{AIBrix Team}}{{}}}
 \bibcite{cherrypick}{{3}{2017}{{Alipourfard et~al.}}{{Alipourfard, Liu, Chen, Venkataraman, Yu, and Zhang}}}
-\@writefile{toc}{\contentsline {section}{\numberline {9}Related Work}{7}{section.9}\protected@file@percent }
-\newlabel{sec:related}{{9}{7}{Related Work}{section.9}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {10}Conclusion}{7}{section.10}\protected@file@percent }
-\newlabel{sec:conclusion}{{10}{7}{Conclusion}{section.10}{}}
 \bibcite{aws_bedrock_xregion}{{4}{2026}{{Amazon Web Services}}{{}}}
 \bibcite{dlpm2025}{{5}{2025}{{Cao et~al.}}{{Cao, Wang, Mao, Hsu, Yin, Xia, Li, Liu, Zhang, Zhou, Sheng, Gonzalez, and Stoica}}}
 \bibcite{klpm2025}{{6}{2025}{{Dexter et~al.}}{{Dexter, Tang, Fatahi, Song, Dharamsi, and Gupta}}}
@@ -105,6 +118,8 @@
 \bibcite{karger1997}{{11}{1997}{{Karger et~al.}}{{Karger, Lehman, Leighton, Panigrahy, Levine, and Lewin}}}
 \bibcite{vllm2023}{{12}{2023}{{Kwon et~al.}}{{Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, and Stoica}}}
 \bibcite{chunkkv2025}{{13}{2025}{{Liu et~al.}}{{Liu, Tang, Dong, Li, Liu, Li, Hu, and Chu}}}
+\@writefile{toc}{\contentsline {section}{\numberline {10}Conclusion}{10}{section.10}\protected@file@percent }
+\newlabel{sec:conclusion}{{10}{10}{Conclusion}{section.10}{}}
 \bibcite{skyserve}{{14}{2025}{{Mao et~al.}}{{Mao, Yang, Phanishayee, Mahajan, and Stoica}}}
 \bibcite{decima}{{15}{2019}{{Mao et~al.}}{{Mao, Schwarzkopf, Venkatakrishnan, Meng, and Alizadeh}}}
 \bibcite{mitzenmacher}{{16}{2001}{{Mitzenmacher}}{{}}}
@@ -114,18 +129,17 @@
 \bibcite{qin2024mooncake}{{20}{2024}{{Qin et~al.}}{{Qin, Li, He, Zhang, Wu, Zheng, Chen, Xu, Yao, Wei, Zhao, Huang, Yang, and Wu}}}
 \bibcite{qwen3technical}{{21}{2025}{{Qwen Team}}{{}}}
 \bibcite{rechenberg1973}{{22}{1973}{{Rechenberg}}{{}}}
-\bibcite{preble}{{23}{2024}{{Srivatsa et~al.}}{{Srivatsa, Gao, Patel, Sivaraman, and Rastogi}}}
-\bibcite{llumnix2024}{{24}{2024}{{Sun et~al.}}{{Sun, Huang, Tang, Wang, Zhang, Li, Yang, Zhang, Wang, Wu, Cao, Lin, et~al.}}}
-\bibcite{vulimiri2015}{{25}{2015}{{Vulimiri et~al.}}{{Vulimiri, Curino, Godfrey, Jungblut, Padhye, and Varghese}}}
-\bibcite{routerwu2025}{{26}{2025}{{Wu and Silwal}}{{}}}
-\bibcite{skywalker}{{27}{2025}{{Xia et~al.}}{{Xia, Mao, Kerney, Jackson, Li, Xing, Shenker, and Stoica}}}
-\bibcite{lpc2025}{{28}{2025{a}}{{Yang et~al.}}{{Yang, Li, Li, and Lloyd}}}
-\bibcite{kvlink2025}{{29}{2025{b}}{{Yang et~al.}}{{Yang, Hou, Wei, Bao, and Chang}}}
-\bibcite{skypilot}{{30}{2023}{{Yang et~al.}}{{}}}
-\bibcite{yao2024cacheblend}{{31}{2024}{{Yao et~al.}}{{Yao, Li, Liu, Ray, Peng, Zhang, Stoica, Keutzer, and Mahoney}}}
-\bibcite{orca}{{32}{2022}{{Yu et~al.}}{{Yu, Jeong, Kim, Kim, and Chun}}}
-\bibcite{wildchat2024}{{33}{2024}{{Zhao et~al.}}{{Zhao, Ren, Hessel, Cardie, Choi, and Deng}}}
-\bibcite{lmsys2024}{{34}{2024{a}}{{Zheng et~al.}}{{Zheng, Chiang, Sheng, Li, Zhuang, Wu, Zhuang, Li, Lin, Xing, Gonzalez, Stoica, and Zhang}}}
-\bibcite{sglang2024}{{35}{2024{b}}{{Zheng et~al.}}{{Zheng, Yin, Xie, Sun, Huang, Yu, Cao, Kozyrakis, Stoica, Gonzalez, Barrett, and Sheng}}}
-\bibcite{distserve2024}{{36}{2024}{{Zhong et~al.}}{{Zhong, Liu, Chen, Hu, Zhu, Liu, Jin, and Zhang}}}
-\gdef \@abspage@last{12}
+\bibcite{llumnix2024}{{23}{2024}{{Sun et~al.}}{{Sun, Huang, Tang, Wang, Zhang, Li, Yang, Zhang, Wang, Wu, Cao, Lin, et~al.}}}
+\bibcite{vulimiri2015}{{24}{2015}{{Vulimiri et~al.}}{{Vulimiri, Curino, Godfrey, Jungblut, Padhye, and Varghese}}}
+\bibcite{routerwu2025}{{25}{2025}{{Wu and Silwal}}{{}}}
+\bibcite{skywalker}{{26}{2025}{{Xia et~al.}}{{Xia, Mao, Kerney, Jackson, Li, Xing, Shenker, and Stoica}}}
+\bibcite{lpc2025}{{27}{2025{a}}{{Yang et~al.}}{{Yang, Li, Li, and Lloyd}}}
+\bibcite{kvlink2025}{{28}{2025{b}}{{Yang et~al.}}{{Yang, Hou, Wei, Bao, and Chang}}}
+\bibcite{skypilot}{{29}{2023}{{Yang et~al.}}{{}}}
+\bibcite{yao2024cacheblend}{{30}{2024}{{Yao et~al.}}{{Yao, Li, Liu, Ray, Peng, Zhang, Stoica, Keutzer, and Mahoney}}}
+\bibcite{orca}{{31}{2022}{{Yu et~al.}}{{Yu, Jeong, Kim, Kim, and Chun}}}
+\bibcite{wildchat2024}{{32}{2024}{{Zhao et~al.}}{{Zhao, Ren, Hessel, Cardie, Choi, and Deng}}}
+\bibcite{lmsys2024}{{33}{2024{a}}{{Zheng et~al.}}{{Zheng, Chiang, Sheng, Li, Zhuang, Wu, Zhuang, Li, Lin, Xing, Gonzalez, Stoica, and Zhang}}}
+\bibcite{sglang2024}{{34}{2024{b}}{{Zheng et~al.}}{{Zheng, Yin, Xie, Sun, Huang, Yu, Cao, Kozyrakis, Stoica, Gonzalez, Barrett, and Sheng}}}
+\bibcite{distserve2024}{{35}{2024}{{Zhong et~al.}}{{Zhong, Liu, Chen, Hu, Zhu, Liu, Jin, and Zhang}}}
+\gdef \@abspage@last{15}
