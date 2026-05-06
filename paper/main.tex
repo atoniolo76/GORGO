@@ -474,7 +474,16 @@ roughly a hundred candidate evaluations
 \label{sec:baselines}
 % -----------------------------------------------------------------------
 
-We compare GORGO against five baseline policies.
+We compare GORGO against five baseline policies, each chosen because it
+isolates one signal that production gateways already deploy:
+\texttt{random} as the lower bound, \texttt{least-request} for
+request-count load (the LLM-gateway analogue of NGINX
+\texttt{least\_conn}), \texttt{least-load} for token-weighted load,
+\texttt{prefix-cache} for KV locality (the AIBrix configuration), and
+\texttt{simple-session-affinity} for static hash-based locality. GORGO
+attempts to subsume all five via Equation~\ref{eq:score}; the
+per-percentile patterns in \S\ref{sec:results} show which signal each
+baseline implicitly weights and where ignoring the others costs latency.
 
 \texttt{random} samples a replica uniformly per request; it is the lower
 bound.
@@ -824,37 +833,6 @@ queues or GPU pools. Both lines reduce the compute component of TTFT but
 do not resolve geo-routing trade-offs when locality and network latency
 conflict; GORGO is complementary and assumes an underlying stack that may
 already use either.
-
-% -----------------------------------------------------------------------
-\section{Discussion}
-\label{sec:discussion}
-% -----------------------------------------------------------------------
-
-\textbf{Centralized vs.\ distributed routing.} GORGO as evaluated runs as
-a single centralized proxy: one node holds the global radix trie, the
-RTT probe, and (for \texttt{gorgo-hillclimb}) the live tuner state. This
-choice keeps the cost model exact (every replica sees the same global
-view) and the search space two-dimensional. It also makes the proxy a
-single point of failure and a bandwidth bottleneck at sufficiently high
-arrival rate. A distributed variant in which each region runs a local
-GORGO proxy and replicas exchange compact peer summaries (cached-prefix
-digests, queued-token snapshots) would relax both constraints at the
-cost of staler signals. We expect the distributed variant to win when
-proxy bandwidth saturates or when wide-area links to the centralized
-node themselves become a routing-decision contributor; we leave that
-benchmark to future work.
-
-\textbf{Why these baselines.} The five non-GORGO baselines were chosen
-because each isolates one signal that production gateways already
-deploy: \texttt{random} as the lower bound, \texttt{least-request} for
-request-count load (the LLM-gateway analogue of NGINX
-\texttt{least\_conn}), \texttt{least-load} for token-weighted load,
-\texttt{prefix-cache} for KV-locality (the AIBrix configuration), and
-\texttt{simple-session-affinity} for static hash-based locality. GORGO
-attempts to subsume all five via the score in
-Equation~\ref{eq:score}; the per-percentile patterns in
-\S\ref{sec:results} show which signal each baseline is implicitly
-weighting and where ignoring the others costs latency.
 
 % -----------------------------------------------------------------------
 \section{Conclusion}
