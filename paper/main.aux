@@ -55,11 +55,11 @@
 \citation{qwen3technical}
 \@writefile{toc}{\contentsline {section}{\numberline {5}Baselines}{5}{section.5}\protected@file@percent }
 \newlabel{sec:baselines}{{5}{5}{Baselines}{section.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Experimental Setup}{5}{section.6}\protected@file@percent }
+\newlabel{sec:setup}{{6}{5}{Experimental Setup}{section.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{Hardware and software.}{5}{section*.5}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Cross-region RTT over W1 (probe from \texttt  {us-ashburn} proxy). The local replica stays near 26\,ms; the Frankfurt and Seoul legs vary by hundreds of ms within the window.}}{6}{figure.caption.6}\protected@file@percent }
 \newlabel{fig:rtt}{{2}{6}{Cross-region RTT over W1 (probe from \texttt {us-ashburn} proxy). The local replica stays near 26\,ms; the Frankfurt and Seoul legs vary by hundreds of ms within the window}{figure.caption.6}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {6}Experimental Setup}{6}{section.6}\protected@file@percent }
-\newlabel{sec:setup}{{6}{6}{Experimental Setup}{section.6}{}}
-\@writefile{toc}{\contentsline {paragraph}{Hardware and software.}{6}{section*.5}\protected@file@percent }
 \@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%.}}{7}{table.caption.7}\protected@file@percent }
 \newlabel{tab:w1}{{2}{7}{GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%}{table.caption.7}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GLM-5.1 W2 (April 2 00:30--01:00 UTC, $c{=}32$, cross-day evaluation). \texttt  {gorgo-static} deploys the W1-learned per-replica weights and does not adjust them. Bold is best in column.}}{7}{table.caption.8}\protected@file@percent }
@@ -95,10 +95,6 @@
 \citation{sarathi_serve}
 \citation{distserve2024}
 \citation{splitwise2024}
-\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Per-policy summary over W2 (April 2 cross-day, $c{=}32$). Top: TTFT percentiles (sorted by p95) and routing concentration. Bottom: smoothed median and p95 TTFT over the 30-minute window.}}{9}{figure.caption.11}\protected@file@percent }
-\newlabel{fig:w2_summary}{{4}{9}{Per-policy summary over W2 (April 2 cross-day, $c{=}32$). Top: TTFT percentiles (sorted by p95) and routing concentration. Bottom: smoothed median and p95 TTFT over the 30-minute window}{figure.caption.11}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {9}Related Work}{9}{section.9}\protected@file@percent }
-\newlabel{sec:related}{{9}{9}{Related Work}{section.9}{}}
 \bibstyle{plainnat}
 \bibdata{references}
 \bibcite{sarathi_serve}{{1}{2024}{{Agrawal et~al.}}{{Agrawal, Kedia, Panwar, Mohan, Kwatra, Gulavani, Ramjee, and Tumanov}}}
@@ -107,14 +103,16 @@
 \bibcite{aws_bedrock_xregion}{{4}{2026}{{Amazon Web Services}}{{}}}
 \bibcite{auer2002bandits}{{5}{2002}{{Auer et~al.}}{{Auer, Cesa-Bianchi, and Fischer}}}
 \bibcite{beyer2002es}{{6}{2002}{{Beyer and Schwefel}}{{}}}
+\@writefile{toc}{\contentsline {section}{\numberline {9}Related Work}{9}{section.9}\protected@file@percent }
+\newlabel{sec:related}{{9}{9}{Related Work}{section.9}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {10}Conclusion}{9}{section.10}\protected@file@percent }
+\newlabel{sec:conclusion}{{10}{9}{Conclusion}{section.10}{}}
 \bibcite{dlpm2025}{{7}{2025}{{Cao et~al.}}{{Cao, Wang, Mao, Hsu, Yin, Xia, Li, Liu, Zhang, Zhou, Sheng, Gonzalez, and Stoica}}}
 \bibcite{klpm2025}{{8}{2025}{{Dexter et~al.}}{{Dexter, Tang, Fatahi, Song, Dharamsi, and Gupta}}}
 \bibcite{nginx2024}{{9}{2024}{{F5 NGINX}}{{}}}
 \bibcite{glm2024}{{10}{2024}{{GLM Team}}{{}}}
 \bibcite{gke_gateway}{{11}{2026}{{Google Cloud}}{{}}}
 \bibcite{jain2025performance}{{12}{2025}{{Jain et~al.}}{{Jain, Parayil, Mallick, Choukse, Qin, Zhang, Goiri, Wang, Bansal, R{\"u}hle, Kulkarni, Kofsky, and Rajmohan}}}
-\@writefile{toc}{\contentsline {section}{\numberline {10}Conclusion}{10}{section.10}\protected@file@percent }
-\newlabel{sec:conclusion}{{10}{10}{Conclusion}{section.10}{}}
 \bibcite{karger1997}{{13}{1997}{{Karger et~al.}}{{Karger, Lehman, Leighton, Panigrahy, Levine, and Lewin}}}
 \bibcite{vllm2023}{{14}{2023}{{Kwon et~al.}}{{Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, and Stoica}}}
 \bibcite{chunkkv2025}{{15}{2025}{{Liu et~al.}}{{Liu, Tang, Dong, Li, Liu, Li, Hu, and Chu}}}
@@ -140,4 +138,4 @@
 \bibcite{lmsys2024}{{35}{2024{a}}{{Zheng et~al.}}{{Zheng, Chiang, Sheng, Li, Zhuang, Wu, Zhuang, Li, Lin, Xing, Gonzalez, Stoica, and Zhang}}}
 \bibcite{sglang2024}{{36}{2024{b}}{{Zheng et~al.}}{{Zheng, Yin, Xie, Sun, Huang, Yu, Cao, Kozyrakis, Stoica, Gonzalez, Barrett, and Sheng}}}
 \bibcite{distserve2024}{{37}{2024}{{Zhong et~al.}}{{Zhong, Liu, Chen, Hu, Zhu, Liu, Jin, and Zhang}}}
-\gdef \@abspage@last{15}
+\gdef \@abspage@last{14}

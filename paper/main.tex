@@ -47,12 +47,13 @@
 
 \usepackage[utf8]{inputenc} % allow utf-8 input
 \usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{amsfonts}       % blackboard math symbols (load before txfonts to avoid integral-symbol redefinition collisions)
+\usepackage{amsmath}        % equation environments and \mathrm, \setminus, etc.
+\usepackage{txfonts}        % Times Roman + matching math (Type 1); eliminates the Type 3 fallback that bare T1+Nimbus introduces
 \usepackage{hyperref}       % hyperlinks
 \usepackage{url}            % simple URL typesetting
 \usepackage{booktabs}       % professional-quality tables
-\usepackage{amsfonts}       % blackboard math symbols
-\usepackage{amsmath}        % equation environments and \mathrm, \setminus, etc.
-\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+% \usepackage{nicefrac}     % unused; left out to keep PDF Type 1 only
 \usepackage{microtype}      % microtypography
 \usepackage{xcolor}         % colors
 \usepackage{graphicx}       % \includegraphics for summary figure
@@ -684,23 +685,6 @@ initial descent during the first few hop cycles, then stable refinement.
 \label{fig:convergence_top}
 \end{figure}
 
-\textbf{Per-policy summary across W2.}
-Figure~\ref{fig:w2_summary} adds a per-policy view of W2 (cross-day
-evaluation): top-left is p50/p95/p99 sorted by p95, top-right is routing
-concentration (share of requests on the most-used replica), bottom panels
-plot smoothed median and p95 TTFT over the 30-minute window.
-\texttt{gorgo-static} (frozen W1 weights) ranks first on p95 with
-\texttt{gorgo-hillclimb} second; smoothed-p95 traces show \texttt{gorgo}
-variants are also visibly more stable across the window than baselines.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.92\linewidth]{figures/glm5_apr2_summary.png}
-\caption{Per-policy summary over W2 (April 2 cross-day, $c{=}32$). Top:
-  TTFT percentiles (sorted by p95) and routing concentration. Bottom:
-  smoothed median and p95 TTFT over the 30-minute window.}
-\label{fig:w2_summary}
-\end{figure}
 
 
 \textbf{Regime sensitivity (WildChat replay).}
