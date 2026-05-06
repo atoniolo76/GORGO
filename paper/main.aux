@@ -40,38 +40,40 @@
 \@writefile{toc}{\contentsline {section}{\numberline {3}Dataset}{3}{section.3}\protected@file@percent }
 \newlabel{sec:dataset}{{3}{3}{Dataset}{section.3}{}}
 \citation{qin2024mooncake}
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. $^*$LMSYS user count is from the dataset card \citep  {lmsys2024} (210K unique IPs across 1M conversations); the public schema does not expose the IP column, so we cannot recompute its intra-user reuse here and leave that cell as ``---''. $^\dagger $GLM-5.1 reports requests per user (not turns per conversation): our production trace partitions by user but does not carry a conversation identifier, so direct turns-per-conversation is not measurable.}}{4}{table.caption.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. $^*$LMSYS user count is from the dataset card \citep  {lmsys2024} (210K unique IPs across 1M conversations); the public schema does not expose the IP column, so we cannot recompute its intra-user reuse here and leave that cell as ``---''.}}{4}{table.caption.3}\protected@file@percent }
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
-\newlabel{tab:datasets}{{1}{4}{Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. $^*$LMSYS user count is from the dataset card \citep {lmsys2024} (210K unique IPs across 1M conversations); the public schema does not expose the IP column, so we cannot recompute its intra-user reuse here and leave that cell as ``---''. $^\dagger $GLM-5.1 reports requests per user (not turns per conversation): our production trace partitions by user but does not carry a conversation identifier, so direct turns-per-conversation is not measurable}{table.caption.3}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Three axes of dataset characterization. \textit  {Left}: average input tokens per request (log scale)---GLM-5.1 is 45$\times $ longer than LMSYS and 7$\times $ longer than WildChat. \textit  {Center}: multi-turn density on a log scale---LMSYS averages 2.0 turns per conversation, WildChat 2.5, while GLM-5.1 has 82.5 requests per user (different metric: production trace has no conversation IDs). \textit  {Right}: prefix-reuse breakdown---GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS's intra-user component is not measurable on the public schema (no IP column), so only its global savings is plotted.}}{4}{figure.caption.4}\protected@file@percent }
-\newlabel{fig:dataset_comparison}{{1}{4}{Three axes of dataset characterization. \textit {Left}: average input tokens per request (log scale)---GLM-5.1 is 45$\times $ longer than LMSYS and 7$\times $ longer than WildChat. \textit {Center}: multi-turn density on a log scale---LMSYS averages 2.0 turns per conversation, WildChat 2.5, while GLM-5.1 has 82.5 requests per user (different metric: production trace has no conversation IDs). \textit {Right}: prefix-reuse breakdown---GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS's intra-user component is not measurable on the public schema (no IP column), so only its global savings is plotted}{figure.caption.4}{}}
+\newlabel{tab:datasets}{{1}{4}{Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. $^*$LMSYS user count is from the dataset card \citep {lmsys2024} (210K unique IPs across 1M conversations); the public schema does not expose the IP column, so we cannot recompute its intra-user reuse here and leave that cell as ``---''}{table.caption.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Three axes of dataset characterization. \textit  {Left}: average input tokens per request (log scale)---GLM-5.1 is 45$\times $ longer than LMSYS and 7$\times $ longer than WildChat. \textit  {Center}: requests per user on a log scale---82 on GLM-5.1 vs.\ 4.8 on LMSYS-Chat-1M vs.\ 1.7 on WildChat-4.8M. \textit  {Right}: prefix-reuse breakdown---GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS's intra-user component is not measurable on the public schema (no IP column), so only its global savings is plotted.}}{4}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:dataset_comparison}{{1}{4}{Three axes of dataset characterization. \textit {Left}: average input tokens per request (log scale)---GLM-5.1 is 45$\times $ longer than LMSYS and 7$\times $ longer than WildChat. \textit {Center}: requests per user on a log scale---82 on GLM-5.1 vs.\ 4.8 on LMSYS-Chat-1M vs.\ 1.7 on WildChat-4.8M. \textit {Right}: prefix-reuse breakdown---GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS's intra-user component is not measurable on the public schema (no IP column), so only its global savings is plotted}{figure.caption.4}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {4}GORGO}{4}{section.4}\protected@file@percent }
 \newlabel{sec:method}{{4}{4}{GORGO}{section.4}{}}
+\newlabel{eq:score}{{1}{4}{GORGO}{equation.4.1}{}}
 \citation{rechenberg1973,beyer2002es}
 \citation{rechenberg1973,beyer2002es}
 \citation{mitzenmacher}
-\newlabel{eq:score}{{1}{5}{GORGO}{equation.4.1}{}}
+\citation{aibrix2024}
 \@writefile{toc}{\contentsline {section}{\numberline {5}Baselines}{5}{section.5}\protected@file@percent }
 \newlabel{sec:baselines}{{5}{5}{Baselines}{section.5}{}}
-\citation{aibrix2024}
 \citation{karger1997}
 \citation{sglang2024}
 \citation{qwen3technical}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces GLM-5.1 W1 (tuning window, $c{=}32$). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%.}}{6}{table.caption.6}\protected@file@percent }
+\newlabel{tab:w1}{{2}{6}{GLM-5.1 W1 (tuning window, $c{=}32$). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%}{table.caption.6}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {6}Experimental Setup}{6}{section.6}\protected@file@percent }
 \newlabel{sec:setup}{{6}{6}{Experimental Setup}{section.6}{}}
 \@writefile{toc}{\contentsline {paragraph}{Hardware and software.}{6}{section*.5}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {7}Results}{6}{section.7}\protected@file@percent }
 \newlabel{sec:results}{{7}{6}{Results}{section.7}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces GLM-5.1 W1 (tuning window, $c{=}32$). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%.}}{7}{table.caption.6}\protected@file@percent }
-\newlabel{tab:w1}{{2}{7}{GLM-5.1 W1 (tuning window, $c{=}32$). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%}{table.caption.6}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GLM-5.1 W2 ($c{=}32$, held-out evaluation: 30-minute window immediately following W1). All GORGO variants are initialized with the hyperparameters \texttt  {gorgo-hillclimb} ended W1 at ($t_{\mathrm  {prefill}}{=}0.983$, $\mathrm  {queued\_tokens\_weight}{=}4.4\times 10^{-4}$); \texttt  {gorgo-static} freezes them, the others continue tuning. Bold is best in column.}}{7}{table.caption.7}\protected@file@percent }
 \newlabel{tab:w2}{{3}{7}{GLM-5.1 W2 ($c{=}32$, held-out evaluation: 30-minute window immediately following W1). All GORGO variants are initialized with the hyperparameters \texttt {gorgo-hillclimb} ended W1 at ($t_{\mathrm {prefill}}{=}0.983$, $\mathrm {queued\_tokens\_weight}{=}4.4\times 10^{-4}$); \texttt {gorgo-static} freezes them, the others continue tuning. Bold is best in column}{table.caption.7}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces GLM-5.1 Stress, nighttime window ($c{=}64$). Same time-of-day band as W1, day after W1. \texttt  {simple-session-affinity} did not complete this sweep and is omitted. Bold is best in column.}}{7}{table.caption.8}\protected@file@percent }
+\newlabel{tab:stress_night}{{4}{7}{GLM-5.1 Stress, nighttime window ($c{=}64$). Same time-of-day band as W1, day after W1. \texttt {simple-session-affinity} did not complete this sweep and is omitted. Bold is best in column}{table.caption.8}{}}
 \citation{distserve2024,splitwise2024}
 \citation{kvflow2025,lpc2025}
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces GLM-5.1 Stress, nighttime window ($c{=}64$). Same time-of-day band as W1, day after W1. \texttt  {simple-session-affinity} did not complete this sweep and is omitted. Bold is best in column.}}{8}{table.caption.8}\protected@file@percent }
-\newlabel{tab:stress_night}{{4}{8}{GLM-5.1 Stress, nighttime window ($c{=}64$). Same time-of-day band as W1, day after W1. \texttt {simple-session-affinity} did not complete this sweep and is omitted. Bold is best in column}{table.caption.8}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces GLM-5.1 Stress, daytime window ($c{=}64$, same day as W1, midday traffic regime). Bold is best in column.}}{8}{table.caption.9}\protected@file@percent }
 \newlabel{tab:stress_midday}{{5}{8}{GLM-5.1 Stress, daytime window ($c{=}64$, same day as W1, midday traffic regime). Bold is best in column}{table.caption.9}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Best-cache-pick rate over the W1 tuning window for five policies. \texttt  {gorgo-hillclimb} (red) converges to $\sim $95--100\% within the first few minutes; baselines either oscillate or stay flat at lower rates.}}{8}{figure.caption.10}\protected@file@percent }
+\newlabel{fig:convergence_top}{{2}{8}{Best-cache-pick rate over the W1 tuning window for five policies. \texttt {gorgo-hillclimb} (red) converges to $\sim $95--100\% within the first few minutes; baselines either oscillate or stay flat at lower rates}{figure.caption.10}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {8}Limitations}{8}{section.8}\protected@file@percent }
 \newlabel{sec:limitations}{{8}{8}{Limitations}{section.8}{}}
 \citation{sglang2024}
@@ -95,14 +97,12 @@
 \citation{sarathi_serve}
 \citation{distserve2024}
 \citation{splitwise2024}
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Best-cache-pick rate over the W1 tuning window for five policies. \texttt  {gorgo-hillclimb} (red) converges to $\sim $95--100\% within the first few minutes; baselines either oscillate or stay flat at lower rates.}}{9}{figure.caption.10}\protected@file@percent }
-\newlabel{fig:convergence_top}{{2}{9}{Best-cache-pick rate over the W1 tuning window for five policies. \texttt {gorgo-hillclimb} (red) converges to $\sim $95--100\% within the first few minutes; baselines either oscillate or stay flat at lower rates}{figure.caption.10}{}}
+\bibstyle{plainnat}
+\bibdata{references}
 \@writefile{toc}{\contentsline {section}{\numberline {9}Related Work}{9}{section.9}\protected@file@percent }
 \newlabel{sec:related}{{9}{9}{Related Work}{section.9}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {10}Conclusion}{9}{section.10}\protected@file@percent }
 \newlabel{sec:conclusion}{{10}{9}{Conclusion}{section.10}{}}
-\bibstyle{plainnat}
-\bibdata{references}
 \bibcite{sarathi_serve}{{1}{2024}{{Agrawal et~al.}}{{Agrawal, Kedia, Panwar, Mohan, Kwatra, Gulavani, Ramjee, and Tumanov}}}
 \bibcite{aibrix2024}{{2}{2024}{{AIBrix Team}}{{}}}
 \bibcite{cherrypick}{{3}{2017}{{Alipourfard et~al.}}{{Alipourfard, Liu, Chen, Venkataraman, Yu, and Zhang}}}
