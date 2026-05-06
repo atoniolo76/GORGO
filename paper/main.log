@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.4.19)  6 MAY 2026 20:58
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.4.19)  6 MAY 2026 21:46
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -748,57 +748,42 @@ Package microtype Info: Loading generic protrusion settings for font family
 
 {/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}{/usr/share/texlive/texmf-di
 st/fonts/enc/dvips/base/8r.enc}] [2]
-Overfull \hbox (23.41197pt too wide) in paragraph at lines 333--342
- [][] 
- []
-
 <figures/dataset_comparison.png, id=156, 1075.6185pt x 356.9335pt>
 File: figures/dataset_comparison.png Graphic file (type png)
 <use figures/dataset_comparison.png>
-Package pdftex.def Info: figures/dataset_comparison.png  used on input line 346
+Package pdftex.def Info: figures/dataset_comparison.png  used on input line 352
 .
 (pdftex.def)             Requested size: 397.48499pt x 131.89993pt.
 
 Underfull \vbox (badness 1215) has occurred while \output is active []
 
  [3]
-Overfull \hbox (25.40448pt too wide) detected at line 407
-[][][][]\OT1/txr/m/n/10 (\OML/txmi/m/it/10 u; r\OT1/txr/m/n/10 ) = [][] + \OML/
-txmi/m/it/10 t[] \OMS/txsy/m/n/10 ^^A [][]\OT1/txr/m/n/10 0\OML/txmi/m/it/10 ; 
-\OMS/txsy/m/n/10 j\OML/txmi/m/it/10 x[]\OMS/txsy/m/n/10 j ^^@ j\OML/txmi/m/it/1
-0 x[] \OMS/txsy/m/n/10 \ \OML/txmi/m/it/10 c[]\OMS/txsy/m/n/10 j[] \OT1/txr/m/n
-/10 + [] \OMS/txsy/m/n/10 ^^A [][][] \OT1/txr/m/n/10 + [][][]\OML/txmi/m/it/10 
-:
- []
+Underfull \vbox (badness 3668) has occurred while \output is active []
 
-[4 <./figures/dataset_comparison.png>]
-Underfull \hbox (badness 5175) in paragraph at lines 497--502
+ [4 <./figures/dataset_comparison.png>]
+Underfull \hbox (badness 5175) in paragraph at lines 507--512
 []\T1/txtt/m/n/10 least-request \T1/txr/m/n/10 (+20) routes to the replica with
  the fewest in-flight re-quests, scor-ing by
  []
 
-
-Underfull \vbox (badness 10000) has occurred while \output is active []
-
- [5]
+[5]
 LaTeX Font Info:    Font shape `T1/txr/b/n' in size <9> not available
-(Font)              Font shape `T1/txr/bx/n' tried instead on input line 587.
-
-[6] [7]
+(Font)              Font shape `T1/txr/bx/n' tried instead on input line 597.
+ [6] [7]
 <figures/convergence_top_0100.png, id=235, 2506.36375pt x 766.865pt>
 File: figures/convergence_top_0100.png Graphic file (type png)
 <use figures/convergence_top_0100.png>
 Package pdftex.def Info: figures/convergence_top_0100.png  used on input line 7
-39.
+49.
 (pdftex.def)             Requested size: 397.48499pt x 121.61267pt.
- [8 <./figures/convergence_top_0100.png>] (./main.bbl [9] [10] [11])
-[12] [13] [14]
+ [8] [9 <./figures/convergence_top_0100.png>] (./main.bbl [10]
+[11]) [12] [13] [14]
 LaTeX Font Info:    Trying to load font information for TS1+txr on input line 9
-73.
+83.
  (/usr/share/texlive/texmf-dist/tex/latex/txfonts/ts1txr.fd
 File: ts1txr.fd 2000/12/15 v3.1
 )
-Underfull \hbox (badness 5533) in paragraph at lines 974--975
+Underfull \hbox (badness 5533) in paragraph at lines 984--985
 []$\T1/txtt/m/n/10 specs / policy _ matrix _ abstract _ night _ w2 . json$ \T1/
 txr/m/n/10 (+20) --- W2 spec (eight poli-cies,
  []
@@ -812,13 +797,13 @@ Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: 12547B7B3C715A6FA0D852FDF9ABA2C8;1223.
  ) 
 Here is how much of TeX's memory you used:
- 16576 strings out of 476106
- 254503 string characters out of 5793933
- 1949975 words of memory out of 5000000
- 37766 multiletter control sequences out of 15000+600000
- 636342 words of font info for 454 fonts, out of 8000000 for 9000
+ 16572 strings out of 476106
+ 254519 string characters out of 5793933
+ 1952975 words of memory out of 5000000
+ 37768 multiletter control sequences out of 15000+600000
+ 637280 words of font info for 450 fonts, out of 8000000 for 9000
  59 hyphenation exceptions out of 8191
- 72i,9n,79p,1001b,653s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 72i,11n,79p,1001b,649s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/txfonts/rtcxr.pfb></usr/sha
 re/texlive/texmf-dist/fonts/type1/public/txfonts/rtxb.pfb></usr/share/texlive/t
 exmf-dist/fonts/type1/public/txfonts/rtxi.pfb></usr/share/texlive/texmf-dist/fo
@@ -830,7 +815,7 @@ texlive/texmf-dist/fonts/type1/urw/helvetic/uhvr8a.pfb></usr/share/texlive/texm
 f-dist/fonts/type1/urw/times/utmb8a.pfb></usr/share/texlive/texmf-dist/fonts/ty
 pe1/urw/times/utmr8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/u
 tmri8a.pfb>
-Output written on main.pdf (15 pages, 417073 bytes).
+Output written on main.pdf (15 pages, 417502 bytes).
 PDF statistics:
  471 PDF objects out of 1000 (max. 8388607)
  419 compressed objects within 5 object streams
