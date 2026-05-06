@@ -301,7 +301,8 @@ underestimate the gain from joint cache--network--queue-aware routing.
 \textbf{GLM-5.1 production trace.}
 To measure routing in the regime where the trade-offs actually arise, we
 compile a long-context, multi-turn chatbot dataset from production inference
-traces of Modal's free GLM-5.1 endpoint \citep{glm2024}. The corpus contains
+traces of a commercial inference provider's free GLM-5.1 endpoint
+\citep{glm2024}. The corpus contains
 411{,}169 requests over 7 days from 4{,}984 distinct users, yielding $\sim$82
 requests per user on average, with an average input length of 21{,}043 tokens
 and 53.7\% intra-user token-weighted prefix reuse. Reuse is measured with a
@@ -443,14 +444,13 @@ should improve the incumbent. We track the acceptance rate $m$ over a
 trailing window and adjust $\sigma$ multiplicatively---decreasing it (factor
 $\sim$0.82) when $m > 1/5$ (the search is too tight to make progress) and
 increasing it (factor $\sim$1/0.82) when $m < 1/5$ (the search is too loose
-and rarely finds improvements). The 1/5 rule is the load-bearing element of the search:
-$(1{+}1)$-ES with adaptive $\sigma$ is a global optimizer in continuous
-parameter spaces \citep{rechenberg1973}, and matching empirical acceptance
-to 1/5 keeps the proposal scale calibrated for fast escape from poor
-regions early and refinement near the optimum late. On a 30-minute window
-with a 64-sample cohort and 16-sample hop, this drives the search to
-within a few percent of the global optimum in roughly a hundred candidate
-evaluations (Fig.~\ref{fig:cache_convergence}b).
+and rarely finds improvements). The 1/5 rule is what makes online tuning practical at our timescales:
+matching empirical acceptance to 1/5 keeps the proposal scale calibrated
+for fast escape from poor regions early and refinement near the best-found
+incumbent late. On a 30-minute window with a 64-sample cohort and
+16-sample hop, this drives the search to within a few percent of the
+best-found incumbent in roughly a hundred candidate evaluations
+(Fig.~\ref{fig:cache_convergence}b).
 
 % -----------------------------------------------------------------------
 \section{Baselines}
@@ -671,26 +671,6 @@ ES adapts to higher load. \texttt{prefix-cache} also improves 19.9\% on p95
 under stress (1.740\,s$\to$1.394\,s), suggesting that at higher load the
 prefix-cache hit rate goes up enough to offset its lack of load-balancing.
 
-\begin{figure}[t]
-\centering
-\begin{subfigure}{0.32\textwidth}
-\includegraphics[width=\linewidth]{figures/glm5_w1_summary.png}
-\caption{W1 (Apr 1, $c{=}32$).}
-\end{subfigure}\hfill
-\begin{subfigure}{0.32\textwidth}
-\includegraphics[width=\linewidth]{figures/glm5_apr2_summary.png}
-\caption{W2 (Apr 2 cross-day, $c{=}32$).}
-\end{subfigure}\hfill
-\begin{subfigure}{0.32\textwidth}
-\includegraphics[width=\linewidth]{figures/glm5_stress_summary.png}
-\caption{Stress (Apr 2, $c{=}64$).}
-\end{subfigure}
-\caption{TTFT distributions on the GLM-5.1 trace across the three windows.
-  In each window, two GORGO variants together cover the lowest TTFT at p50,
-  p95, and p99 against all baseline policies.}
-\label{fig:percentiles}
-\end{figure}
-
 \textbf{Cache-hit and convergence diagnostics.}
 Figure~\ref{fig:cache_convergence} shows two intermediate signals from W2.
 The cache-hit-rate panel (a) confirms that \texttt{gorgo-static} and
@@ -742,46 +722,32 @@ on long-context, high-reuse traffic; we discuss this in
 % -----------------------------------------------------------------------
 
 \textbf{Statistical scope.}
-The percentile-sweep claim rests on three 30-minute windows of one production
-trace: W1 (April 1, $c{=}32$, tuning), W2 (April 2, $c{=}32$, cross-day
-evaluation), and Stress (April 2, $c{=}64$). Each policy is run once per
-window. With ${\sim}2{,}500$--$4{,}800$ successful responses, p99 has
-approximate standard error $\sigma_{\mathrm{TTFT}} /
-\sqrt{n \cdot 0.01 \cdot 0.99} \approx 0.05$--$0.07$\,s. In W2 and Stress the
-GORGO p95 and p99 wins are several standard errors clear of the next baseline;
-in W1 the p99 lead is $\sim$1\,SE. Confidence intervals from cross-window
-replication on additional time-of-day slices remain future work.
+Three 30-minute windows from one production trace; each policy run once
+per window. With ${\sim}2{,}500$--$4{,}800$ successful responses, p99
+standard error is $\sigma_{\mathrm{TTFT}}/\sqrt{n\cdot 0.01\cdot 0.99}
+\approx 0.05$--$0.07$\,s. GORGO p95/p99 wins are several SE clear of the
+next baseline in W2 and Stress; in W1 the p99 lead is $\sim$1\,SE.
+Cross-window replication on additional time-of-day slices remains future
+work.
 \textbf{Regime sensitivity.}
-The WildChat replay (\S\ref{sec:results}) shows that GORGO's advantage is
-specific to long-context, high-reuse traffic: on a corpus where prompts
-average 2{,}900 tokens and intra-user reuse is 5.3\%, the cost model's
-prefill term is small, the per-token rate parameters do not converge during
-a 30-minute window, and \texttt{simple-session-affinity} wins. We claim no
-universal improvement; we claim improvement in the regime characterized in
-\S\ref{sec:dataset}.
-\textbf{Operational scope.}
-Each policy ran on its own dedicated three-replica fleet, so cache state is
-single-tenant; multi-tenant sharing changes the queue and cache dynamics
-that GORGO's $t_{\mathrm{decode}}$ term captures and is not validated here.
-The routing proxy is centralized and is therefore a single point of failure;
-a distributed GORGO variant using peer-summary coordination is sketched in
-our design but not benchmarked, and we expect distributed coordination to
-win for proxy-bandwidth-bound regimes that this evaluation does not reach.
-\textbf{Methodological caveats.}
-\texttt{gorgo-autotune} is the weakest GORGO variant on GLM-5.1: its
-median-of-rates fit treats $t_{\mathrm{prefill}}$ as an identifiable physical
-rate, but $({\rm TTFT} - {\rm rtt})/\mathrm{uncached}$ inflates when uncached
-counts are small (high cache hit), and the variant drifts---a known failure
-mode of identifiability-style fits relative to black-box optimization.
-\texttt{gorgo-hillclimb} requires several hop cycles to converge from a
-random starting point; in our 30-minute windows this fits comfortably
-(Fig.~\ref{fig:cache_convergence}b), but very short traffic windows may not.
-\textbf{System scope.}
-All replicas use identical GPU configurations; the fleet does not split
-prefill and decode \citep{distserve2024,splitwise2024}, which would require
-an additional routing term. GORGO uses only metrics exposed by an
-HTTP-fronted SGLang/vLLM server, not scheduler-internal information
-\citep{kvflow2025,lpc2025} that would tighten the prefill estimate.
+The WildChat replay (\S\ref{sec:results}) shows GORGO's advantage is
+specific to long-context, high-reuse traffic: on prompts averaging
+2{,}900 tokens with 5.3\% intra-user reuse, the prefill term is small,
+the per-token rates do not converge in 30 minutes, and
+\texttt{simple-session-affinity} wins. We claim improvement in the regime
+characterized in \S\ref{sec:dataset}, not universally.
+\textbf{Methodological and operational caveats.}
+\texttt{gorgo-autotune} is the weakest GORGO variant on GLM-5.1 because the
+per-sample rate $({\rm TTFT}-{\rm rtt})/\mathrm{uncached}$ inflates at high
+cache hit, biasing the fit. \texttt{gorgo-hillclimb} requires several hop
+cycles to converge; this fits comfortably in 30-minute windows but not in
+arbitrarily short ones. Each policy ran on a single-tenant three-replica
+fleet; the centralized proxy is a single point of failure, and a
+distributed peer-summary GORGO variant is sketched but not benchmarked.
+The fleet uses homogeneous GPUs and does not split prefill/decode
+\citep{distserve2024,splitwise2024}, which would require an additional
+routing term; GORGO uses only HTTP-exposed metrics, not scheduler-internal
+state \citep{kvflow2025,lpc2025} that could tighten the prefill estimate.
 
 % -----------------------------------------------------------------------
 \section{Related Work}
