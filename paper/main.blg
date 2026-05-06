@@ -5,45 +5,45 @@ The style file: plainnat.bst
 Database file #1: references.bib
 Warning--empty journal in qwen3technical
 Warning--empty journal in rechenberg1973
-You've used 35 entries,
+You've used 33 entries,
             2773 wiz_defined-function locations,
-            736 strings with 12363 characters,
-and the built_in function-call counts, 20286 in all, are:
-= -- 1503
-> -- 1984
-< -- 11
-+ -- 670
-- -- 633
-* -- 1771
-:= -- 3276
-add.period$ -- 107
-call.type$ -- 35
-change.case$ -- 314
-chr.to.int$ -- 33
-cite$ -- 72
-duplicate$ -- 722
-empty$ -- 1299
-format.name$ -- 671
-if$ -- 4092
+            723 strings with 11896 characters,
+and the built_in function-call counts, 19284 in all, are:
+= -- 1420
+> -- 1917
+< -- 10
++ -- 647
+- -- 612
+* -- 1687
+:= -- 3121
+add.period$ -- 101
+call.type$ -- 33
+change.case$ -- 301
+chr.to.int$ -- 31
+cite$ -- 68
+duplicate$ -- 678
+empty$ -- 1216
+format.name$ -- 648
+if$ -- 3885
 int.to.chr$ -- 3
 int.to.str$ -- 1
-missing$ -- 24
-newline$ -- 185
-num.names$ -- 140
-pop$ -- 750
+missing$ -- 22
+newline$ -- 175
+num.names$ -- 132
+pop$ -- 721
 preamble$ -- 1
-purify$ -- 279
+purify$ -- 268
 quote$ -- 0
-skip$ -- 629
+skip$ -- 598
 stack$ -- 0
-substring$ -- 101
-swap$ -- 56
+substring$ -- 66
+swap$ -- 53
 text.length$ -- 0
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 385
+type$ -- 363
 warning$ -- 2
-while$ -- 107
+while$ -- 99
 width$ -- 0
-write$ -- 430
+write$ -- 405
 (There were 2 warnings)

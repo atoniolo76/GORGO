@@ -38,17 +38,18 @@
 \citation{wildchat2024}
 \citation{skywalker}
 \citation{glm2024}
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings.}}{3}{table.caption.3}\protected@file@percent }
-\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
-\newlabel{tab:datasets}{{1}{3}{Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings}{table.caption.3}{}}
+\citation{qin2024mooncake}
 \@writefile{toc}{\contentsline {section}{\numberline {3}Dataset}{3}{section.3}\protected@file@percent }
 \newlabel{sec:dataset}{{3}{3}{Dataset}{section.3}{}}
-\citation{qin2024mooncake}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. LMSYS-Chat-1M does not expose a stable user identifier (only conversation IDs), so its intra-user reuse and per-user-counts are reported as ``---'' (treating each conversation as a separate user yields essentially zero intra-user reuse).}}{4}{table.caption.3}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:datasets}{{1}{4}{Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. LMSYS-Chat-1M does not expose a stable user identifier (only conversation IDs), so its intra-user reuse and per-user-counts are reported as ``---'' (treating each conversation as a separate user yields essentially zero intra-user reuse)}{table.caption.3}{}}
 \@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Token-weighted prefix-reuse breakdown for the three datasets. GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS has no per-user signal at all.}}{4}{figure.caption.4}\protected@file@percent }
 \newlabel{fig:reuse_composition}{{1}{4}{Token-weighted prefix-reuse breakdown for the three datasets. GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS has no per-user signal at all}{figure.caption.4}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {4}GORGO}{4}{section.4}\protected@file@percent }
 \newlabel{sec:method}{{4}{4}{GORGO}{section.4}{}}
 \newlabel{eq:score}{{1}{4}{GORGO}{equation.4.1}{}}
+\citation{rechenberg1973}
 \citation{rechenberg1973}
 \citation{rechenberg1973}
 \citation{nginx2024}
@@ -92,13 +93,9 @@
 \citation{jain2025performance}
 \citation{decima}
 \citation{cherrypick}
-\citation{rechenberg1973}
 \citation{sarathi_serve}
 \citation{distserve2024}
 \citation{splitwise2024}
-\citation{mitzenmacher}
-\citation{karger1997}
-\citation{aibrix2024,nginx2024}
 \@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Diagnostic intermediates. (a) GORGO variants sustain higher and steadier prefix-hit rates than load-only baselines and avoid the \texttt  {prefix-cache} spike-and-collapse pattern. (b) Rechenberg's 1/5-success rule produces fast initial descent followed by stable refinement of the rolling-window p95 TTFT objective.}}{9}{figure.caption.11}\protected@file@percent }
 \newlabel{fig:cache_convergence}{{4}{9}{Diagnostic intermediates. (a) GORGO variants sustain higher and steadier prefix-hit rates than load-only baselines and avoid the \texttt {prefix-cache} spike-and-collapse pattern. (b) Rechenberg's 1/5-success rule produces fast initial descent followed by stable refinement of the rolling-window p95 TTFT objective}{figure.caption.11}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {9}Related Work}{9}{section.9}\protected@file@percent }
@@ -115,31 +112,29 @@
 \bibcite{glm2024}{{8}{2024}{{GLM Team}}{{}}}
 \bibcite{gke_gateway}{{9}{2026}{{Google Cloud}}{{}}}
 \bibcite{jain2025performance}{{10}{2025}{{Jain et~al.}}{{Jain, Parayil, Mallick, Choukse, Qin, Zhang, Goiri, Wang, Bansal, R{\"u}hle, Kulkarni, Kofsky, and Rajmohan}}}
-\bibcite{karger1997}{{11}{1997}{{Karger et~al.}}{{Karger, Lehman, Leighton, Panigrahy, Levine, and Lewin}}}
-\bibcite{vllm2023}{{12}{2023}{{Kwon et~al.}}{{Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, and Stoica}}}
-\bibcite{chunkkv2025}{{13}{2025}{{Liu et~al.}}{{Liu, Tang, Dong, Li, Liu, Li, Hu, and Chu}}}
+\bibcite{vllm2023}{{11}{2023}{{Kwon et~al.}}{{Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, and Stoica}}}
+\bibcite{chunkkv2025}{{12}{2025}{{Liu et~al.}}{{Liu, Tang, Dong, Li, Liu, Li, Hu, and Chu}}}
 \@writefile{toc}{\contentsline {section}{\numberline {10}Conclusion}{10}{section.10}\protected@file@percent }
 \newlabel{sec:conclusion}{{10}{10}{Conclusion}{section.10}{}}
-\bibcite{skyserve}{{14}{2025}{{Mao et~al.}}{{Mao, Yang, Phanishayee, Mahajan, and Stoica}}}
-\bibcite{decima}{{15}{2019}{{Mao et~al.}}{{Mao, Schwarzkopf, Venkatakrishnan, Meng, and Alizadeh}}}
-\bibcite{mitzenmacher}{{16}{2001}{{Mitzenmacher}}{{}}}
-\bibcite{modal_prefix_caching}{{17}{2026}{{Modal}}{{}}}
-\bibcite{kvflow2025}{{18}{2025}{{Pan et~al.}}{{Pan, Patel, Hu, Shen, Guan, Li, Qin, Wang, and Ding}}}
-\bibcite{splitwise2024}{{19}{2024}{{Patel et~al.}}{{Patel, Choukse, Zhang, Shah, Goiri, Maleki, and Bianchini}}}
-\bibcite{qin2024mooncake}{{20}{2024}{{Qin et~al.}}{{Qin, Li, He, Zhang, Wu, Zheng, Chen, Xu, Yao, Wei, Zhao, Huang, Yang, and Wu}}}
-\bibcite{qwen3technical}{{21}{2025}{{Qwen Team}}{{}}}
-\bibcite{rechenberg1973}{{22}{1973}{{Rechenberg}}{{}}}
-\bibcite{llumnix2024}{{23}{2024}{{Sun et~al.}}{{Sun, Huang, Tang, Wang, Zhang, Li, Yang, Zhang, Wang, Wu, Cao, Lin, et~al.}}}
-\bibcite{vulimiri2015}{{24}{2015}{{Vulimiri et~al.}}{{Vulimiri, Curino, Godfrey, Jungblut, Padhye, and Varghese}}}
-\bibcite{routerwu2025}{{25}{2025}{{Wu and Silwal}}{{}}}
-\bibcite{skywalker}{{26}{2025}{{Xia et~al.}}{{Xia, Mao, Kerney, Jackson, Li, Xing, Shenker, and Stoica}}}
-\bibcite{lpc2025}{{27}{2025{a}}{{Yang et~al.}}{{Yang, Li, Li, and Lloyd}}}
-\bibcite{kvlink2025}{{28}{2025{b}}{{Yang et~al.}}{{Yang, Hou, Wei, Bao, and Chang}}}
-\bibcite{skypilot}{{29}{2023}{{Yang et~al.}}{{}}}
-\bibcite{yao2024cacheblend}{{30}{2024}{{Yao et~al.}}{{Yao, Li, Liu, Ray, Peng, Zhang, Stoica, Keutzer, and Mahoney}}}
-\bibcite{orca}{{31}{2022}{{Yu et~al.}}{{Yu, Jeong, Kim, Kim, and Chun}}}
-\bibcite{wildchat2024}{{32}{2024}{{Zhao et~al.}}{{Zhao, Ren, Hessel, Cardie, Choi, and Deng}}}
-\bibcite{lmsys2024}{{33}{2024{a}}{{Zheng et~al.}}{{Zheng, Chiang, Sheng, Li, Zhuang, Wu, Zhuang, Li, Lin, Xing, Gonzalez, Stoica, and Zhang}}}
-\bibcite{sglang2024}{{34}{2024{b}}{{Zheng et~al.}}{{Zheng, Yin, Xie, Sun, Huang, Yu, Cao, Kozyrakis, Stoica, Gonzalez, Barrett, and Sheng}}}
-\bibcite{distserve2024}{{35}{2024}{{Zhong et~al.}}{{Zhong, Liu, Chen, Hu, Zhu, Liu, Jin, and Zhang}}}
+\bibcite{skyserve}{{13}{2025}{{Mao et~al.}}{{Mao, Yang, Phanishayee, Mahajan, and Stoica}}}
+\bibcite{decima}{{14}{2019}{{Mao et~al.}}{{Mao, Schwarzkopf, Venkatakrishnan, Meng, and Alizadeh}}}
+\bibcite{modal_prefix_caching}{{15}{2026}{{Modal}}{{}}}
+\bibcite{kvflow2025}{{16}{2025}{{Pan et~al.}}{{Pan, Patel, Hu, Shen, Guan, Li, Qin, Wang, and Ding}}}
+\bibcite{splitwise2024}{{17}{2024}{{Patel et~al.}}{{Patel, Choukse, Zhang, Shah, Goiri, Maleki, and Bianchini}}}
+\bibcite{qin2024mooncake}{{18}{2024}{{Qin et~al.}}{{Qin, Li, He, Zhang, Wu, Zheng, Chen, Xu, Yao, Wei, Zhao, Huang, Yang, and Wu}}}
+\bibcite{qwen3technical}{{19}{2025}{{Qwen Team}}{{}}}
+\bibcite{rechenberg1973}{{20}{1973}{{Rechenberg}}{{}}}
+\bibcite{llumnix2024}{{21}{2024}{{Sun et~al.}}{{Sun, Huang, Tang, Wang, Zhang, Li, Yang, Zhang, Wang, Wu, Cao, Lin, et~al.}}}
+\bibcite{vulimiri2015}{{22}{2015}{{Vulimiri et~al.}}{{Vulimiri, Curino, Godfrey, Jungblut, Padhye, and Varghese}}}
+\bibcite{routerwu2025}{{23}{2025}{{Wu and Silwal}}{{}}}
+\bibcite{skywalker}{{24}{2025}{{Xia et~al.}}{{Xia, Mao, Kerney, Jackson, Li, Xing, Shenker, and Stoica}}}
+\bibcite{lpc2025}{{25}{2025{a}}{{Yang et~al.}}{{Yang, Li, Li, and Lloyd}}}
+\bibcite{kvlink2025}{{26}{2025{b}}{{Yang et~al.}}{{Yang, Hou, Wei, Bao, and Chang}}}
+\bibcite{skypilot}{{27}{2023}{{Yang et~al.}}{{}}}
+\bibcite{yao2024cacheblend}{{28}{2024}{{Yao et~al.}}{{Yao, Li, Liu, Ray, Peng, Zhang, Stoica, Keutzer, and Mahoney}}}
+\bibcite{orca}{{29}{2022}{{Yu et~al.}}{{Yu, Jeong, Kim, Kim, and Chun}}}
+\bibcite{wildchat2024}{{30}{2024}{{Zhao et~al.}}{{Zhao, Ren, Hessel, Cardie, Choi, and Deng}}}
+\bibcite{lmsys2024}{{31}{2024{a}}{{Zheng et~al.}}{{Zheng, Chiang, Sheng, Li, Zhuang, Wu, Zhuang, Li, Lin, Xing, Gonzalez, Stoica, and Zhang}}}
+\bibcite{sglang2024}{{32}{2024{b}}{{Zheng et~al.}}{{Zheng, Yin, Xie, Sun, Huang, Yu, Cao, Kozyrakis, Stoica, Gonzalez, Barrett, and Sheng}}}
+\bibcite{distserve2024}{{33}{2024}{{Zhong et~al.}}{{Zhong, Liu, Chen, Hu, Zhu, Liu, Jin, and Zhang}}}
 \gdef \@abspage@last{15}

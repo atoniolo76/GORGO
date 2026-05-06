@@ -239,15 +239,18 @@ implicitly select for can dominate TTFT \citep{skywalker,qin2024mooncake}.
 
 \textbf{Routing-cost decomposition.}
 For request $r$ routed to replica $u$, TTFT depends on three signal
-families the gateway can observe:
-(1)~\emph{network latency}, the proxy-to-replica RTT $\mathrm{rtt}(u)$
-\citep{vulimiri2015};
-(2)~\emph{replica load}---decode tokens already in the running batch,
-prefill tokens queued ahead of $r$, and $r$'s own prefill once admitted;
-and
-(3)~\emph{available prefix cache}---overlap with the running batch, with
-queued requests, and with $r$'s own cached prior turns. A routing policy
-is a function over these signals; the question is which function.
+families the gateway can observe, each of which decomposes further:
+(1)~\emph{Network latency}: the proxy-to-replica RTT $\mathrm{rtt}(u)$
+\citep{vulimiri2015}.
+(2)~\emph{Replica load}, comprising (2a)~decode tokens of running
+requests in the current batch, (2b)~prefill tokens of requests queued
+ahead of $r$, and (2c)~$r$'s own prefill cost once admitted.
+(3)~\emph{Available prefix cache}, comprising prefix overlap with
+(3a)~the running batch (some KV state may already be evicted),
+(3b)~queued requests (their KV state will exist by the time $r$ runs),
+and (3c)~$r$'s own cached prior turns under the same conversation.
+A routing policy is a function over these nine sub-signals; no production
+policy we are aware of jointly weighs even all three top-level families.
 
 \textbf{Common policies.}
 We consider five non-GORGO baselines representative of production systems:
@@ -314,15 +317,19 @@ separate user.
 \small
 \caption{Dataset comparison along axes that determine the routing-decision
   surface. Token counts use the same byte-pair tokenizer in all rows. Reuse
-  percentages are token-weighted prefix-trie savings.}
+  percentages are token-weighted prefix-trie savings.
+  LMSYS-Chat-1M does not expose a stable user identifier (only conversation
+  IDs), so its intra-user reuse and per-user-counts are reported as ``---''
+  (treating each conversation as a separate user yields essentially zero
+  intra-user reuse).}
 \label{tab:datasets}
-\begin{tabular}{lrrrrr}
+\begin{tabular}{lrrrrrr}
 \toprule
-Dataset & Total reqs & Users & Avg input tokens & Intra-user reuse & Global reuse \\
+Dataset & Total reqs & Users & Reqs/user & Avg in.\ tokens & Intra-user reuse & Global reuse \\
 \midrule
-LMSYS-Chat-1M & 1{,}000{,}000 & --- & 467 & --- & 9.0\% \\
-WildChat-4.8M & 3{,}199{,}860 & 1{,}833{,}730 & 2{,}925 & 5.3\% & 34.4\% \\
-GLM-5.1 production & 411{,}169 & 4{,}984 & 21{,}043 & 53.7\% & 55.3\% \\
+LMSYS-Chat-1M & 1{,}000{,}000 & --- & --- & 467 & --- & 9.0\% \\
+WildChat-4.8M & 3{,}199{,}860 & 1{,}833{,}730 & 1.7 & 2{,}925 & 5.3\% & 34.4\% \\
+GLM-5.1 production & 411{,}169 & 4{,}984 & 82.5 & 21{,}043 & 53.7\% & 55.3\% \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -409,18 +416,20 @@ them. The starter values can be hand-set or the result of an offline
 characterization run on a previous window; the variant isolates the
 contribution of the cost model independent of online adaptation.
 
-\textbf{gorgo-autotune} re-fits both parameters from observed completions every
-16 new samples on a trailing 64-sample window, partitioned by destination
-replica. For each replica it takes the median of per-sample rates
-$(\mathrm{TTFT} - \mathrm{rtt}) / \mathrm{uncached\_tokens}$ to update
-$t_{\mathrm{prefill}}$ and the median of decode-phase rates over completion
-tokens (with network and prefill time subtracted) to update
-$t_{\mathrm{decode}}$. The median over per-sample rates is equivalent to a
-robust slope through the origin and tracks per-replica hardware drift; it
-treats the cost-model weights as identifiable physical rates rather than
-black-box knobs, which is also its failure mode---the rate
+\textbf{gorgo-autotune} re-fits both rates online by linear regression
+through the origin on a trailing 64-sample window, partitioned by
+destination replica, every 16 new samples. For $t_{\mathrm{prefill}}(u)$
+we fit network-latency-normalized TTFT $(\mathrm{TTFT} - \mathrm{rtt}_u)$
+as a linear function of uncached input tokens; for $t_{\mathrm{decode}}(u)$
+we fit network-latency-normalized total completion time
+$(\mathrm{TCT} - \mathrm{rtt}_u)$ as a linear function of completion
+tokens, decode-phase only. Implementation note: the median of per-sample
+rates we use is equivalent to a robust slope through the origin and tracks
+per-replica hardware drift. The variant treats the cost-model weights as
+identifiable physical rates rather than black-box knobs, which is also its
+failure mode---the per-sample rate
 $(\mathrm{TTFT} - \mathrm{rtt})/\mathrm{uncached}$ inflates when uncached
-counts are small.
+counts are small (high cache hit), so the median drifts upward.
 
 \textbf{gorgo-hillclimb} treats the two parameters as black-box knobs and runs
 a Gaussian $(1{+}1)$-evolution strategy \citep{rechenberg1973} over them in
@@ -434,10 +443,13 @@ should improve the incumbent. We track the acceptance rate $m$ over a
 trailing window and adjust $\sigma$ multiplicatively---decreasing it (factor
 $\sim$0.82) when $m > 1/5$ (the search is too tight to make progress) and
 increasing it (factor $\sim$1/0.82) when $m < 1/5$ (the search is too loose
-and rarely finds improvements). The 1/5 rule is what makes the loop
-practical at our timescales: on a 30-minute window with a 64-sample
-evaluation cohort and 16-sample hop, the ES converges to within a few
-percent of the best-found solution in roughly a hundred candidate
+and rarely finds improvements). The 1/5 rule is the load-bearing element of the search:
+$(1{+}1)$-ES with adaptive $\sigma$ is a global optimizer in continuous
+parameter spaces \citep{rechenberg1973}, and matching empirical acceptance
+to 1/5 keeps the proposal scale calibrated for fast escape from poor
+regions early and refinement near the optimum late. On a 30-minute window
+with a 64-sample cohort and 16-sample hop, this drives the search to
+within a few percent of the global optimum in roughly a hundred candidate
 evaluations (Fig.~\ref{fig:cache_convergence}b).
 
 % -----------------------------------------------------------------------
@@ -795,27 +807,17 @@ online weight tuning and requires no engine modifications.
 \textbf{Online and learned routing.}
 Performance-aware LLM load balancing \citep{jain2025performance} learns a
 routing policy over mixed prefill/decode workloads; bandit and RL schedulers
-such as Decima \citep{decima} adapt placement from observed outcomes;
-CherryPick \citep{cherrypick} uses Bayesian optimization to tune cloud
-configurations from a small parameter space. GORGO keeps the policy
-interpretable (an additive cost) and applies $(1{+}1)$-ES \citep{rechenberg1973}
-only to its two scaling weights, with TTFT as direct reward---fast and
-overhead-free with no surrogate model.
+\citep{decima} and Bayesian-optimization configuration tuners
+\citep{cherrypick} explore the broader space. GORGO keeps the policy
+interpretable (an additive cost) and applies $(1{+}1)$-ES only to two
+scaling weights, with TTFT as direct reward.
 \textbf{PD-disaggregation.}
-Sarathi-Serve \citep{sarathi_serve} interleaves chunked prefill with decode at
-the batch level; DistServe \citep{distserve2024} and Splitwise
-\citep{splitwise2024} dedicate separate GPU pools to prefill and decode. These
-reduce the compute component of TTFT but do not resolve geo-routing trade-offs
-when locality and network latency conflict; GORGO is complementary and assumes
-an underlying stack that may already use either.
-\textbf{Classic load balancing.}
-Power-of-two-choices \citep{mitzenmacher} and consistent-hash affinity
-\citep{karger1997} underpin production L7 balancers, including the
-prefix-aware AIBrix-style routers we benchmark against
-\citep{aibrix2024,nginx2024}. Their coordination assumes microsecond-scale
-homogeneous backends, whereas GPU LLM replicas process requests for seconds
-and per-token prefill rates differ by an order of magnitude depending on
-locality.
+Sarathi-Serve \citep{sarathi_serve}, DistServe \citep{distserve2024}, and
+Splitwise \citep{splitwise2024} disaggregate prefill from decode at the batch
+or GPU-pool level. These reduce the compute component of TTFT but do not
+resolve geo-routing trade-offs when locality and network latency conflict;
+GORGO is complementary and assumes an underlying stack that may already use
+either.
 
 % -----------------------------------------------------------------------
 \section{Conclusion}

@@ -1,4 +1,4 @@
-\begin{thebibliography}{35}
+\begin{thebibliography}{33}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -74,15 +74,6 @@ Kunal Jain, Anjaly Parayil, Ankur Mallick, Esha Choukse, Xiaoting Qin, Jue
 \newblock In \emph{Proceedings of the 5th Workshop on Machine Learning and
   Systems (EuroMLSys '25)}, 2025.
 
-\bibitem[Karger et~al.(1997)Karger, Lehman, Leighton, Panigrahy, Levine, and
-  Lewin]{karger1997}
-David Karger, Eric Lehman, Tom Leighton, Rina Panigrahy, Matthew Levine, and
-  Daniel Lewin.
-\newblock Consistent hashing and random trees: Distributed caching protocols
-  for relieving hot spots on the world wide web.
-\newblock In \emph{Proceedings of the 29th Annual ACM Symposium on Theory of
-  Computing (STOC '97)}, 1997.
-
 \bibitem[Kwon et~al.(2023)Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang,
   and Stoica]{vllm2023}
 Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody~Hao Yu,
@@ -114,12 +105,6 @@ Hongzi Mao, Malte Schwarzkopf, Shaileshh~Bojja Venkatakrishnan, Zili Meng, and
 \newblock Learning scheduling algorithms for data processing clusters.
 \newblock In \emph{Proceedings of the ACM Special Interest Group on Data
   Communication (SIGCOMM '19)}, 2019.
-
-\bibitem[Mitzenmacher(2001)]{mitzenmacher}
-Michael Mitzenmacher.
-\newblock The power of two choices in randomized load balancing.
-\newblock \emph{IEEE Transactions on Parallel and Distributed Systems},
-  12\penalty0 (10):\penalty0 1094--1104, 2001.
 
 \bibitem[{Modal}(2026)]{modal_prefix_caching}
 {Modal}.
