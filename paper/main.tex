@@ -337,15 +337,20 @@ GLM-5.1 production & 411{,}169 & 4{,}984 & 82.5 & 21{,}043 & 53.7\% & 55.3\% \\
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.92\linewidth]{figures/dataset_reuse_composition.png}
-\caption{Token-weighted prefix-reuse breakdown for the three datasets.
-  GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes;
-  WildChat reuse is dominated by cross-user structural similarity (shared
-  system prompts, viral templates); LMSYS has no per-user signal at all.}
-\label{fig:reuse_composition}
+\includegraphics[width=\linewidth]{figures/dataset_comparison.png}
+\caption{Three axes of dataset characterization.
+  \textit{Left}: average input tokens per request (log scale)---GLM-5.1 is
+  45$\times$ longer than LMSYS and 7$\times$ longer than WildChat.
+  \textit{Center}: requests per user (log scale)---82 on GLM-5.1 vs.\ 1.7
+  on WildChat vs.\ 1 on LMSYS.
+  \textit{Right}: prefix-reuse breakdown---GLM-5.1 reuse is dominated by
+  intra-user repeat-conversation prefixes; WildChat reuse is dominated by
+  cross-user structural similarity (shared system prompts, viral
+  templates); LMSYS has no per-user signal at all.}
+\label{fig:dataset_comparison}
 \end{figure}
 
-Three contrasts (Table~\ref{tab:datasets}, Fig.~\ref{fig:reuse_composition})
+Three contrasts (Table~\ref{tab:datasets}, Fig.~\ref{fig:dataset_comparison})
 matter for routing. \textit{Request length}: GLM-5.1 prompts are 45$\times$
 longer than LMSYS and 7$\times$ longer than WildChat---at the prefill rates we
 measure, a 21{,}000-token uncached prompt costs seconds, not milliseconds.
@@ -450,7 +455,7 @@ for fast escape from poor regions early and refinement near the best-found
 incumbent late. On a 30-minute window with a 64-sample cohort and
 16-sample hop, this drives the search to within a few percent of the
 best-found incumbent in roughly a hundred candidate evaluations
-(Fig.~\ref{fig:cache_convergence}b).
+(Fig.~\ref{fig:convergence_top}).
 
 % -----------------------------------------------------------------------
 \section{Baselines}
@@ -575,25 +580,19 @@ random                   & 4{,}076 & 0.296 & 1.828 & 3.171 & 28.99 & 84.6 \\
 
 In W1 (Table~\ref{tab:w1}), \texttt{gorgo-hillclimb} delivers the lowest p50
 (0.288\,s), p95 (1.466\,s), and p99 (2.307\,s)---a single GORGO variant
-sweeps every percentile during tuning. The next-best p95 is
-\texttt{simple-session-affinity} at 1.482\,s, a 1.1\% gap; the next-best p99
-is \texttt{least-request} at 2.355\,s, a 2.1\% gap. \texttt{gorgo-static}
-(starter weights, never adjusted) already beats every non-GORGO policy on
-p99 and ranks third on p95, showing that the cost model alone improves on
-single-signal heuristics; \texttt{gorgo-hillclimb} extends that lead by
-adapting per-replica rates online. \texttt{prefix-cache} is competitive at
-p95 but tail-degraded at p99 (3.017\,s)---it concentrates traffic onto
-warm-cache replicas and pays a queueing penalty when one is momentarily
-saturated. \texttt{simple-session-affinity}'s p99 (2.804\,s) and max
-(14.96\,s) reflect episodes where the hashed replica is transiently
-overloaded with no escape mechanism. Starting from
+sweeps every percentile during tuning. \texttt{gorgo-static} (starter
+weights, never adjusted) already beats every non-GORGO policy on p99 and
+ranks third on p95, showing the cost model alone improves on single-signal
+heuristics; \texttt{gorgo-hillclimb} extends the lead by adapting
+per-replica rates online. \texttt{prefix-cache} is competitive at p95 but
+tail-degraded at p99 (3.017\,s) by concentrating traffic onto warm-cache
+replicas; \texttt{simple-session-affinity}'s p99 (2.804\,s) and max
+(14.96\,s) reflect transient overload of the hashed replica. Starting from
 $t_{\mathrm{prefill}}=0.07$, $t_{\mathrm{decode}}=0.06$, the ES converged to
-$t_{\mathrm{prefill}}\approx 0.98$ and $t_{\mathrm{decode}}\approx
-4.4\times10^{-4}$: the high $t_{\mathrm{prefill}}$ reflects long uncached
-prefixes ($\sim$9.5k tokens after 55\% reuse on 21k-token prompts), and the
-low $t_{\mathrm{decode}}$ reflects that SGLang's continuous batching already
-orders within a replica---deep queues are rare at $c{=}32$ on this arrival
-rate, so the load term should weight lightly relative to prefill.
+$t_{\mathrm{prefill}}\approx 0.98$, $t_{\mathrm{decode}}\approx
+4.4\times10^{-4}$: the high $t_{\mathrm{prefill}}$ reflects $\sim$9.5k
+uncached tokens per request after 55\% reuse, and the low
+$t_{\mathrm{decode}}$ reflects that deep queues are rare at $c{=}32$.
 
 \begin{table}[t]
 \centering
@@ -620,20 +619,14 @@ prefix-cache             & 2{,}460 & 0.277 & 1.740 & 2.530 & 15.01 & 89.3 \\
 
 In W2 (Table~\ref{tab:w2}, same time-of-day as W1 on a different day),
 \texttt{gorgo-static}---deploying the W1-learned weights without
-adjustment---achieves the best p95 (1.387\,s) and p99 (1.947\,s);
-\texttt{gorgo-autotune} achieves the best p50 (0.264\,s). Two GORGO variants
-together sweep all three percentiles. The p95 spread is 1.25$\times$, the
-same as W1. Crucially, \texttt{gorgo-static}'s W2 p95 (1.387\,s) improves on
-its W1 p95 (1.605\,s) by 13.6\% and on \texttt{gorgo-hillclimb}'s W1 p95
-(1.466\,s) by 5.4\%, even though it is running with frozen weights.
-\texttt{gorgo-static} beats \texttt{gorgo-hillclimb} on p95/p99 because the
-W1-learned weights are near-optimal and continuing to tune on a similar
-distribution adds proposal variance, a known property of $(1{+}1)$-ES under
-stationary objectives---an operator can run \texttt{gorgo-hillclimb} during a
-tuning window and freeze the result into \texttt{gorgo-static} for
-production. \texttt{prefix-cache}'s p95 actually \emph{inflates} 5.2\% from
-W1 to W2 (1.654\,s$\to$1.740\,s); a longest-prefix-match policy that never
-re-balances under load drifts in the wrong direction across days.
+adjustment---wins p95 (1.387\,s) and p99 (1.947\,s); \texttt{gorgo-autotune}
+wins p50 (0.264\,s). Two GORGO variants together sweep all three
+percentiles. \texttt{gorgo-static}'s W2 p95 improves 13.6\% on its W1 p95
+and 5.4\% on \texttt{gorgo-hillclimb}'s W1 p95, with frozen weights---an
+operator can run \texttt{gorgo-hillclimb} during a tuning window and freeze
+the result into \texttt{gorgo-static} for production. \texttt{prefix-cache}'s
+p95 \emph{inflates} 5.2\% from W1 to W2; a longest-prefix-match policy that
+never re-balances under load drifts in the wrong direction across days.
 
 \begin{table}[t]
 \centering
@@ -659,48 +652,52 @@ random                   & 2{,}460 & 0.287 & 1.724 & 2.357 & 4.00  & 89.3 \\
 \end{table}
 
 At $c{=}64$ (Table~\ref{tab:stress}), the picture flips between
-\texttt{gorgo-static} and \texttt{gorgo-hillclimb}: \texttt{gorgo-static} wins
-p50 (0.179\,s, 36\% lower than at $c{=}32$ because lighter-load requests are
-batched more aggressively) but loses p95/p99 to \texttt{gorgo-hillclimb}
-(1.331\,s p95, 1.832\,s p99). The two GORGO variants together still sweep all
-three percentiles. The frozen W1-learned weights are no longer optimal for
-this load regime, and \texttt{gorgo-hillclimb}'s online adaptation moves
-toward weights that handle the deeper queues better. \texttt{gorgo-hillclimb}
-improves 6.0\% on p95 and 13.5\% on p99 versus its $c{=}32$ W2 result---the
-ES adapts to higher load. \texttt{prefix-cache} also improves 19.9\% on p95
-under stress (1.740\,s$\to$1.394\,s), suggesting that at higher load the
-prefix-cache hit rate goes up enough to offset its lack of load-balancing.
+\texttt{gorgo-static} and \texttt{gorgo-hillclimb}: \texttt{gorgo-static}
+wins p50 (0.179\,s) but loses p95/p99 to \texttt{gorgo-hillclimb} (1.331\,s
+and 1.832\,s); the two together still sweep all three percentiles.
+\texttt{gorgo-hillclimb} improves 6.0\% on p95 and 13.5\% on p99 versus its
+$c{=}32$ W2 result as the ES adapts to higher load; the W1-frozen weights
+are no longer optimal at $c{=}64$.
 
-\textbf{Cache-hit and convergence diagnostics.}
-Figure~\ref{fig:cache_convergence} shows two intermediate signals from W2.
-The cache-hit-rate panel (a) confirms that \texttt{gorgo-static} and
-\texttt{gorgo-hillclimb} sustain higher per-replica prefix-hit rates than
-\texttt{least-load} or \texttt{random} despite not making prefix-hit-rate
-their primary objective; both also avoid the \texttt{prefix-cache} policy's
-hit-rate spike-and-collapse pattern, which corresponds to its tail-degraded
-p95. The convergence panel (b) plots the rolling-window p95 TTFT of
-\texttt{gorgo-hillclimb} against candidate index over the W1 tuning window:
-under Rechenberg's 1/5-success rule the search descends rapidly in the first
-$\sim$30 candidates, then stabilizes within a few percent of the best-found
-value.
+\textbf{Online-tuning convergence.}
+Figure~\ref{fig:convergence_top} plots the best-cache-pick rate---the
+fraction of requests routed to the replica that already holds the most of
+the request's input prefix---over the W1 tuning window for five policies.
+\texttt{gorgo-hillclimb} converges to picking the best-cached replica on
+$\sim$95--100\% of requests within the first $\sim$2 minutes of online
+tuning and stays there for the remainder of the window; the other policies
+either oscillate (\texttt{prefix-cache}) or remain at lower rates
+(\texttt{simple-session-affinity}, \texttt{random}, \texttt{gorgo-static}).
+This is the empirical signature of the (1+1)-ES with the 1/5 rule: fast
+initial descent during the first few hop cycles, then stable refinement.
 
 \begin{figure}[t]
 \centering
-\begin{subfigure}{0.48\textwidth}
-\includegraphics[width=\linewidth]{figures/cache_hit_rate_0100.png}
-\caption{Per-replica cache-hit rate over W2.}
-\end{subfigure}\hfill
-\begin{subfigure}{0.48\textwidth}
-\includegraphics[width=\linewidth]{figures/convergence_0100.png}
-\caption{\texttt{gorgo-hillclimb} ES descent over W1.}
-\end{subfigure}
-\caption{Diagnostic intermediates. (a) GORGO variants sustain higher and
-  steadier prefix-hit rates than load-only baselines and avoid the
-  \texttt{prefix-cache} spike-and-collapse pattern. (b) Rechenberg's
-  1/5-success rule produces fast initial descent followed by stable
-  refinement of the rolling-window p95 TTFT objective.}
-\label{fig:cache_convergence}
+\includegraphics[width=\linewidth]{figures/convergence_top_0100.png}
+\caption{Best-cache-pick rate over the W1 tuning window for five policies.
+  \texttt{gorgo-hillclimb} (red) converges to $\sim$95--100\% within the
+  first few minutes; baselines either oscillate or stay flat at lower rates.}
+\label{fig:convergence_top}
 \end{figure}
+
+\textbf{Per-policy summary across W2.}
+Figure~\ref{fig:w2_summary} adds a per-policy view of W2 (cross-day
+evaluation): top-left is p50/p95/p99 sorted by p95, top-right is routing
+concentration (share of requests on the most-used replica), bottom panels
+plot smoothed median and p95 TTFT over the 30-minute window.
+\texttt{gorgo-static} (frozen W1 weights) ranks first on p95 with
+\texttt{gorgo-hillclimb} second; smoothed-p95 traces show \texttt{gorgo}
+variants are also visibly more stable across the window than baselines.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.92\linewidth]{figures/glm5_apr2_summary.png}
+\caption{Per-policy summary over W2 (April 2 cross-day, $c{=}32$). Top:
+  TTFT percentiles (sorted by p95) and routing concentration. Bottom:
+  smoothed median and p95 TTFT over the 30-minute window.}
+\label{fig:w2_summary}
+\end{figure}
+
 
 \textbf{Regime sensitivity (WildChat replay).}
 A control replay on WildChat-4.8M with the same fleet and proxy reverses the

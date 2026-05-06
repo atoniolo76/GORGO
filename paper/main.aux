@@ -44,8 +44,8 @@
 \@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. LMSYS-Chat-1M does not expose a stable user identifier (only conversation IDs), so its intra-user reuse and per-user-counts are reported as ``---'' (treating each conversation as a separate user yields essentially zero intra-user reuse).}}{4}{table.caption.3}\protected@file@percent }
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
 \newlabel{tab:datasets}{{1}{4}{Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. LMSYS-Chat-1M does not expose a stable user identifier (only conversation IDs), so its intra-user reuse and per-user-counts are reported as ``---'' (treating each conversation as a separate user yields essentially zero intra-user reuse)}{table.caption.3}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Token-weighted prefix-reuse breakdown for the three datasets. GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS has no per-user signal at all.}}{4}{figure.caption.4}\protected@file@percent }
-\newlabel{fig:reuse_composition}{{1}{4}{Token-weighted prefix-reuse breakdown for the three datasets. GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS has no per-user signal at all}{figure.caption.4}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Three axes of dataset characterization. \textit  {Left}: average input tokens per request (log scale)---GLM-5.1 is 45$\times $ longer than LMSYS and 7$\times $ longer than WildChat. \textit  {Center}: requests per user (log scale)---82 on GLM-5.1 vs.\ 1.7 on WildChat vs.\ 1 on LMSYS. \textit  {Right}: prefix-reuse breakdown---GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS has no per-user signal at all.}}{4}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:dataset_comparison}{{1}{4}{Three axes of dataset characterization. \textit {Left}: average input tokens per request (log scale)---GLM-5.1 is 45$\times $ longer than LMSYS and 7$\times $ longer than WildChat. \textit {Center}: requests per user (log scale)---82 on GLM-5.1 vs.\ 1.7 on WildChat vs.\ 1 on LMSYS. \textit {Right}: prefix-reuse breakdown---GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS has no per-user signal at all}{figure.caption.4}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {4}GORGO}{4}{section.4}\protected@file@percent }
 \newlabel{sec:method}{{4}{4}{GORGO}{section.4}{}}
 \newlabel{eq:score}{{1}{4}{GORGO}{equation.4.1}{}}
@@ -62,18 +62,20 @@
 \@writefile{toc}{\contentsline {paragraph}{Hardware and software.}{5}{section*.5}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Cross-region RTT over W1 (probe from \texttt  {us-ashburn} proxy). The local replica stays near 26\,ms; the Frankfurt and Seoul legs vary by hundreds of ms within the window.}}{6}{figure.caption.6}\protected@file@percent }
 \newlabel{fig:rtt}{{2}{6}{Cross-region RTT over W1 (probe from \texttt {us-ashburn} proxy). The local replica stays near 26\,ms; the Frankfurt and Seoul legs vary by hundreds of ms within the window}{figure.caption.6}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {7}Results}{6}{section.7}\protected@file@percent }
-\newlabel{sec:results}{{7}{6}{Results}{section.7}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%.}}{7}{table.caption.7}\protected@file@percent }
 \newlabel{tab:w1}{{2}{7}{GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%}{table.caption.7}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GLM-5.1 W2 (April 2 00:30--01:00 UTC, $c{=}32$, cross-day evaluation). \texttt  {gorgo-static} deploys the W1-learned per-replica weights and does not adjust them. Bold is best in column.}}{7}{table.caption.8}\protected@file@percent }
 \newlabel{tab:w2}{{3}{7}{GLM-5.1 W2 (April 2 00:30--01:00 UTC, $c{=}32$, cross-day evaluation). \texttt {gorgo-static} deploys the W1-learned per-replica weights and does not adjust them. Bold is best in column}{table.caption.8}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Results}{7}{section.7}\protected@file@percent }
+\newlabel{sec:results}{{7}{7}{Results}{section.7}{}}
 \citation{distserve2024,splitwise2024}
 \citation{kvflow2025,lpc2025}
 \@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces GLM-5.1 Stress (April 2 00:30--01:00 UTC, $c{=}64$). Same trace as W2, replayed at 2$\times $ the in-flight-request cap. Bold is best in column. \texttt  {simple-session-affinity} did not complete its sweep at $c{=}64$ and is omitted.}}{8}{table.caption.9}\protected@file@percent }
 \newlabel{tab:stress}{{4}{8}{GLM-5.1 Stress (April 2 00:30--01:00 UTC, $c{=}64$). Same trace as W2, replayed at 2$\times $ the in-flight-request cap. Bold is best in column. \texttt {simple-session-affinity} did not complete its sweep at $c{=}64$ and is omitted}{table.caption.9}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Diagnostic intermediates. (a) GORGO variants sustain higher and steadier prefix-hit rates than load-only baselines and avoid the \texttt  {prefix-cache} spike-and-collapse pattern. (b) Rechenberg's 1/5-success rule produces fast initial descent followed by stable refinement of the rolling-window p95 TTFT objective.}}{8}{figure.caption.10}\protected@file@percent }
-\newlabel{fig:cache_convergence}{{3}{8}{Diagnostic intermediates. (a) GORGO variants sustain higher and steadier prefix-hit rates than load-only baselines and avoid the \texttt {prefix-cache} spike-and-collapse pattern. (b) Rechenberg's 1/5-success rule produces fast initial descent followed by stable refinement of the rolling-window p95 TTFT objective}{figure.caption.10}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Best-cache-pick rate over the W1 tuning window for five policies. \texttt  {gorgo-hillclimb} (red) converges to $\sim $95--100\% within the first few minutes; baselines either oscillate or stay flat at lower rates.}}{8}{figure.caption.10}\protected@file@percent }
+\newlabel{fig:convergence_top}{{3}{8}{Best-cache-pick rate over the W1 tuning window for five policies. \texttt {gorgo-hillclimb} (red) converges to $\sim $95--100\% within the first few minutes; baselines either oscillate or stay flat at lower rates}{figure.caption.10}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {8}Limitations}{8}{section.8}\protected@file@percent }
+\newlabel{sec:limitations}{{8}{8}{Limitations}{section.8}{}}
 \citation{sglang2024}
 \citation{vllm2023}
 \citation{kvlink2025}
@@ -93,14 +95,12 @@
 \citation{sarathi_serve}
 \citation{distserve2024}
 \citation{splitwise2024}
-\bibstyle{plainnat}
-\bibdata{references}
-\@writefile{toc}{\contentsline {section}{\numberline {8}Limitations}{9}{section.8}\protected@file@percent }
-\newlabel{sec:limitations}{{8}{9}{Limitations}{section.8}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Per-policy summary over W2 (April 2 cross-day, $c{=}32$). Top: TTFT percentiles (sorted by p95) and routing concentration. Bottom: smoothed median and p95 TTFT over the 30-minute window.}}{9}{figure.caption.11}\protected@file@percent }
+\newlabel{fig:w2_summary}{{4}{9}{Per-policy summary over W2 (April 2 cross-day, $c{=}32$). Top: TTFT percentiles (sorted by p95) and routing concentration. Bottom: smoothed median and p95 TTFT over the 30-minute window}{figure.caption.11}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {9}Related Work}{9}{section.9}\protected@file@percent }
 \newlabel{sec:related}{{9}{9}{Related Work}{section.9}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {10}Conclusion}{9}{section.10}\protected@file@percent }
-\newlabel{sec:conclusion}{{10}{9}{Conclusion}{section.10}{}}
+\bibstyle{plainnat}
+\bibdata{references}
 \bibcite{sarathi_serve}{{1}{2024}{{Agrawal et~al.}}{{Agrawal, Kedia, Panwar, Mohan, Kwatra, Gulavani, Ramjee, and Tumanov}}}
 \bibcite{aibrix2024}{{2}{2024}{{AIBrix Team}}{{}}}
 \bibcite{cherrypick}{{3}{2017}{{Alipourfard et~al.}}{{Alipourfard, Liu, Chen, Venkataraman, Yu, and Zhang}}}
@@ -115,6 +115,8 @@
 \bibcite{chunkkv2025}{{12}{2025}{{Liu et~al.}}{{Liu, Tang, Dong, Li, Liu, Li, Hu, and Chu}}}
 \bibcite{skyserve}{{13}{2025}{{Mao et~al.}}{{Mao, Yang, Phanishayee, Mahajan, and Stoica}}}
 \bibcite{decima}{{14}{2019}{{Mao et~al.}}{{Mao, Schwarzkopf, Venkatakrishnan, Meng, and Alizadeh}}}
+\@writefile{toc}{\contentsline {section}{\numberline {10}Conclusion}{10}{section.10}\protected@file@percent }
+\newlabel{sec:conclusion}{{10}{10}{Conclusion}{section.10}{}}
 \bibcite{modal_prefix_caching}{{15}{2026}{{Modal}}{{}}}
 \bibcite{kvflow2025}{{16}{2025}{{Pan et~al.}}{{Pan, Patel, Hu, Shen, Guan, Li, Qin, Wang, and Ding}}}
 \bibcite{splitwise2024}{{17}{2024}{{Patel et~al.}}{{Patel, Choukse, Zhang, Shah, Goiri, Maleki, and Bianchini}}}
@@ -134,4 +136,4 @@
 \bibcite{lmsys2024}{{31}{2024{a}}{{Zheng et~al.}}{{Zheng, Chiang, Sheng, Li, Zhuang, Wu, Zhuang, Li, Lin, Xing, Gonzalez, Stoica, and Zhang}}}
 \bibcite{sglang2024}{{32}{2024{b}}{{Zheng et~al.}}{{Zheng, Yin, Xie, Sun, Huang, Yu, Cao, Kozyrakis, Stoica, Gonzalez, Barrett, and Sheng}}}
 \bibcite{distserve2024}{{33}{2024}{{Zhong et~al.}}{{Zhong, Liu, Chen, Hu, Zhu, Liu, Jin, and Zhang}}}
-\gdef \@abspage@last{14}
+\gdef \@abspage@last{15}
