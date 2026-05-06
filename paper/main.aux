@@ -34,14 +34,17 @@
 \citation{lmsys2024}
 \citation{wildchat2024}
 \citation{glm2024}
-\citation{qin2024mooncake}
+\citation{lmsys2024}
+\citation{lmsys2024}
+\citation{lmsys2024}
 \@writefile{toc}{\contentsline {section}{\numberline {3}Dataset}{3}{section.3}\protected@file@percent }
 \newlabel{sec:dataset}{{3}{3}{Dataset}{section.3}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. LMSYS-Chat-1M does not expose a stable user identifier (only conversation IDs), so its intra-user reuse and per-user-counts are reported as ``---'' (treating each conversation as a separate user yields essentially zero intra-user reuse).}}{4}{table.caption.3}\protected@file@percent }
+\citation{qin2024mooncake}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. $^*$LMSYS user count is from the dataset card \citep  {lmsys2024} (210K unique IPs across 1M conversations); the public schema does not expose the IP column, so we cannot recompute its intra-user reuse here and leave that cell as ``---''.}}{4}{table.caption.3}\protected@file@percent }
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
-\newlabel{tab:datasets}{{1}{4}{Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. LMSYS-Chat-1M does not expose a stable user identifier (only conversation IDs), so its intra-user reuse and per-user-counts are reported as ``---'' (treating each conversation as a separate user yields essentially zero intra-user reuse)}{table.caption.3}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Three axes of dataset characterization. \textit  {Left}: average input tokens per request (log scale)---GLM-5.1 is 45$\times $ longer than LMSYS and 7$\times $ longer than WildChat. \textit  {Center}: requests per user (log scale)---82 on GLM-5.1 vs.\ 1.7 on WildChat vs.\ 1 on LMSYS. \textit  {Right}: prefix-reuse breakdown---GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS has no per-user signal at all.}}{4}{figure.caption.4}\protected@file@percent }
-\newlabel{fig:dataset_comparison}{{1}{4}{Three axes of dataset characterization. \textit {Left}: average input tokens per request (log scale)---GLM-5.1 is 45$\times $ longer than LMSYS and 7$\times $ longer than WildChat. \textit {Center}: requests per user (log scale)---82 on GLM-5.1 vs.\ 1.7 on WildChat vs.\ 1 on LMSYS. \textit {Right}: prefix-reuse breakdown---GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS has no per-user signal at all}{figure.caption.4}{}}
+\newlabel{tab:datasets}{{1}{4}{Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. $^*$LMSYS user count is from the dataset card \citep {lmsys2024} (210K unique IPs across 1M conversations); the public schema does not expose the IP column, so we cannot recompute its intra-user reuse here and leave that cell as ``---''}{table.caption.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Three axes of dataset characterization. \textit  {Left}: average input tokens per request (log scale)---GLM-5.1 is 45$\times $ longer than LMSYS and 7$\times $ longer than WildChat. \textit  {Center}: requests per user (log scale)---82 on GLM-5.1 vs.\ 1.7 on WildChat vs.\ 1 on LMSYS. \textit  {Right}: prefix-reuse breakdown---GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS's intra-user component is not measurable on the public schema (no IP column), so only its global savings is plotted.}}{4}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:dataset_comparison}{{1}{4}{Three axes of dataset characterization. \textit {Left}: average input tokens per request (log scale)---GLM-5.1 is 45$\times $ longer than LMSYS and 7$\times $ longer than WildChat. \textit {Center}: requests per user (log scale)---82 on GLM-5.1 vs.\ 1.7 on WildChat vs.\ 1 on LMSYS. \textit {Right}: prefix-reuse breakdown---GLM-5.1 reuse is dominated by intra-user repeat-conversation prefixes; WildChat reuse is dominated by cross-user structural similarity (shared system prompts, viral templates); LMSYS's intra-user component is not measurable on the public schema (no IP column), so only its global savings is plotted}{figure.caption.4}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {4}GORGO}{4}{section.4}\protected@file@percent }
 \newlabel{sec:method}{{4}{4}{GORGO}{section.4}{}}
 \newlabel{eq:score}{{1}{4}{GORGO}{equation.4.1}{}}
@@ -49,9 +52,9 @@
 \citation{rechenberg1973,beyer2002es}
 \citation{mitzenmacher}
 \citation{aibrix2024}
-\citation{karger1997}
 \@writefile{toc}{\contentsline {section}{\numberline {5}Baselines}{5}{section.5}\protected@file@percent }
 \newlabel{sec:baselines}{{5}{5}{Baselines}{section.5}{}}
+\citation{karger1997}
 \citation{sglang2024}
 \citation{qwen3technical}
 \@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces GLM-5.1 W1 (tuning window, $c{=}32$). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%.}}{6}{table.caption.6}\protected@file@percent }
