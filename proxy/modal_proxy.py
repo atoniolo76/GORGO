@@ -590,6 +590,7 @@ def proxy(registry_key: str = ""):
             "stopped_at": None,
             "dropped_metrics": 0,
             "dropped_requests": 0,
+            "dropped_tune": 0,
             "saved_paths": None,
         },
     }
@@ -612,6 +613,7 @@ def proxy(registry_key: str = ""):
     samples: deque[dict] = deque(maxlen=MAX_REQUEST_SAMPLES)
     metrics_trace_events: deque[dict] = deque(maxlen=state["trace"]["max_events"])
     request_trace_events: deque[dict] = deque(maxlen=state["trace"]["max_events"])
+    tune_trace_events: deque[dict] = deque(maxlen=state["trace"]["max_events"])
 
     # Live radix trie of every prompt we've forwarded. Each node along a
     # sequence's insertion path is tagged with the replica URL that received
@@ -793,6 +795,9 @@ def proxy(registry_key: str = ""):
                 return
             target = request_trace_events
             dropped_key = "dropped_requests"
+        elif kind == "tune":
+            target = tune_trace_events
+            dropped_key = "dropped_tune"
         else:
             return
         if target.maxlen is not None and len(target) >= target.maxlen:
@@ -803,7 +808,7 @@ def proxy(registry_key: str = ""):
         tr = state["trace"]
         first_ts = None
         last_ts = None
-        for buf in (metrics_trace_events, request_trace_events):
+        for buf in (metrics_trace_events, request_trace_events, tune_trace_events):
             if not buf:
                 continue
             b_first = buf[0].get("wall_ts")
@@ -814,6 +819,7 @@ def proxy(registry_key: str = ""):
             **tr,
             "metrics_events": len(metrics_trace_events),
             "request_events": len(request_trace_events),
+            "tune_events": len(tune_trace_events),
             "first_event_ts": first_ts,
             "last_event_ts": last_ts,
         }
@@ -937,14 +943,17 @@ def proxy(registry_key: str = ""):
         os.makedirs(out_dir, exist_ok=True)
         metrics_path = os.path.join(out_dir, "metrics.jsonl")
         requests_path = os.path.join(out_dir, "requests.jsonl")
+        tune_path = os.path.join(out_dir, "tune.jsonl")
         manifest_path = os.path.join(out_dir, "manifest.json")
         _write_jsonl(metrics_path, metrics_trace_events)
         _write_jsonl(requests_path, request_trace_events)
+        _write_jsonl(tune_path, tune_trace_events)
         fallback_summary = _compute_fallback_summary()
         manifest = {
             "trace": _trace_status_payload(),
             "metrics_path": metrics_path,
             "requests_path": requests_path,
+            "tune_path": tune_path,
             "fallback_summary": fallback_summary,
         }
         with open(manifest_path, "w") as f:
@@ -953,6 +962,7 @@ def proxy(registry_key: str = ""):
         paths = {
             "metrics_path": metrics_path,
             "requests_path": requests_path,
+            "tune_path": tune_path,
             "manifest_path": manifest_path,
         }
         tr["saved_paths"] = paths
@@ -1688,7 +1698,7 @@ def proxy(registry_key: str = ""):
         }
 
     async def _handle_post_trace_start(data) -> tuple[int, dict]:
-        nonlocal metrics_trace_events, request_trace_events
+        nonlocal metrics_trace_events, request_trace_events, tune_trace_events
         if not isinstance(data, dict):
             return 400, {"error": "body must be a JSON object"}
         tr = state["trace"]
@@ -1706,6 +1716,7 @@ def proxy(registry_key: str = ""):
         if not append or max_events != tr["max_events"]:
             metrics_trace_events = deque(maxlen=max_events)
             request_trace_events = deque(maxlen=max_events)
+            tune_trace_events = deque(maxlen=max_events)
 
         tr.update(
             {
@@ -1723,6 +1734,7 @@ def proxy(registry_key: str = ""):
         if not append:
             tr["dropped_metrics"] = 0
             tr["dropped_requests"] = 0
+            tr["dropped_tune"] = 0
         _log(f"trace started id={tr['trace_id']} max_events={max_events}")
         return 200, {"trace": _trace_status_payload()}
 
@@ -2382,23 +2394,13 @@ def proxy(registry_key: str = ""):
             score = float(score_fn(window))
             pending = at.get("pending_candidate")
             if pending is not None:
-                # Tell the tuner how the just-applied candidate scored
-                # over its evaluation window. ``report`` updates the
-                # incumbent if the candidate beat ``best_score`` * (1+tol).
-                tuner.report(pending, score)
+                accepted = tuner.report(pending, score)
             else:
-                # First fire: seed the tuner's baseline from the current
-                # incumbent so subsequent candidates have something to
-                # compare against. ``report`` with ``best_score=None``
-                # always accepts and stores ``score`` as the baseline.
-                tuner.report(dict(tuner.best_params), score)
+                accepted = tuner.report(dict(tuner.best_params), score)
             at["last_score"] = score
 
             proposal = tuner.propose()
             if proposal is None:
-                # Tuner converged or hit max_steps. Pin to best params and
-                # turn off auto-tune to stop pointless recomputes; manual
-                # POST /tune {"enabled": true} can reactivate.
                 if at["apply"]:
                     state["hyperparameters"] = merge_update(
                         state["hyperparameters"],
@@ -2407,6 +2409,30 @@ def proxy(registry_key: str = ""):
                     )
                 at["enabled"] = False
                 at["pending_candidate"] = None
+                _trace_append(
+                    "tune",
+                    {
+                        "kind": "tune",
+                        "mode": "online-es",
+                        "wall_ts": _now_wall_ts(),
+                        "monotonic_s": time.monotonic(),
+                        "step": at["applied_count"],
+                        "total_samples": state["total_samples_appended"],
+                        "window_size": len(window),
+                        "converged": True,
+                        "accepted": accepted,
+                        "candidate": pending,
+                        "score": score,
+                        "best_score": tuner.best_score,
+                        "best_params": dict(tuner.best_params),
+                        "proposal": None,
+                        "sigma": tuner.sigma,
+                        "success_rate": (
+                            sum(tuner._recent) / len(tuner._recent) if tuner._recent else None
+                        ),
+                        "objective_metric": metric,
+                    },
+                )
                 _log(
                     f"auto-tune online-es CONVERGED best={tuner.best_params} "
                     f"score={tuner.best_score}"
@@ -2414,10 +2440,6 @@ def proxy(registry_key: str = ""):
                 return
 
             if at["apply"]:
-                # Online-ES only writes ``defaults`` -- per-target
-                # overrides are intentionally left alone so an operator
-                # can pin a heterogeneous replica manually without the
-                # ES blowing it away every cycle.
                 state["hyperparameters"] = merge_update(
                     state["hyperparameters"],
                     {"defaults": dict(proposal), "per_target": {}},
@@ -2432,6 +2454,30 @@ def proxy(registry_key: str = ""):
                 "per_target": {},
             }
             at["samples_since_last_apply"] = 0
+            _trace_append(
+                "tune",
+                {
+                    "kind": "tune",
+                    "mode": "online-es",
+                    "wall_ts": _now_wall_ts(),
+                    "monotonic_s": time.monotonic(),
+                    "step": at["applied_count"],
+                    "total_samples": state["total_samples_appended"],
+                    "window_size": len(window),
+                    "converged": False,
+                    "accepted": accepted,
+                    "candidate": pending,
+                    "score": score,
+                    "best_score": tuner.best_score,
+                    "best_params": dict(tuner.best_params),
+                    "proposal": dict(proposal),
+                    "sigma": tuner.sigma,
+                    "success_rate": (
+                        sum(tuner._recent) / len(tuner._recent) if tuner._recent else None
+                    ),
+                    "objective_metric": metric,
+                },
+            )
             _log(
                 f"auto-tune online-es #{at['applied_count']} "
                 f"window={len(window)} score={score:.4f} "
@@ -2450,10 +2496,6 @@ def proxy(registry_key: str = ""):
         # sample median.
         recommendation = recommend_hyperparameters_per_target(window)
         if at["apply"]:
-            # Use the same merge primitive as ``POST /hyperparameters``
-            # so layering rules stay identical between manual writes
-            # and auto-tune writes (key-level merge: per-target keys
-            # not in the recommendation are preserved).
             state["hyperparameters"] = merge_update(
                 state["hyperparameters"], recommendation, replace=False
             )
@@ -2461,6 +2503,20 @@ def proxy(registry_key: str = ""):
         at["last_applied_at_monotonic"] = time.monotonic()
         at["last_recommendation"] = recommendation
         at["samples_since_last_apply"] = 0
+        _trace_append(
+            "tune",
+            {
+                "kind": "tune",
+                "mode": "fit",
+                "wall_ts": _now_wall_ts(),
+                "monotonic_s": time.monotonic(),
+                "step": at["applied_count"],
+                "total_samples": state["total_samples_appended"],
+                "window_size": len(window),
+                "defaults": recommendation["defaults"],
+                "per_target": recommendation["per_target"],
+            },
+        )
         _log(
             f"auto-tune #{at['applied_count']} "
             f"window={len(window)} defaults={recommendation['defaults']} "

@@ -1,4 +1,4 @@
-# GLM5 Apr2 Stress (c=64)
+# GLM5 Stress Apr2 (concurrency=64)
 
 | Policy | OK | Succ% | TTFT p50 | p95 | p99 | max | E2E p95 | E2E p99 | req/s |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
