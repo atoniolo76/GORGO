@@ -3,7 +3,6 @@
 \providecommand\HyField@AuxAddToFields[1]{}
 \providecommand\HyField@AuxAddToCoFields[2]{}
 \citation{skywalker,skyserve}
-\citation{aibrix2024,nginx2024}
 \citation{orca}
 \citation{sglang2024,vllm2023}
 \citation{skywalker,qin2024mooncake}
@@ -26,7 +25,6 @@
 \@writefile{toc}{\contentsline {paragraph}{Contributions.}{2}{section*.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {2}Background}{2}{section.2}\protected@file@percent }
 \newlabel{sec:background}{{2}{2}{Background}{section.2}{}}
-\citation{aibrix2024}
 \citation{aws_bedrock_xregion}
 \citation{gke_gateway}
 \citation{modal_prefix_caching}
@@ -36,9 +34,9 @@
 \citation{lmsys2024}
 \citation{wildchat2024}
 \citation{glm2024}
-\citation{qin2024mooncake}
 \@writefile{toc}{\contentsline {section}{\numberline {3}Dataset}{3}{section.3}\protected@file@percent }
 \newlabel{sec:dataset}{{3}{3}{Dataset}{section.3}{}}
+\citation{qin2024mooncake}
 \@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. LMSYS-Chat-1M does not expose a stable user identifier (only conversation IDs), so its intra-user reuse and per-user-counts are reported as ``---'' (treating each conversation as a separate user yields essentially zero intra-user reuse).}}{4}{table.caption.3}\protected@file@percent }
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
 \newlabel{tab:datasets}{{1}{4}{Dataset comparison along axes that determine the routing-decision surface. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings. LMSYS-Chat-1M does not expose a stable user identifier (only conversation IDs), so its intra-user reuse and per-user-counts are reported as ``---'' (treating each conversation as a separate user yields essentially zero intra-user reuse)}{table.caption.3}{}}
@@ -49,31 +47,28 @@
 \newlabel{eq:score}{{1}{4}{GORGO}{equation.4.1}{}}
 \citation{rechenberg1973,beyer2002es}
 \citation{rechenberg1973,beyer2002es}
-\citation{nginx2024,mitzenmacher}
+\citation{mitzenmacher}
 \citation{aibrix2024}
-\citation{sglang2024}
-\citation{qwen3technical}
+\citation{karger1997}
 \@writefile{toc}{\contentsline {section}{\numberline {5}Baselines}{5}{section.5}\protected@file@percent }
 \newlabel{sec:baselines}{{5}{5}{Baselines}{section.5}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {6}Experimental Setup}{5}{section.6}\protected@file@percent }
-\newlabel{sec:setup}{{6}{5}{Experimental Setup}{section.6}{}}
-\@writefile{toc}{\contentsline {paragraph}{Hardware and software.}{5}{section*.5}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Cross-region RTT over W1 (probe from \texttt  {us-ashburn} proxy). The local replica stays near 26\,ms; the Frankfurt and Seoul legs vary by hundreds of ms within the window.}}{6}{figure.caption.6}\protected@file@percent }
-\newlabel{fig:rtt}{{2}{6}{Cross-region RTT over W1 (probe from \texttt {us-ashburn} proxy). The local replica stays near 26\,ms; the Frankfurt and Seoul legs vary by hundreds of ms within the window}{figure.caption.6}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%.}}{7}{table.caption.7}\protected@file@percent }
-\newlabel{tab:w1}{{2}{7}{GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%}{table.caption.7}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GLM-5.1 W2 (April 2 00:30--01:00 UTC, $c{=}32$, cross-day evaluation). \texttt  {gorgo-static} deploys the W1-learned per-replica weights and does not adjust them. Bold is best in column.}}{7}{table.caption.8}\protected@file@percent }
-\newlabel{tab:w2}{{3}{7}{GLM-5.1 W2 (April 2 00:30--01:00 UTC, $c{=}32$, cross-day evaluation). \texttt {gorgo-static} deploys the W1-learned per-replica weights and does not adjust them. Bold is best in column}{table.caption.8}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {7}Results}{7}{section.7}\protected@file@percent }
-\newlabel{sec:results}{{7}{7}{Results}{section.7}{}}
+\citation{sglang2024}
+\citation{qwen3technical}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces GLM-5.1 W1 (tuning window, $c{=}32$). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%.}}{6}{table.caption.6}\protected@file@percent }
+\newlabel{tab:w1}{{2}{6}{GLM-5.1 W1 (tuning window, $c{=}32$). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%}{table.caption.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Experimental Setup}{6}{section.6}\protected@file@percent }
+\newlabel{sec:setup}{{6}{6}{Experimental Setup}{section.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{Hardware and software.}{6}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Results}{6}{section.7}\protected@file@percent }
+\newlabel{sec:results}{{7}{6}{Results}{section.7}{}}
 \citation{distserve2024,splitwise2024}
 \citation{kvflow2025,lpc2025}
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces GLM-5.1 Stress (April 2 00:30--01:00 UTC, $c{=}64$). Same trace as W2, replayed at 2$\times $ the in-flight-request cap. Bold is best in column. \texttt  {simple-session-affinity} did not complete its sweep at $c{=}64$ and is omitted.}}{8}{table.caption.9}\protected@file@percent }
-\newlabel{tab:stress}{{4}{8}{GLM-5.1 Stress (April 2 00:30--01:00 UTC, $c{=}64$). Same trace as W2, replayed at 2$\times $ the in-flight-request cap. Bold is best in column. \texttt {simple-session-affinity} did not complete its sweep at $c{=}64$ and is omitted}{table.caption.9}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Best-cache-pick rate over the W1 tuning window for five policies. \texttt  {gorgo-hillclimb} (red) converges to $\sim $95--100\% within the first few minutes; baselines either oscillate or stay flat at lower rates.}}{8}{figure.caption.10}\protected@file@percent }
-\newlabel{fig:convergence_top}{{3}{8}{Best-cache-pick rate over the W1 tuning window for five policies. \texttt {gorgo-hillclimb} (red) converges to $\sim $95--100\% within the first few minutes; baselines either oscillate or stay flat at lower rates}{figure.caption.10}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {8}Limitations}{8}{section.8}\protected@file@percent }
-\newlabel{sec:limitations}{{8}{8}{Limitations}{section.8}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GLM-5.1 W2 ($c{=}32$, cross-day evaluation: same time-of-day as W1, different day). \texttt  {gorgo-static} deploys the W1-learned per-replica weights and does not adjust them. Bold is best in column.}}{7}{table.caption.7}\protected@file@percent }
+\newlabel{tab:w2}{{3}{7}{GLM-5.1 W2 ($c{=}32$, cross-day evaluation: same time-of-day as W1, different day). \texttt {gorgo-static} deploys the W1-learned per-replica weights and does not adjust them. Bold is best in column}{table.caption.7}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces GLM-5.1 Stress ($c{=}64$). Same trace as W2, replayed at 2$\times $ the in-flight-request cap. Bold is best in column. \texttt  {simple-session-affinity} did not complete its sweep at $c{=}64$ and is omitted.}}{7}{table.caption.8}\protected@file@percent }
+\newlabel{tab:stress}{{4}{7}{GLM-5.1 Stress ($c{=}64$). Same trace as W2, replayed at 2$\times $ the in-flight-request cap. Bold is best in column. \texttt {simple-session-affinity} did not complete its sweep at $c{=}64$ and is omitted}{table.caption.8}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {8}Limitations}{7}{section.8}\protected@file@percent }
+\newlabel{sec:limitations}{{8}{7}{Limitations}{section.8}{}}
 \citation{sglang2024}
 \citation{vllm2023}
 \citation{kvlink2025}
@@ -95,6 +90,10 @@
 \citation{sarathi_serve}
 \citation{distserve2024}
 \citation{splitwise2024}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Best-cache-pick rate over the W1 tuning window for five policies. \texttt  {gorgo-hillclimb} (red) converges to $\sim $95--100\% within the first few minutes; baselines either oscillate or stay flat at lower rates.}}{8}{figure.caption.9}\protected@file@percent }
+\newlabel{fig:convergence_top}{{2}{8}{Best-cache-pick rate over the W1 tuning window for five policies. \texttt {gorgo-hillclimb} (red) converges to $\sim $95--100\% within the first few minutes; baselines either oscillate or stay flat at lower rates}{figure.caption.9}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {9}Related Work}{8}{section.9}\protected@file@percent }
+\newlabel{sec:related}{{9}{8}{Related Work}{section.9}{}}
 \bibstyle{plainnat}
 \bibdata{references}
 \bibcite{sarathi_serve}{{1}{2024}{{Agrawal et~al.}}{{Agrawal, Kedia, Panwar, Mohan, Kwatra, Gulavani, Ramjee, and Tumanov}}}
@@ -103,10 +102,6 @@
 \bibcite{aws_bedrock_xregion}{{4}{2026}{{Amazon Web Services}}{{}}}
 \bibcite{auer2002bandits}{{5}{2002}{{Auer et~al.}}{{Auer, Cesa-Bianchi, and Fischer}}}
 \bibcite{beyer2002es}{{6}{2002}{{Beyer and Schwefel}}{{}}}
-\@writefile{toc}{\contentsline {section}{\numberline {9}Related Work}{9}{section.9}\protected@file@percent }
-\newlabel{sec:related}{{9}{9}{Related Work}{section.9}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {10}Conclusion}{9}{section.10}\protected@file@percent }
-\newlabel{sec:conclusion}{{10}{9}{Conclusion}{section.10}{}}
 \bibcite{dlpm2025}{{7}{2025}{{Cao et~al.}}{{Cao, Wang, Mao, Hsu, Yin, Xia, Li, Liu, Zhang, Zhou, Sheng, Gonzalez, and Stoica}}}
 \bibcite{klpm2025}{{8}{2025}{{Dexter et~al.}}{{Dexter, Tang, Fatahi, Song, Dharamsi, and Gupta}}}
 \bibcite{nginx2024}{{9}{2024}{{F5 NGINX}}{{}}}
@@ -114,6 +109,8 @@
 \bibcite{gke_gateway}{{11}{2026}{{Google Cloud}}{{}}}
 \bibcite{jain2025performance}{{12}{2025}{{Jain et~al.}}{{Jain, Parayil, Mallick, Choukse, Qin, Zhang, Goiri, Wang, Bansal, R{\"u}hle, Kulkarni, Kofsky, and Rajmohan}}}
 \bibcite{karger1997}{{13}{1997}{{Karger et~al.}}{{Karger, Lehman, Leighton, Panigrahy, Levine, and Lewin}}}
+\@writefile{toc}{\contentsline {section}{\numberline {10}Conclusion}{9}{section.10}\protected@file@percent }
+\newlabel{sec:conclusion}{{10}{9}{Conclusion}{section.10}{}}
 \bibcite{vllm2023}{{14}{2023}{{Kwon et~al.}}{{Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, and Stoica}}}
 \bibcite{chunkkv2025}{{15}{2025}{{Liu et~al.}}{{Liu, Tang, Dong, Li, Liu, Li, Hu, and Chu}}}
 \bibcite{decima}{{16}{2019}{{Mao et~al.}}{{Mao, Schwarzkopf, Venkatakrishnan, Meng, and Alizadeh}}}
@@ -138,4 +135,9 @@
 \bibcite{lmsys2024}{{35}{2024{a}}{{Zheng et~al.}}{{Zheng, Chiang, Sheng, Li, Zhuang, Wu, Zhuang, Li, Lin, Xing, Gonzalez, Stoica, and Zhang}}}
 \bibcite{sglang2024}{{36}{2024{b}}{{Zheng et~al.}}{{Zheng, Yin, Xie, Sun, Huang, Yu, Cao, Kozyrakis, Stoica, Gonzalez, Barrett, and Sheng}}}
 \bibcite{distserve2024}{{37}{2024}{{Zhong et~al.}}{{Zhong, Liu, Chen, Hu, Zhu, Liu, Jin, and Zhang}}}
+\citation{wildchat2024}
+\@writefile{toc}{\contentsline {section}{\numberline {A}WildChat replay (regime-sensitivity control)}{14}{appendix.A}\protected@file@percent }
+\newlabel{app:wildchat}{{A}{14}{WildChat replay (regime-sensitivity control)}{appendix.A}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces WildChat-4.8M replay: 30-minute window, $c{=}32$. TTFT in seconds. Bold is best in column. Compared to the GLM-5.1 results, GORGO variants are not competitive: \texttt  {gorgo-static} and \texttt  {gorgo-autotune} are the worst two policies on p95.}}{14}{table.caption.13}\protected@file@percent }
+\newlabel{tab:wildchat}{{5}{14}{WildChat-4.8M replay: 30-minute window, $c{=}32$. TTFT in seconds. Bold is best in column. Compared to the GLM-5.1 results, GORGO variants are not competitive: \texttt {gorgo-static} and \texttt {gorgo-autotune} are the worst two policies on p95}{table.caption.13}{}}
 \gdef \@abspage@last{14}
