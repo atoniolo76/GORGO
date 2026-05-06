@@ -328,19 +328,15 @@ HF-published user count and leave intra-user reuse unmeasured here.
   $^*$LMSYS user count is from the dataset card \citep{lmsys2024} (210K
   unique IPs across 1M conversations); the public schema does not expose
   the IP column, so we cannot recompute its intra-user reuse here and
-  leave that cell as ``---''.
-  $^\dagger$GLM-5.1 reports requests per user (not turns per
-  conversation): our production trace partitions by user but does not
-  carry a conversation identifier, so direct turns-per-conversation is
-  not measurable.}
+  leave that cell as ``---''.}
 \label{tab:datasets}
 \begin{tabular}{lrrrrrr}
 \toprule
-Dataset & Total reqs & Users & Turns/conv & Avg in.\ tokens & Intra-user reuse & Global reuse \\
+Dataset & Total reqs & Users & Reqs/user & Avg in.\ tokens & Intra-user reuse & Global reuse \\
 \midrule
-LMSYS-Chat-1M      & 1{,}000{,}000  & 210{,}479$^*$  & 2.0           & 467     & ---$^*$ & 9.0\% \\
-WildChat-4.8M      & 3{,}199{,}860  & 1{,}833{,}730  & 2.5           & 2{,}925 & 5.3\%   & 34.4\% \\
-GLM-5.1 production & 411{,}169      & 4{,}984        & 82.5$^\dagger$ & 21{,}043 & 53.7\%  & 55.3\% \\
+LMSYS-Chat-1M      & 1{,}000{,}000  & 210{,}479$^*$  &  4.8 & 467     & ---$^*$ & 9.0\% \\
+WildChat-4.8M      & 3{,}199{,}860  & 1{,}833{,}730  &  1.7 & 2{,}925 & 5.3\%   & 34.4\% \\
+GLM-5.1 production & 411{,}169      & 4{,}984        & 82.5 & 21{,}043 & 53.7\%  & 55.3\% \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -351,9 +347,8 @@ GLM-5.1 production & 411{,}169      & 4{,}984        & 82.5$^\dagger$ & 21{,}043
 \caption{Three axes of dataset characterization.
   \textit{Left}: average input tokens per request (log scale)---GLM-5.1 is
   45$\times$ longer than LMSYS and 7$\times$ longer than WildChat.
-  \textit{Center}: multi-turn density on a log scale---LMSYS averages 2.0
-  turns per conversation, WildChat 2.5, while GLM-5.1 has 82.5 requests
-  per user (different metric: production trace has no conversation IDs).
+  \textit{Center}: requests per user on a log scale---82 on GLM-5.1
+  vs.\ 4.8 on LMSYS-Chat-1M vs.\ 1.7 on WildChat-4.8M.
   \textit{Right}: prefix-reuse breakdown---GLM-5.1 reuse is dominated by
   intra-user repeat-conversation prefixes; WildChat reuse is dominated by
   cross-user structural similarity (shared system prompts, viral
@@ -366,10 +361,10 @@ Three contrasts (Table~\ref{tab:datasets}, Fig.~\ref{fig:dataset_comparison})
 matter for routing. \textit{Request length}: GLM-5.1 prompts are 45$\times$
 longer than LMSYS and 7$\times$ longer than WildChat---at the prefill rates
 we measure, a 21{,}000-token uncached prompt costs seconds, not milliseconds.
-\textit{Conversation depth}: LMSYS averages 2.0 turns per conversation,
-WildChat 2.5; on the production trace, by contrast, each user issues 82
-requests on average. Intra-user prefix reuse depends on returning users
-with multi-turn conversations, which neither public set has at the scale
+\textit{User concentration}: GLM-5.1 averages 82 requests per user;
+WildChat 1.7; LMSYS 4.8. Both public sets are dominated by single-shot
+or near-single-shot users---intra-user prefix reuse depends on returning
+users issuing many requests, which neither public set has at the scale
 of a long-running production endpoint. \textit{Reuse composition}: GLM-5.1's reuse
 is intra-user multi-turn dialogue (53.7\% intra plus 1.6\% additional
 cross-user), while WildChat's 34.4\% global is mostly cross-user shared
