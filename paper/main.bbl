@@ -1,4 +1,4 @@
-\begin{thebibliography}{36}
+\begin{thebibliography}{35}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -165,13 +165,6 @@ Ingo Rechenberg.
 \newblock Evolutionsstrategie: Optimierung technischer systeme nach prinzipien
   der biologischen evolution.
 \newblock 1973.
-
-\bibitem[Srivatsa et~al.(2024)Srivatsa, Gao, Patel, Sivaraman, and
-  Rastogi]{preble}
-Varun Srivatsa, H.~Gao, M.~Patel, A.~Sivaraman, and A.~Rastogi.
-\newblock {Preble}: Efficient distributed prompt scheduling for large language
-  model serving.
-\newblock arXiv preprint arXiv:2407.00023, 2024.
 
 \bibitem[Sun et~al.(2024)Sun, Huang, Tang, Wang, Zhang, Li, Yang, Zhang, Wang,
   Wu, Cao, Lin, et~al.]{llumnix2024}
