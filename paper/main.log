@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.4.19)  6 MAY 2026 05:36
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.4.19)  6 MAY 2026 05:46
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -747,15 +747,18 @@ Package microtype Info: Loading generic protrusion settings for font family
 
 
 {/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}{/usr/share/texlive/texmf-di
-st/fonts/enc/dvips/base/8r.enc}] [2]
-Overfull \hbox (23.41197pt too wide) in paragraph at lines 330--339
+st/fonts/enc/dvips/base/8r.enc}]
+Underfull \vbox (badness 2894) has occurred while \output is active []
+
+ [2]
+Overfull \hbox (23.41197pt too wide) in paragraph at lines 331--340
  [][] 
  []
 
-<figures/dataset_comparison.png, id=152, 1074.8155pt x 356.532pt>
+<figures/dataset_comparison.png, id=150, 1074.8155pt x 356.532pt>
 File: figures/dataset_comparison.png Graphic file (type png)
 <use figures/dataset_comparison.png>
-Package pdftex.def Info: figures/dataset_comparison.png  used on input line 343
+Package pdftex.def Info: figures/dataset_comparison.png  used on input line 344
 .
 (pdftex.def)             Requested size: 397.48499pt x 131.84949pt.
 
@@ -763,52 +766,43 @@ Underfull \vbox (badness 1215) has occurred while \output is active []
 
  [3]
 [4 <./figures/dataset_comparison.png>]
-Underfull \hbox (badness 10000) in paragraph at lines 472--477
-[]\T1/txr/bx/n/10 (+20) least-request \T1/txr/m/n/10 (+20) routes to the replic
-a with the fewest in-flight re-quests, scor-ing by
+Underfull \hbox (badness 5175) in paragraph at lines 476--481
+[]\T1/txtt/m/n/10 least-request \T1/txr/m/n/10 (+20) routes to the replica with
+ the fewest in-flight re-quests, scor-ing by
  []
 
-
-Underfull \hbox (badness 2426) in paragraph at lines 472--477
-[]\OT1/txr/m/n/10 (+20) ([][]\OML/txmi/m/it/10 ; [][]\OT1/txr/m/n/10 (+20) )$ \
-T1/txr/m/n/10 (+20) to bridge the $\OMS/txsy/m/n/10 ^^X$\T1/txr/m/n/10 (+20) 10
-s stal-e-ness be-tween met-rics
- []
-
-[5]
-LaTeX Font Info:    Trying to load font information for TS1+txr on input line 5
-22.
- (/usr/share/texlive/texmf-dist/tex/latex/txfonts/ts1txr.fd
-File: ts1txr.fd 2000/12/15 v3.1
-)
-<figures/rtt_over_time_glm5_w1.png, id=211, 1002.5455pt x 569.327pt>
-File: figures/rtt_over_time_glm5_w1.png Graphic file (type png)
-<use figures/rtt_over_time_glm5_w1.png>
-Package pdftex.def Info: figures/rtt_over_time_glm5_w1.png  used on input line 
-545.
-(pdftex.def)             Requested size: 337.86465pt x 191.86592pt.
-LaTeX Font Info:    Font shape `T1/txr/b/n' in size <9> not available
-(Font)              Font shape `T1/txr/bx/n' tried instead on input line 574.
 
 Underfull \vbox (badness 10000) has occurred while \output is active []
 
- [6 <./figures/rtt_over_time_glm5_w1.png>]
-Underfull \hbox (badness 4441) in paragraph at lines 659--666
+ [5]
+LaTeX Font Info:    Font shape `T1/txr/b/n' in size <9> not available
+(Font)              Font shape `T1/txr/bx/n' tried instead on input line 566.
+
+[6]
+Underfull \hbox (badness 4441) in paragraph at lines 651--658
 []\T1/txr/m/n/10 (+20) At $\OML/txmi/m/it/10 c[]\OT1/txr/m/n/10 (+20) 64$ \T1/t
 xr/m/n/10 (+20) (Ta-ble []4[]), the pic-ture flips be-tween \T1/txtt/m/n/10 gor
 go-static \T1/txr/m/n/10 (+20) and \T1/txtt/m/n/10 gorgo-hillclimb\T1/txr/m/n/1
 0 (+20) :
  []
 
-<figures/convergence_top_0100.png, id=224, 2506.36375pt x 766.865pt>
+<figures/convergence_top_0100.png, id=216, 2506.36375pt x 766.865pt>
 File: figures/convergence_top_0100.png Graphic file (type png)
 <use figures/convergence_top_0100.png>
 Package pdftex.def Info: figures/convergence_top_0100.png  used on input line 6
-81.
+73.
 (pdftex.def)             Requested size: 397.48499pt x 121.61267pt.
-[7] [8 <./figures/convergence_top_0100.png>] (./main.bbl [9] [10]) [11]
-[12] [13]
-Underfull \hbox (badness 5533) in paragraph at lines 901--902
+[7]
+Underfull \vbox (badness 1270) has occurred while \output is active []
+
+ [8 <./figures/convergence_top_0100.png>] (./main.bbl [9] [10]) [11] [12] [13]
+LaTeX Font Info:    Trying to load font information for TS1+txr on input line 8
+95.
+
+(/usr/share/texlive/texmf-dist/tex/latex/txfonts/ts1txr.fd
+File: ts1txr.fd 2000/12/15 v3.1
+)
+Underfull \hbox (badness 5533) in paragraph at lines 896--897
 []$\T1/txtt/m/n/10 specs / policy _ matrix _ abstract _ night _ w2 . json$ \T1/
 txr/m/n/10 (+20) --- W2 spec (eight poli-cies,
  []
@@ -819,32 +813,31 @@ LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
  ***********
 Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: 38607290D3887B14F1F8AFB5E160BEA4;943.
+(rerunfilecheck)             Checksum: 12547B7B3C715A6FA0D852FDF9ABA2C8;1223.
  ) 
 Here is how much of TeX's memory you used:
- 16564 strings out of 476106
- 254649 string characters out of 5793933
- 1951975 words of memory out of 5000000
- 37773 multiletter control sequences out of 15000+600000
- 640187 words of font info for 441 fonts, out of 8000000 for 9000
+ 16549 strings out of 476106
+ 254301 string characters out of 5793933
+ 1947975 words of memory out of 5000000
+ 37765 multiletter control sequences out of 15000+600000
+ 635344 words of font info for 436 fonts, out of 8000000 for 9000
  59 hyphenation exceptions out of 8191
- 72i,8n,79p,1001b,633s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 72i,8n,79p,1001b,645s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/txfonts/rtcxr.pfb></usr/sha
 re/texlive/texmf-dist/fonts/type1/public/txfonts/rtxb.pfb></usr/share/texlive/t
 exmf-dist/fonts/type1/public/txfonts/rtxi.pfb></usr/share/texlive/texmf-dist/fo
 nts/type1/public/txfonts/rtxmi.pfb></usr/share/texlive/texmf-dist/fonts/type1/p
 ublic/txfonts/rtxr.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/txfont
-s/rtxsc.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/txfonts/t1xtt.pfb
-></usr/share/texlive/texmf-dist/fonts/type1/public/txfonts/txex.pfb></usr/share
-/texlive/texmf-dist/fonts/type1/public/txfonts/txsy.pfb></usr/share/texlive/tex
-mf-dist/fonts/type1/urw/helvetic/uhvr8a.pfb></usr/share/texlive/texmf-dist/font
-s/type1/urw/times/utmb8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/tim
-es/utmr8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
-
-Output written on main.pdf (14 pages, 721037 bytes).
+s/t1xtt.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/txfonts/txex.pfb>
+</usr/share/texlive/texmf-dist/fonts/type1/public/txfonts/txsy.pfb></usr/share/
+texlive/texmf-dist/fonts/type1/urw/helvetic/uhvr8a.pfb></usr/share/texlive/texm
+f-dist/fonts/type1/urw/times/utmb8a.pfb></usr/share/texlive/texmf-dist/fonts/ty
+pe1/urw/times/utmr8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/u
+tmri8a.pfb>
+Output written on main.pdf (14 pages, 414352 bytes).
 PDF statistics:
- 456 PDF objects out of 1000 (max. 8388607)
- 403 compressed objects within 5 object streams
- 92 named destinations out of 1000 (max. 500000)
- 98912 words of extra memory for PDF output out of 106986 (max. 10000000)
+ 453 PDF objects out of 1000 (max. 8388607)
+ 404 compressed objects within 5 object streams
+ 93 named destinations out of 1000 (max. 500000)
+ 94819 words of extra memory for PDF output out of 106986 (max. 10000000)
 
