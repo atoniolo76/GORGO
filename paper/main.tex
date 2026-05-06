@@ -149,9 +149,10 @@ Time-to-first-token on a single replica decomposes into three terms: the
 network round-trip from the gateway to that replica, the queueing delay
 behind in-flight requests admitted via continuous batching \citep{orca}, and
 the prefill computation for whatever portion of the input prompt is not
-already cached. Modern inference engines expose a per-replica radix-tree
-KV-cache that lets incoming requests skip prefill for any prefix already
-present on the handling replica \citep{sglang2024,vllm2023}. On long-context
+already cached. Modern inference engines expose a per-replica prefix-keyed
+KV-cache (radix-tree-indexed in SGLang, block-hash-keyed in vLLM) that lets
+incoming requests skip prefill for any prefix already present on the
+handling replica \citep{sglang2024,vllm2023}. On long-context
 multi-turn traffic that saving can be the difference between sub-second TTFT
 and multi-second TTFT, so KV-cache locality at the routing layer is a
 first-order determinant of latency \citep{skywalker,qin2024mooncake}.
@@ -161,9 +162,10 @@ geographically nearest replica minimizes network RTT but ignores cache state;
 routing to the most cache-warm replica maximizes prefix reuse but can pile
 onto a saturated batch; routing to the least-loaded replica balances queue
 depth but is cache- and locality-blind. Standard production heuristics
-implement one of these signals at a time: NGINX-style least-request and
-least-connections \citep{nginx2024}, AIBrix-style longest-prefix-match
-\citep{aibrix2024}, hash-based session affinity, and so on. They suffice for
+implement one of these signals at a time: least-connections-style load
+balancers (NGINX) \citep{nginx2024}, AIBrix-style longest-prefix-match
+\citep{aibrix2024}, consistent-hash session affinity \citep{karger1997},
+and so on. They suffice for
 workloads with short prompts, weak prefix reuse, and uniform replica
 latencies, but interactive long-context traffic breaks all three assumptions:
 production chat traces concentrate most tokens in a small set of returning
@@ -180,8 +182,8 @@ average 470 and 2{,}900 tokens per request with intra-user prefix reuse below
 10\%; the production endpoint we evaluate carries 21{,}000 tokens per request
 on average and 53.7\% intra-user prefix reuse. Public datasets thus produce
 TTFT distributions that are nearly indistinguishable across cache-aware and
-cache-blind policies \citep{skywalker}, which masks routing differences that
-production traffic exposes.
+cache-blind policies in our measurements (\S\ref{sec:results}), masking
+routing differences that production traffic exposes.
 
 \paragraph{Contributions.}
 (i) A workload characterization (\S\ref{sec:dataset}) placing three datasets on
@@ -240,8 +242,7 @@ implicitly select for can dominate TTFT \citep{skywalker,qin2024mooncake}.
 \textbf{Routing-cost decomposition.}
 For request $r$ routed to replica $u$, TTFT depends on three signal
 families the gateway can observe, each of which decomposes further:
-(1)~\emph{Network latency}: the proxy-to-replica RTT $\mathrm{rtt}(u)$
-\citep{vulimiri2015}.
+(1)~\emph{Network latency}: the proxy-to-replica RTT $\mathrm{rtt}(u)$.
 (2)~\emph{Replica load}, comprising (2a)~decode tokens of running
 requests in the current batch, (2b)~prefill tokens of requests queued
 ahead of $r$, and (2c)~$r$'s own prefill cost once admitted.
@@ -294,15 +295,16 @@ LMSYS-Chat-1M \citep{lmsys2024} averages 467 input tokens per request and
 averages 2{,}925 input tokens and 5.3\% intra-user reuse. The combination of
 short prompts and weak reuse pushes prefill cost down enough that TTFT
 distributions are nearly indistinguishable across cache-aware and cache-blind
-policies---an observation also made for cross-region serving more broadly
-\citep{skywalker}. Public benchmarks on these corpora consequently
-underestimate the gain from joint cache--network--queue-aware routing.
+policies (we confirm this in \S\ref{sec:results} via a WildChat replay).
+Public benchmarks on these corpora consequently underestimate the gain from
+joint cache--network--queue-aware routing.
 
 \textbf{GLM-5.1 production trace.}
 To measure routing in the regime where the trade-offs actually arise, we
 compile a long-context, multi-turn chatbot dataset from production inference
-traces of a commercial inference provider's free GLM-5.1 endpoint
-\citep{glm2024}. The corpus contains
+traces of a commercial inference provider's free GLM-family endpoint (the
+deployed variant is GLM-5.1; see \citep{glm2024} for the most recently
+published technical report from the model family). The corpus contains
 411{,}169 requests over 7 days from 4{,}984 distinct users, yielding $\sim$82
 requests per user on average, with an average input length of 21{,}043 tokens
 and 53.7\% intra-user token-weighted prefix reuse. Reuse is measured with a
@@ -438,13 +440,13 @@ $(\mathrm{TTFT} - \mathrm{rtt})/\mathrm{uncached}$ inflates when uncached
 counts are small (high cache hit), so the median drifts upward.
 
 \textbf{gorgo-hillclimb} treats the two parameters as black-box knobs and runs
-a Gaussian $(1{+}1)$-evolution strategy \citep{rechenberg1973} over them in
+a Gaussian $(1{+}1)$-evolution strategy \citep{rechenberg1973,beyer2002es} over them in
 log-space, with the negative p95 TTFT of a rolling 64-request window as the
 objective. Every 16 new samples the tuner scores the current incumbent,
 accepts or rejects the most recent candidate, and proposes a new candidate
 $\theta_{\mathrm{new}} = \exp\bigl(\log\theta_{\mathrm{best}} + \sigma\,\mathcal{N}(0, I)\bigr)$.
 The step size $\sigma$ adapts according to Rechenberg's 1/5-success rule
-\citep{rechenberg1973}: of the last 5 candidates evaluated, roughly one
+\citep{rechenberg1973,beyer2002es}: of the last 5 candidates evaluated, roughly one
 should improve the incumbent. We track the acceptance rate $m$ over a
 trailing window and adjust $\sigma$ multiplicatively---decreasing it (factor
 $\sim$0.82) when $m > 1/5$ (the search is too tight to make progress) and
@@ -466,9 +468,11 @@ We compare GORGO against five baseline policies.
 
 \textbf{random} samples a replica uniformly per request; it is the lower bound.
 
-\textbf{least-request} routes to the replica with the fewest in-flight requests,
-scoring by $\max(\mathrm{sgLang\_running\_reqs}_u, \mathrm{proxy\_inflight}_u)$
-to bridge the $\sim$10\,s staleness between metrics scrapes \citep{nginx2024}.
+\textbf{least-request} routes to the replica with the fewest in-flight
+requests, scoring by $\max(\mathrm{sgLang\_running\_reqs}_u,
+\mathrm{proxy\_inflight}_u)$ to bridge the $\sim$10\,s staleness between
+metrics scrapes; this is the LLM-gateway analogue of NGINX's
+\texttt{least\_conn} \citep{nginx2024,mitzenmacher}.
 
 \textbf{least-load} routes to the replica with the lowest aggregate
 token-weighted load: $\mathrm{running} + \mathrm{queued} +
@@ -760,27 +764,31 @@ the single-replica cache but do not decide which replica serves a request.
 \textbf{Routing and scheduling.}
 Mooncake \citep{qin2024mooncake} is a KV-cache-centric architecture and the
 source of our trace format. AIBrix \citep{aibrix2024} provides prefix-aware
-load balancing as a baseline; k-LPM \citep{klpm2025} formulates LLM scheduling
-under TTFT constraints as NP-hard; DLPM \citep{dlpm2025} targets fairness with
-locality; Llumnix \citep{llumnix2024} migrates requests across replicas;
-Multi-LLM routers \citep{routerwu2025} address model selection; CacheBlend
-\citep{yao2024cacheblend} routes by trie-measured prefix length but does not
-measure network RTT. GORGO commits to a single scalar score per replica with
-online weight tuning and requires no engine modifications.
+load balancing as a baseline; Preble \citep{preble} is an earlier distributed
+prefix-aware scheduler combining locality with load-aware reassignment;
+k-LPM \citep{klpm2025} formulates LLM scheduling under TTFT constraints as
+NP-hard; DLPM \citep{dlpm2025} targets fairness with locality; Llumnix
+\citep{llumnix2024} migrates requests across replicas; Multi-LLM routers
+\citep{routerwu2025} address model selection; CacheBlend
+\citep{yao2024cacheblend} fuses cached chunks for RAG by overlap but does
+not consider network RTT. GORGO commits to a single scalar score per
+replica with online weight tuning and requires no engine modifications.
 \textbf{Online and learned routing.}
 Performance-aware LLM load balancing \citep{jain2025performance} learns a
-routing policy over mixed prefill/decode workloads; bandit and RL schedulers
-\citep{decima} and Bayesian-optimization configuration tuners
+routing policy over mixed prefill/decode workloads; bandit
+\citep{auer2002bandits} and RL schedulers \citep{decima} adapt placement
+from observed outcomes; Bayesian-optimization configuration tuners
 \citep{cherrypick} explore the broader space. GORGO keeps the policy
 interpretable (an additive cost) and applies $(1{+}1)$-ES only to two
 scaling weights, with TTFT as direct reward.
-\textbf{PD-disaggregation.}
-Sarathi-Serve \citep{sarathi_serve}, DistServe \citep{distserve2024}, and
-Splitwise \citep{splitwise2024} disaggregate prefill from decode at the batch
-or GPU-pool level. These reduce the compute component of TTFT but do not
-resolve geo-routing trade-offs when locality and network latency conflict;
-GORGO is complementary and assumes an underlying stack that may already use
-either.
+\textbf{Prefill/decode batching and disaggregation.}
+Sarathi-Serve \citep{sarathi_serve} uses chunked prefill to share a single
+batch between phases; DistServe \citep{distserve2024} and Splitwise
+\citep{splitwise2024} disaggregate prefill and decode onto separate batch
+queues or GPU pools. Both lines reduce the compute component of TTFT but
+do not resolve geo-routing trade-offs when locality and network latency
+conflict; GORGO is complementary and assumes an underlying stack that may
+already use either.
 
 % -----------------------------------------------------------------------
 \section{Conclusion}
