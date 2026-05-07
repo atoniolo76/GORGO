@@ -4,7 +4,6 @@
 \providecommand\HyField@AuxAddToCoFields[2]{}
 \citation{sglang2024}
 \citation{vllm2023}
-\citation{nginx2024}
 \@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
 \newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}
 \citation{lmsys2024}
@@ -29,57 +28,46 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Cost Model}{3}{subsection.3.2}\protected@file@percent }
 \newlabel{eq:score}{{2}{3}{Cost Model}{equation.2}{}}
 \citation{rechenberg1973}
-\citation{nginx2024}
-\citation{aibrix2024}
 \citation{sglang2024}
 \citation{qwen3technical}
+\citation{preble}
+\citation{aibrix2024}
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Three Variants of Weight Selection}{4}{subsection.3.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4}Baselines}{4}{section.4}\protected@file@percent }
-\newlabel{sec:baselines}{{4}{4}{Baselines}{section.4}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {5}Experimental Setup}{4}{section.5}\protected@file@percent }
-\newlabel{sec:setup}{{5}{4}{Experimental Setup}{section.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Experimental Setup}{4}{section.4}\protected@file@percent }
+\newlabel{sec:setup}{{4}{4}{Experimental Setup}{section.4}{}}
 \@writefile{toc}{\contentsline {paragraph}{Hardware and software.}{4}{section*.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Cross-region RTT distribution.}{4}{section*.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Baselines, policies, and windows.}{4}{section*.10}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Proxy-to-replica RTT over the W1 tuning window. Bold lines show the EWMA-smoothed signal ($\alpha {=}0.3$) that GORGO uses for routing; faint lines show raw probe samples. Dashed lines show per-replica means. Seoul exhibits periodic spikes from routing-table churn; Frankfurt is moderately variable; Ashburn is near-constant. The 18$\times $ spread motivates network-aware routing.}}{5}{figure.caption.9}\protected@file@percent }
 \newlabel{fig:rtt}{{2}{5}{Proxy-to-replica RTT over the W1 tuning window. Bold lines show the EWMA-smoothed signal ($\alpha {=}0.3$) that GORGO uses for routing; faint lines show raw probe samples. Dashed lines show per-replica means. Seoul exhibits periodic spikes from routing-table churn; Frankfurt is moderately variable; Ashburn is near-constant. The 18$\times $ spread motivates network-aware routing}{figure.caption.9}{}}
-\@writefile{toc}{\contentsline {paragraph}{Cross-region RTT distribution.}{5}{section*.8}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Policies and windows.}{5}{section*.10}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%.}}{5}{table.caption.12}\protected@file@percent }
+\newlabel{tab:w1}{{2}{5}{GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%}{table.caption.12}{}}
 \@writefile{toc}{\contentsline {paragraph}{Metrics.}{5}{section*.11}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {6}Results}{5}{section.6}\protected@file@percent }
-\newlabel{sec:results}{{6}{5}{Results}{section.6}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}W1: Tuning Window}{5}{subsection.6.1}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%.}}{6}{table.caption.12}\protected@file@percent }
-\newlabel{tab:w1}{{2}{6}{GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold is best in column. Completed counts from proxy logs; success rate $\approx $84.2--84.6\%}{table.caption.12}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Results}{5}{section.5}\protected@file@percent }
+\newlabel{sec:results}{{5}{5}{Results}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}W1: Tuning Window}{5}{subsection.5.1}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Achieved prefix hit rate over the W1 tuning window: the fraction of each request's input tokens that were already cached on the replica the policy routed to (not the total cache available across all replicas). A higher rate means the routing decision exploited more of the available cache. Bold lines are EWMA-smoothed ($\alpha {=}0.06$); faint lines are 64-request rolling averages. \texttt  {gorgo-hillclimb} converges from $\sim $45\% to $\sim $95\% within the first 5 minutes as the ES learns to route requests to their best-cached replica.}}{6}{figure.caption.13}\protected@file@percent }
 \newlabel{fig:cache_convergence}{{3}{6}{Achieved prefix hit rate over the W1 tuning window: the fraction of each request's input tokens that were already cached on the replica the policy routed to (not the total cache available across all replicas). A higher rate means the routing decision exploited more of the available cache. Bold lines are EWMA-smoothed ($\alpha {=}0.06$); faint lines are 64-request rolling averages. \texttt {gorgo-hillclimb} converges from $\sim $45\% to $\sim $95\% within the first 5 minutes as the ES learns to route requests to their best-cached replica}{figure.caption.13}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}W2: Held-Out Evaluation Window}{6}{subsection.6.2}\protected@file@percent }
-\citation{distserve2024,splitwise2024}
-\citation{kvflow2025,lpc2025}
-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GLM-5.1 W2 (held-out evaluation window, 01:00--01:30 UTC). \texttt  {gorgo-static} deploys the W1-learned weights and does not adjust them. Bold is best in column.}}{7}{table.caption.14}\protected@file@percent }
-\newlabel{tab:w2}{{3}{7}{GLM-5.1 W2 (held-out evaluation window, 01:00--01:30 UTC). \texttt {gorgo-static} deploys the W1-learned weights and does not adjust them. Bold is best in column}{table.caption.14}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GLM-5.1 W2 (held-out evaluation window, 01:00--01:30 UTC). \texttt  {gorgo-static} deploys the W1-learned weights and does not adjust them. Bold is best in column.}}{6}{table.caption.14}\protected@file@percent }
+\newlabel{tab:w2}{{3}{6}{GLM-5.1 W2 (held-out evaluation window, 01:00--01:30 UTC). \texttt {gorgo-static} deploys the W1-learned weights and does not adjust them. Bold is best in column}{table.caption.14}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}W2: Held-Out Evaluation Window}{6}{subsection.5.2}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces W1 TTFT broken out by percentile (sorted by p95, worst at top). \texttt  {gorgo-hillclimb} (gold outline) wins all three percentiles during the tuning window.}}{7}{figure.caption.15}\protected@file@percent }
 \newlabel{fig:ttft_bars_w1}{{4}{7}{W1 TTFT broken out by percentile (sorted by p95, worst at top). \texttt {gorgo-hillclimb} (gold outline) wins all three percentiles during the tuning window}{figure.caption.15}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {7}Limitations}{7}{section.7}\protected@file@percent }
-\newlabel{sec:limitations}{{7}{7}{Limitations}{section.7}{}}
-\@writefile{toc}{\contentsline {paragraph}{Single-trace generalization.}{7}{section*.18}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{p99 noise floor.}{7}{section*.19}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Single-tenant traffic.}{7}{section*.20}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces \textit  {Left}: KV-cache hit rate vs.\ p95 TTFT on W2. Bottom-right is ideal (high cache, low latency). \texttt  {gorgo-static} and \texttt  {gorgo-hillclimb} achieve both; \texttt  {simple-session-affinity} achieves the highest cache hit rate but the worst p95 because it cannot rebalance load. \textit  {Right}: routing concentration (share of requests on the most-used replica). The dashed line marks uniform (33\%). GORGO variants concentrate moderately on cache-warm replicas without the pathological imbalance of \texttt  {simple-session-affinity}.}}{7}{figure.caption.16}\protected@file@percent }
+\newlabel{fig:cache_concentration}{{5}{7}{\textit {Left}: KV-cache hit rate vs.\ p95 TTFT on W2. Bottom-right is ideal (high cache, low latency). \texttt {gorgo-static} and \texttt {gorgo-hillclimb} achieve both; \texttt {simple-session-affinity} achieves the highest cache hit rate but the worst p95 because it cannot rebalance load. \textit {Right}: routing concentration (share of requests on the most-used replica). The dashed line marks uniform (33\%). GORGO variants concentrate moderately on cache-warm replicas without the pathological imbalance of \texttt {simple-session-affinity}}{figure.caption.16}{}}
+\citation{distserve2024,splitwise2024}
+\citation{kvflow2025,lpc2025}
 \citation{sglang2024}
 \citation{vllm2023}
 \citation{kvlink2025}
 \citation{chunkkv2025}
 \citation{kvflow2025}
 \citation{lpc2025}
-\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces \textit  {Left}: KV-cache hit rate vs.\ p95 TTFT on W2. Bottom-right is ideal (high cache, low latency). \texttt  {gorgo-static} and \texttt  {gorgo-hillclimb} achieve both; \texttt  {simple-session-affinity} achieves the highest cache hit rate but the worst p95 because it cannot rebalance load. \textit  {Right}: routing concentration (share of requests on the most-used replica). The dashed line marks uniform (33\%). GORGO variants concentrate moderately on cache-warm replicas without the pathological imbalance of \texttt  {simple-session-affinity}.}}{8}{figure.caption.16}\protected@file@percent }
-\newlabel{fig:cache_concentration}{{5}{8}{\textit {Left}: KV-cache hit rate vs.\ p95 TTFT on W2. Bottom-right is ideal (high cache, low latency). \texttt {gorgo-static} and \texttt {gorgo-hillclimb} achieve both; \texttt {simple-session-affinity} achieves the highest cache hit rate but the worst p95 because it cannot rebalance load. \textit {Right}: routing concentration (share of requests on the most-used replica). The dashed line marks uniform (33\%). GORGO variants concentrate moderately on cache-warm replicas without the pathological imbalance of \texttt {simple-session-affinity}}{figure.caption.16}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces W2 TTFT broken out by percentile (sorted by W1 p95, worst at top). Gold outline marks the winner in each panel. \texttt  {gorgo-static} (frozen W1 weights) wins p50 and p95; \texttt  {gorgo-hillclimb} wins p99. \texttt  {simple-session-affinity} degrades sharply at the tail (4.92\,s p99).}}{8}{figure.caption.17}\protected@file@percent }
-\newlabel{fig:percentiles}{{6}{8}{W2 TTFT broken out by percentile (sorted by W1 p95, worst at top). Gold outline marks the winner in each panel. \texttt {gorgo-static} (frozen W1 weights) wins p50 and p95; \texttt {gorgo-hillclimb} wins p99. \texttt {simple-session-affinity} degrades sharply at the tail (4.92\,s p99)}{figure.caption.17}{}}
-\@writefile{toc}{\contentsline {paragraph}{Homogeneous hardware and no PD-disaggregation.}{8}{section*.21}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{ES convergence time.}{8}{section*.22}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {8}Related Work}{8}{section.8}\protected@file@percent }
-\newlabel{sec:related}{{8}{8}{Related Work}{section.8}{}}
-\@writefile{toc}{\contentsline {paragraph}{Prefix caches and reuse.}{8}{section*.23}\protected@file@percent }
-\citation{qin2024mooncake}
+\citation{preble}
 \citation{aibrix2024}
+\citation{qin2024mooncake}
+\citation{skyserve}
+\citation{skywalker}
 \citation{klpm2025}
 \citation{dlpm2025}
 \citation{llumnix2024}
@@ -87,49 +75,54 @@
 \citation{yao2024cacheblend}
 \citation{distserve2024}
 \citation{splitwise2024}
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces W2 TTFT broken out by percentile (sorted by W1 p95, worst at top). Gold outline marks the winner in each panel. \texttt  {gorgo-static} (frozen W1 weights) wins p50 and p95; \texttt  {gorgo-hillclimb} wins p99. \texttt  {simple-session-affinity} degrades sharply at the tail (4.92\,s p99).}}{8}{figure.caption.17}\protected@file@percent }
+\newlabel{fig:percentiles}{{6}{8}{W2 TTFT broken out by percentile (sorted by W1 p95, worst at top). Gold outline marks the winner in each panel. \texttt {gorgo-static} (frozen W1 weights) wins p50 and p95; \texttt {gorgo-hillclimb} wins p99. \texttt {simple-session-affinity} degrades sharply at the tail (4.92\,s p99)}{figure.caption.17}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Limitations}{8}{section.6}\protected@file@percent }
+\newlabel{sec:limitations}{{6}{8}{Limitations}{section.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{Single-trace generalization.}{8}{section*.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{p99 noise floor.}{8}{section*.19}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Single-tenant traffic.}{8}{section*.20}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Homogeneous hardware and no PD-disaggregation.}{8}{section*.21}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{ES convergence time.}{8}{section*.22}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Related Work}{8}{section.7}\protected@file@percent }
+\newlabel{sec:related}{{7}{8}{Related Work}{section.7}{}}
+\@writefile{toc}{\contentsline {paragraph}{Prefix caches and reuse.}{8}{section*.23}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Cross-replica routing and cross-region serving.}{8}{section*.24}\protected@file@percent }
 \citation{routerwu2025}
 \citation{rechenberg1973}
 \bibstyle{plainnat}
 \bibdata{references}
-\bibcite{sarathi_serve}{{1}{2024}{{Agrawal et~al.}}{{Agrawal, Kedia, Panwar, Mohan, Kwatra, Gulavani, Ramjee, and Tumanov}}}
-\bibcite{aibrix2024}{{2}{2024}{{AIBrix Team}}{{}}}
-\bibcite{cherrypick}{{3}{2017}{{Alipourfard et~al.}}{{Alipourfard, Liu, Chen, Venkataraman, Yu, and Zhang}}}
-\bibcite{aws_bedrock_xregion}{{4}{2026}{{Amazon Web Services}}{{}}}
-\bibcite{auer2002bandits}{{5}{2002}{{Auer et~al.}}{{Auer, Cesa-Bianchi, and Fischer}}}
-\bibcite{beyer2002es}{{6}{2002}{{Beyer and Schwefel}}{{}}}
-\bibcite{dlpm2025}{{7}{2025}{{Cao et~al.}}{{Cao, Wang, Mao, Hsu, Yin, Xia, Li, Liu, Zhang, Zhou, Sheng, Gonzalez, and Stoica}}}
-\bibcite{klpm2025}{{8}{2025}{{Dexter et~al.}}{{Dexter, Tang, Fatahi, Song, Dharamsi, and Gupta}}}
-\bibcite{nginx2024}{{9}{2024}{{F5 NGINX}}{{}}}
-\bibcite{glm2024}{{10}{2024}{{GLM Team}}{{}}}
-\@writefile{toc}{\contentsline {paragraph}{Routing and scheduling.}{9}{section*.24}\protected@file@percent }
+\bibcite{aibrix2024}{{1}{2024}{{AIBrix Team}}{{}}}
+\bibcite{dlpm2025}{{2}{2025}{{Cao et~al.}}{{Cao, Wang, Mao, Hsu, Yin, Xia, Li, Liu, Zhang, Zhou, Sheng, Gonzalez, and Stoica}}}
+\bibcite{klpm2025}{{3}{2025}{{Dexter et~al.}}{{Dexter, Tang, Fatahi, Song, Dharamsi, and Gupta}}}
+\bibcite{glm2024}{{4}{2024}{{GLM Team}}{{}}}
+\bibcite{vllm2023}{{5}{2023}{{Kwon et~al.}}{{Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, and Stoica}}}
+\bibcite{chunkkv2025}{{6}{2025}{{Liu et~al.}}{{Liu, Tang, Dong, Li, Liu, Li, Hu, and Chu}}}
+\bibcite{skyserve}{{7}{2025}{{Mao et~al.}}{{Mao, Xia, Wu, Chiang, Griggs, Bhardwaj, Yang, Shenker, and Stoica}}}
 \@writefile{toc}{\contentsline {paragraph}{Online hyperparameter adaptation.}{9}{section*.25}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {9}Conclusion}{9}{section.9}\protected@file@percent }
-\newlabel{sec:conclusion}{{9}{9}{Conclusion}{section.9}{}}
-\bibcite{gke_gateway}{{11}{2026}{{Google Cloud}}{{}}}
-\bibcite{jain2025performance}{{12}{2025}{{Jain et~al.}}{{Jain, Parayil, Mallick, Choukse, Qin, Zhang, Goiri, Wang, Bansal, R{\"u}hle, Kulkarni, Kofsky, and Rajmohan}}}
-\bibcite{karger1997}{{13}{1997}{{Karger et~al.}}{{Karger, Lehman, Leighton, Panigrahy, Levine, and Lewin}}}
-\bibcite{vllm2023}{{14}{2023}{{Kwon et~al.}}{{Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, and Stoica}}}
-\bibcite{chunkkv2025}{{15}{2025}{{Liu et~al.}}{{Liu, Tang, Dong, Li, Liu, Li, Hu, and Chu}}}
-\bibcite{decima}{{16}{2019}{{Mao et~al.}}{{Mao, Schwarzkopf, Venkatakrishnan, Meng, and Alizadeh}}}
-\bibcite{skyserve}{{17}{2025}{{Mao et~al.}}{{Mao, Xia, Wu, Chiang, Griggs, Bhardwaj, Yang, Shenker, and Stoica}}}
-\bibcite{mitzenmacher}{{18}{2001}{{Mitzenmacher}}{{}}}
-\bibcite{modal_prefix_caching}{{19}{2026}{{Modal}}{{}}}
-\bibcite{kvflow2025}{{20}{2025}{{Pan et~al.}}{{Pan, Patel, Hu, Shen, Guan, Li, Qin, Wang, and Ding}}}
-\bibcite{splitwise2024}{{21}{2024}{{Patel et~al.}}{{Patel, Choukse, Zhang, Shah, Goiri, Maleki, and Bianchini}}}
-\bibcite{qin2024mooncake}{{22}{2024}{{Qin et~al.}}{{Qin, Li, He, Zhang, Wu, Zheng, Chen, Xu, Yao, Wei, Zhao, Huang, Yang, and Wu}}}
-\bibcite{qwen3technical}{{23}{2025}{{Qwen Team}}{{}}}
-\bibcite{rechenberg1973}{{24}{1973}{{Rechenberg}}{{}}}
-\bibcite{preble}{{25}{2025}{{Srivatsa et~al.}}{{Srivatsa, Madhavan, Hu, Tarun, Cheng, Han, Yu, Rusti, Wang, Liu, and Zhang}}}
-\bibcite{llumnix2024}{{26}{2024}{{Sun et~al.}}{{Sun, Huang, Tang, Wang, Zhang, Li, Yang, Zhang, Wang, Wu, Cao, Lin, et~al.}}}
-\bibcite{routerwu2025}{{27}{2025}{{Wu and Silwal}}{{}}}
-\bibcite{skywalker}{{28}{2025}{{Xia et~al.}}{{Xia, Mao, Kerney, Jackson, Li, Xing, Shenker, and Stoica}}}
-\bibcite{lpc2025}{{29}{2025{a}}{{Yang et~al.}}{{Yang, Li, Li, and Lloyd}}}
-\bibcite{kvlink2025}{{30}{2025{b}}{{Yang et~al.}}{{Yang, Hou, Wei, Bao, and Chang}}}
-\bibcite{skypilot}{{31}{2023}{{Yang et~al.}}{{}}}
-\bibcite{yao2024cacheblend}{{32}{2024}{{Yao et~al.}}{{Yao, Li, Liu, Ray, Peng, Zhang, Stoica, Keutzer, and Mahoney}}}
-\bibcite{orca}{{33}{2022}{{Yu et~al.}}{{Yu, Jeong, Kim, Kim, and Chun}}}
-\bibcite{wildchat2024}{{34}{2024}{{Zhao et~al.}}{{Zhao, Ren, Hessel, Cardie, Choi, and Deng}}}
-\bibcite{lmsys2024}{{35}{2024{a}}{{Zheng et~al.}}{{Zheng, Chiang, Sheng, Li, Zhuang, Wu, Zhuang, Li, Lin, Xing, Gonzalez, Stoica, and Zhang}}}
-\bibcite{sglang2024}{{36}{2024{b}}{{Zheng et~al.}}{{Zheng, Yin, Xie, Sun, Huang, Yu, Cao, Kozyrakis, Stoica, Gonzalez, Barrett, and Sheng}}}
-\bibcite{distserve2024}{{37}{2024}{{Zhong et~al.}}{{Zhong, Liu, Chen, Hu, Zhu, Liu, Jin, and Zhang}}}
-\gdef \@abspage@last{14}
+\@writefile{toc}{\contentsline {section}{\numberline {8}Conclusion}{9}{section.8}\protected@file@percent }
+\newlabel{sec:conclusion}{{8}{9}{Conclusion}{section.8}{}}
+\bibcite{kvflow2025}{{8}{2025}{{Pan et~al.}}{{Pan, Patel, Hu, Shen, Guan, Li, Qin, Wang, and Ding}}}
+\bibcite{splitwise2024}{{9}{2024}{{Patel et~al.}}{{Patel, Choukse, Zhang, Shah, Goiri, Maleki, and Bianchini}}}
+\bibcite{qin2024mooncake}{{10}{2024}{{Qin et~al.}}{{Qin, Li, He, Zhang, Wu, Zheng, Chen, Xu, Yao, Wei, Zhao, Huang, Yang, and Wu}}}
+\bibcite{qwen3technical}{{11}{2025}{{Qwen Team}}{{}}}
+\bibcite{rechenberg1973}{{12}{1973}{{Rechenberg}}{{}}}
+\bibcite{preble}{{13}{2025}{{Srivatsa et~al.}}{{Srivatsa, Madhavan, Hu, Tarun, Cheng, Han, Yu, Rusti, Wang, Liu, and Zhang}}}
+\bibcite{llumnix2024}{{14}{2024}{{Sun et~al.}}{{Sun, Huang, Tang, Wang, Zhang, Li, Yang, Zhang, Wang, Wu, Cao, Lin, et~al.}}}
+\bibcite{routerwu2025}{{15}{2025}{{Wu and Silwal}}{{}}}
+\bibcite{skywalker}{{16}{2025}{{Xia et~al.}}{{Xia, Mao, Kerney, Jackson, Li, Xing, Shenker, and Stoica}}}
+\bibcite{lpc2025}{{17}{2025{a}}{{Yang et~al.}}{{Yang, Li, Li, and Lloyd}}}
+\bibcite{kvlink2025}{{18}{2025{b}}{{Yang et~al.}}{{Yang, Hou, Wei, Bao, and Chang}}}
+\bibcite{yao2024cacheblend}{{19}{2024}{{Yao et~al.}}{{Yao, Li, Liu, Ray, Peng, Zhang, Stoica, Keutzer, and Mahoney}}}
+\bibcite{wildchat2024}{{20}{2024}{{Zhao et~al.}}{{Zhao, Ren, Hessel, Cardie, Choi, and Deng}}}
+\bibcite{lmsys2024}{{21}{2024{a}}{{Zheng et~al.}}{{Zheng, Chiang, Sheng, Li, Zhuang, Wu, Zhuang, Li, Lin, Xing, Gonzalez, Stoica, and Zhang}}}
+\bibcite{sglang2024}{{22}{2024{b}}{{Zheng et~al.}}{{Zheng, Yin, Xie, Sun, Huang, Yu, Cao, Kozyrakis, Stoica, Gonzalez, Barrett, and Sheng}}}
+\bibcite{distserve2024}{{23}{2024}{{Zhong et~al.}}{{Zhong, Liu, Chen, Hu, Zhu, Liu, Jin, and Zhang}}}
+\citation{wildchat2024}
+\@writefile{toc}{\contentsline {section}{\numberline {A}WildChat replay (regime-sensitivity control)}{14}{appendix.A}\protected@file@percent }
+\newlabel{app:wildchat}{{A}{14}{WildChat replay (regime-sensitivity control)}{appendix.A}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces WildChat-4.8M replay: 30-minute window, $c{=}32$. TTFT in seconds. Bold is best in column. Compared to the GLM-5.1 results, GORGO variants are not competitive: \texttt  {gorgo-static} and \texttt  {gorgo-autotune} are the worst two policies on p95.}}{14}{table.caption.29}\protected@file@percent }
+\newlabel{tab:wildchat}{{4}{14}{WildChat-4.8M replay: 30-minute window, $c{=}32$. TTFT in seconds. Bold is best in column. Compared to the GLM-5.1 results, GORGO variants are not competitive: \texttt {gorgo-static} and \texttt {gorgo-autotune} are the worst two policies on p95}{table.caption.29}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces WildChat-4.8M replay, per-percentile TTFT (p50/p95/p99) across the eight policies. GORGO variants (dark blues) are not competitive: \texttt  {gorgo-static} and \texttt  {gorgo-autotune} are the slowest two policies at the tail, and \texttt  {gorgo-hillclimb} sits mid-pack. The ranking inverts the GLM-5.1 result, consistent with the regime argument in \S  \ref {sec:characterization}.}}{15}{figure.caption.30}\protected@file@percent }
+\newlabel{fig:ttft_bars_wildchat}{{7}{15}{WildChat-4.8M replay, per-percentile TTFT (p50/p95/p99) across the eight policies. GORGO variants (dark blues) are not competitive: \texttt {gorgo-static} and \texttt {gorgo-autotune} are the slowest two policies at the tail, and \texttt {gorgo-hillclimb} sits mid-pack. The ranking inverts the GLM-5.1 result, consistent with the regime argument in \S \ref {sec:characterization}}{figure.caption.30}{}}
+\gdef \@abspage@last{15}
