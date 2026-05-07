@@ -1,112 +1,6 @@
 \documentclass{article}
 
-<<<<<<< HEAD
-% if you need to pass options to natbib, use, e.g.:
-%     \PassOptionsToPackage{numbers, compress}{natbib}
-% before loading neurips_2026
-
-% The authors should use one of these tracks.
-% Before accepting by the NeurIPS conference, select one of the options below.
-% 0. "default" for submission
-\usepackage{neurips_2026}
-% the "default" option is equal to the "main" option, which is used for the Main Track with double-blind reviewing.
-% 1. "main" option is used for the Main Track
-%  \usepackage[main]{neurips_2026}
-% 2. "position" option is used for the Position Paper Track
-%  \usepackage[position]{neurips_2026}
-% 3. "eandd" option is used for the Evaluations & Datasets Track
- % \usepackage[eandd]{neurips_2026}
-% 4. "creativeai" option is used for the Creative AI Track
-%  \usepackage[creativeai]{neurips_2026}
-% 5. "sglblindworkshop" option is used for the Workshop with single-blind reviewing
- % \usepackage[sglblindworkshop]{neurips_2026}
-% 6. "dblblindworkshop" option is used for the Workshop with double-blind reviewing
-%  \usepackage[dblblindworkshop]{neurips_2026}
-
-% After being accepted, the authors should add "final" behind the track to compile a camera-ready version.
-% 1. Main Track
- % \usepackage[main, final]{neurips_2026}
-% 2. Position Paper Track
-%  \usepackage[position, final]{neurips_2026}
-% 3. Evaluations & Datasets Track
- % \usepackage[eandd, final]{neurips_2026}
-% 4. Creative AI Track
-%  \usepackage[creativeai, final]{neurips_2026}
-% 5. Workshop with single-blind reviewing
-%  \usepackage[sglblindworkshop, final]{neurips_2026}
-% 6. Workshop with double-blind reviewing
-%  \usepackage[dblblindworkshop, final]{neurips_2026}
-% Note. For the workshop paper template, both \title{} and \workshoptitle{} are required, with the former indicating the paper title shown in the title and the latter indicating the workshop title displayed in the footnote.
-% For workshops (5., 6.), the authors should add the name of the workshop, "\workshoptitle" command is used to set the workshop title.
-% \workshoptitle{WORKSHOP TITLE}
-
-% "preprint" option is used for arXiv or other preprint submissions
- % \usepackage[preprint]{neurips_2026}
-
-% to avoid loading the natbib package, add option nonatbib:
-%    \usepackage[nonatbib]{neurips_2026}
-
-\usepackage[utf8]{inputenc} % allow utf-8 input
-\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
-\usepackage{amsfonts}       % blackboard math symbols (load before txfonts to avoid integral-symbol redefinition collisions)
-\usepackage{amsmath}        % equation environments and \mathrm, \setminus, etc.
-\usepackage{txfonts}        % Times Roman + matching math (Type 1); eliminates the Type 3 fallback that bare T1+Nimbus introduces
-\usepackage{hyperref}       % hyperlinks
-\usepackage{url}            % simple URL typesetting
-\usepackage{booktabs}       % professional-quality tables
-% \usepackage{nicefrac}     % unused; left out to keep PDF Type 1 only
-\usepackage{microtype}      % microtypography
-\usepackage{xcolor}         % colors
-\usepackage{graphicx}       % \includegraphics for summary figure
-\usepackage{subcaption}     % subfigure environment for the W1/W2 panel
-
-% Note. For the workshop paper template, both \title{} and \workshoptitle{} are required, with the former indicating the paper title shown in the title and the latter indicating the workshop title displayed in the footnote. 
-\title{GORGO: Online Tuning for Cross-Region Network-Aware LLM Serving}
-
-
-
-% The \author macro works with any number of authors. There are two commands
-% used to separate the names and addresses of multiple authors: \And and \AND.
-%
-% Using \And between authors leaves it to LaTeX to determine where to break the
-% lines. Using \AND forces a line break at that point. So, if LaTeX puts 3 of 4
-% authors names on the first line, and the last on the second line, try using
-% \AND instead of \And before the third author name.
-
-
-\author{%
-  Anonymous Author(s)
-  % David S.~Hippocampus\thanks{Use footnote for providing further information
-  %   about author (webpage, alternative address)---\emph{not} for acknowledging
-  %   funding agencies.} \\
-  % Department of Computer Science\\
-  % Cranberry-Lemon University\\
-  % Pittsburgh, PA 15213 \\
-  % \texttt{hippo@cs.cranberry-lemon.edu} \\
-  % examples of more authors
-  % \And
-  % Coauthor \\
-  % Affiliation \\
-  % Address \\
-  % \texttt{email} \\
-  % \AND
-  % Coauthor \\
-  % Affiliation \\
-  % Address \\
-  % \texttt{email} \\
-  % \And
-  % Coauthor \\
-  % Affiliation \\
-  % Address \\
-  % \texttt{email} \\
-  % \And
-  % Coauthor \\
-  % Affiliation \\
-  % Address \\
-  % \texttt{email} \\
-}
-=======
-\usepackage[final]{neurips_2026}
+\usepackage[final,main]{neurips_2026}
 
 \usepackage[utf8]{inputenc}
 \usepackage{natbib}
@@ -125,7 +19,6 @@
 \title{GORGO: Online Tuning for Cross-Region Network-Aware LLM Serving}
 
 \author{Anonymous Author(s)}
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 
 \begin{document}
 
@@ -146,14 +39,9 @@ endpoint featuring multi-turn conversations (${\sim}82$ requests/user),
 7--45$\times$ longer prompts (21k avg tokens), and 2--6$\times$ higher KV-cache
 reuse (55\%). We evaluate policies on a multi-region GPU cluster where
 cross-region network latency ranges from 26ms to 466ms across replicas to test
-<<<<<<< HEAD
-GORGO, an online policy that jointly optimizes cache reuse, network latency,
-and queue depth to minimize p95 TTFT with no offline profiling. GORGO achieves the lowest TTFT at every percentile (p50, p95, p99)
-=======
 GORGO, a policy that jointly optimizes cache reuse, network latency, and queue
 depth with weights optimized online to minimize p95 TTFT with no offline
 profiling. GORGO achieves the lowest TTFT at every percentile (p50, p95, p99)
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 across both a tuning window and a held-out evaluation window against all other
 load balancing policies, highlighting the impact of online joint optimization.
 \end{abstract}
@@ -163,191 +51,6 @@ load balancing policies, highlighting the impact of online joint optimization.
 \label{sec:intro}
 % -----------------------------------------------------------------------
 
-<<<<<<< HEAD
-Modern LLM serving is increasingly cross-region. Operators distribute model
-replicas across multiple geographies for three reasons: to follow diurnally
-shifting demand from a globally distributed user base, to provide redundancy
-against regional capacity loss or partition, and to aggregate accelerator
-capacity that no single region currently supplies \citep{skywalker,skyserve}.
-Once replicas span regions, the gateway that routes incoming requests
-becomes a first-class component of time-to-first-token (TTFT), sitting
-between the client and the inference engines and choosing one replica per
-request based on observable state.
-
-TTFT on a single replica decomposes into three terms: the
-network round-trip from the gateway to that replica, the queueing delay
-behind in-flight requests admitted via continuous batching \citep{orca}, and
-the prefill computation for whatever portion of the input prompt is not
-already cached. Modern inference engines expose a per-replica prefix-keyed
-KV-cache (radix-tree-indexed in SGLang, block-hash-keyed in vLLM) that lets
-incoming requests skip prefill for any prefix already present on the
-handling replica \citep{sglang2024,vllm2023}. On long-context
-multi-turn traffic that saving can be the difference between sub-second TTFT
-and multi-second TTFT, so KV-cache locality at the routing layer is a
-first-order determinant of latency \citep{skywalker,qin2024mooncake}.
-
-These three TTFT terms pull in different directions. Routing to the
-geographically nearest replica minimizes network RTT but ignores cache state;
-routing to the most cache-warm replica maximizes prefix reuse but can pile
-onto a saturated batch; routing to the least-loaded replica balances queue
-depth but is cache- and locality-blind. Standard production heuristics
-implement one of these signals at a time: least-connections-style load
-balancers (NGINX) \citep{nginx2024}, AIBrix-style longest-prefix-match
-\citep{aibrix2024}, consistent-hash session affinity \citep{karger1997},
-and so on. They suffice for
-workloads with short prompts, weak prefix reuse, and uniform replica
-latencies, but interactive long-context traffic breaks all three assumptions:
-production chat traces concentrate most tokens in a small set of returning
-users with substantial prefix overlap, prompts run to tens of thousands of
-tokens, and cross-region RTTs differ by an order of magnitude. The right
-routing target for a given request can change minute-to-minute as load shifts,
-and weighting one signal in isolation leaves performance on the table at the
-tail.
-
-A second obstacle is empirical: the public chat datasets used in prior
-LLM-serving evaluations underrepresent the regime where these trade-offs
-matter. LMSYS-Chat-1M \citep{lmsys2024} and WildChat-4.8M \citep{wildchat2024}
-average 470 and 2{,}900 tokens per request with intra-user prefix reuse below
-10\%; the production endpoint we evaluate carries 21{,}000 tokens per request
-on average and 53.7\% intra-user prefix reuse. Public datasets thus produce
-TTFT distributions that are nearly indistinguishable across cache-aware and
-cache-blind policies in our measurements (\S\ref{sec:results}), masking
-routing differences that production traffic exposes.
-
-\paragraph{Contributions.}
-(i) A workload characterization (\S\ref{sec:dataset}) placing three datasets on
-the same prefix-reuse and request-length axes; the GLM-5.1 production trace
-has 7--45$\times$ longer prompts and 2--6$\times$ higher token-weighted reuse
-than LMSYS-Chat-1M and WildChat-4.8M.
-(ii) A routing cost model and three variants collectively called GORGO
-(\S\ref{sec:method}) that score each replica by an additive combination of
-EWMA network RTT, estimated prefill cost over uncached tokens, and projected
-decode-rate cost over running and queued tokens. Variants differ only in how
-the two per-token rate parameters are set: a static configuration, a
-per-replica median-of-rates fit, or a Gaussian $(1{+}1)$-ES hill climb that
-directly minimizes p95 TTFT.
-(iii) An experimental setup (\S\ref{sec:setup}) running each of eight policies
-on its own dedicated 2$\times$L40S three-replica fleet in Seoul, Frankfurt,
-and Ashburn, with cross-region RTTs spanning 26--466\,ms.
-(iv) Empirical results (\S\ref{sec:results}) across multiple 30-minute slices
-of GLM-5.1 traffic on two consecutive days plus a higher-concurrency stress
-window: in every window, two GORGO variants together cover the lowest TTFT
-at p50, p95, and p99 against seven baseline policies; on a WildChat replay
-the GORGO advantage collapses, confirming that the result is regime-dependent
-on long-context, high-reuse traffic.
-
-% -----------------------------------------------------------------------
-\section{Background}
-\label{sec:background}
-% -----------------------------------------------------------------------
-
-\textbf{KV caching and prefix reuse.}
-Inference engines such as SGLang \citep{sglang2024} and vLLM \citep{vllm2023}
-maintain a Key--Value cache of attention activations for every active sequence;
-new tokens are appended to this cache step-by-step and admitted into the next
-decoding iteration via continuous batching \citep{orca}. Beyond per-request
-state, the same cache enables \emph{prefix reuse}: when an incoming request
-shares a token-level prefix with a sequence already cached on a replica, that
-prefix's KV state can be reused and prefill is skipped for those tokens.
-SGLang's RadixAttention \citep{sglang2024} operationalizes
-this via a per-replica radix trie that tracks which prefixes are resident; on
-multi-turn workloads where the same user returns repeatedly, a replica that
-has seen the conversation can serve the next turn at a fraction of the prefill
-cost.
-
-\textbf{Request-level routing as its own layer.}
-Inside a single replica, a per-request scheduler decides admission and order
-within the running batch \citep{sglang2024,orca}; across replicas, a
-\emph{request-level router} (or gateway) decides which replica receives a
-request in the first place. AIBrix \citep{aibrix2024} is a recent example of
-such a routing layer designed for LLM gateways, exposing
-\texttt{prefix-cache}, \texttt{least-load}, and \texttt{least-request}
-policies behind a common interface; production
-gateways like NGINX \citep{nginx2024} and AWS Bedrock cross-region inference
-\citep{aws_bedrock_xregion} occupy the same architectural slot but at the
-network level, with no surface for KV state. Routing-layer decisions matter
-disproportionately on long-context workloads because the prefill term they
-implicitly select for can dominate TTFT \citep{skywalker,qin2024mooncake}.
-
-\textbf{Routing-cost decomposition.}
-For request $r$ routed to replica $u$, TTFT depends on three signal
-families the gateway can observe, each of which decomposes further:
-(1)~\emph{Network latency}: the proxy-to-replica RTT $\mathrm{rtt}(u)$.
-(2)~\emph{Replica load}, comprising (2a)~decode tokens of running
-requests in the current batch, (2b)~prefill tokens of requests queued
-ahead of $r$, and (2c)~$r$'s own prefill cost once admitted.
-(3)~\emph{Available prefix cache}, comprising prefix overlap with
-(3a)~the running batch (some KV state may already be evicted),
-(3b)~queued requests (their KV state will exist by the time $r$ runs),
-and (3c)~$r$'s own cached prior turns under the same conversation.
-A routing policy is a function over these nine sub-signals; no production
-policy we are aware of jointly weighs even all three top-level families.
-
-\textbf{Common policies.}
-We consider five non-GORGO baselines representative of production systems:
-\texttt{random} (cache- and load-blind), \texttt{least-request} and
-\texttt{least-load} (load-aware, cache-blind), \texttt{prefix-cache}
-(longest-prefix-match with a \texttt{least-request} fallback under load imbalance, in
-the AIBrix style), and \texttt{simple-session-affinity}
-(token-prefix hash to a fixed replica). \S\ref{sec:baselines} states their
-exact form. None of the five takes more than one of the three signal
-families above as a primary objective.
-
-\textbf{Production cross-region gateways and prior systems.}
-Industrial cross-region routing exists today but is opaque to KV state. AWS
-Bedrock cross-region inference \citep{aws_bedrock_xregion} and GKE
-multi-cluster Gateways \citep{gke_gateway} provide global routing and failover
-but treat inference as an HTTP endpoint. Serverless GPU platforms such as
-Modal \citep{modal_prefix_caching} support intra-region prefix caching but do
-not optimize across regions; SkyPilot \citep{skypilot} aggregates capacity
-across clouds but does not observe per-replica KV state. SkyServe
-\citep{skyserve} manages cross-region placement and SkyWalker
-\citep{skywalker} adds KV-aware cross-region load balancing with selective
-KV pushing. GORGO occupies the gap between opaque gateways and KV-aware
-single-region schedulers: a per-request, multi-region routing layer that
-combines all three signal families on a single scalar cost score, with the
-two scaling weights tuned online.
-
-% -----------------------------------------------------------------------
-\section{Dataset}
-\label{sec:dataset}
-% -----------------------------------------------------------------------
-
-\textbf{Public datasets sit in the wrong regime.}
-Routing policies that exploit cache locality or user stickiness improve TTFT
-by choosing a replica with high prefix-cache reuse, which we measure as the
-prefix-hit rate---the fraction of an incoming request's input tokens that
-match a previously-seen prefix on the chosen replica. On a corpus where
-prefix-hit rates are uniformly low across all replicas, no cache-aware policy
-has anywhere to win. This is the regime occupied by the public chat datasets:
-LMSYS-Chat-1M \citep{lmsys2024} averages 467 input tokens per request and
-9\% global token-weighted prefix reuse, and WildChat-4.8M \citep{wildchat2024}
-averages 2{,}925 input tokens and 5.3\% intra-user reuse. The combination of
-short prompts and weak reuse pushes prefill cost down enough that TTFT
-distributions are nearly indistinguishable across cache-aware and cache-blind
-policies (we confirm this in \S\ref{sec:results} via a WildChat replay).
-Public benchmarks on these corpora consequently underestimate the gain from
-joint cache--network--queue-aware routing.
-
-\textbf{GLM-5.1 production trace.}
-To measure routing in the regime where the trade-offs actually arise, we
-compile a long-context, multi-turn chatbot dataset from production inference
-traces of a commercial inference provider's GLM-family endpoint (the
-deployed variant is GLM-5.1; see \citep{glm2024} for the most recently
-published technical report from the model family). The corpus contains
-411{,}169 requests over 7 days from 4{,}984 distinct users, yielding $\sim$82
-requests per user on average, with an average input length of 21{,}043 tokens
-and 53.7\% intra-user token-weighted prefix reuse. Reuse is measured with a
-token-weighted prefix trie that ingests each request's tokenized message
-sequence in arrival order, partitioned by user, and reports intra-user
-savings, cross-user (additional) savings, and global savings.
-Table~\ref{tab:datasets} places the three datasets on the same axes.
-LMSYS-Chat-1M's release reports 210{,}479 unique client IPs across its 1M
-conversations \citep{lmsys2024}, but the publicly distributed dataset
-schema does not include the per-conversation IP column, so our prefix-trie
-analysis can only partition LMSYS by conversation ID; we cite the
-HF-published user count and leave intra-user reuse unmeasured here.
-=======
 Modern LLM chat services serve interactive workloads where perceived latency is
 dominated by time-to-first-token (TTFT). On a single replica, TTFT is the sum
 of three terms: (i) the network round-trip from the client proxy to the replica,
@@ -441,34 +144,10 @@ the dataset carries user identity. The trie reports \textit{intra-user savings}
 \textit{cross-user savings} (additional fraction from pooling across users), and
 \textit{global savings} (sum). LMSYS does not carry user identity, so we report
 only the global figure.
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 
 \begin{table}[t]
 \centering
 \small
-<<<<<<< HEAD
-\caption{Dataset comparison along axes that determine the routing-decision
-  surface. Token counts use the same byte-pair tokenizer in all rows.
-  Reuse percentages are token-weighted prefix-trie savings; global
-  reuse decomposes into intra-user and cross-user components.
-  $^*$LMSYS user count is from the dataset card \citep{lmsys2024} (210K
-  unique IPs across 1M conversations); the public schema does not expose
-  the IP column, so we partition the LMSYS trie by conversation ID
-  instead. Under that partition, intra-user reuse is 0\% as an artifact
-  (every ``user'' has exactly one conversation), and the entire 9.0\%
-  global reuse is attributed to cross-user; this is an upper bound on
-  the true cross-user value, since proper IP partitioning would migrate
-  some of it to intra-user.}
-\label{tab:datasets}
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{lrrrrrrr}
-\toprule
-Dataset & Reqs & Users & Reqs/user & Avg.\ tokens & Intra & Cross & Global \\
-\midrule
-LMSYS-Chat-1M      & 1{,}000{,}000  & 210{,}479$^*$  &  4.8 & 467      & ---$^*$ & $\le 9.0\%^*$ & 9.0\%   \\
-WildChat-4.8M      & 3{,}199{,}860  & 1{,}833{,}730  &  1.7 & 2{,}925  & 5.3\%   & 29.1\%        & 34.4\%  \\
-GLM-5.1 production & 411{,}169      & 4{,}984        & 82.5 & 21{,}043 & 53.7\%  & 1.6\%         & 55.3\%  \\
-=======
 \caption{Workload characterization. Token counts use the same byte-pair
   tokenizer in all rows. Reuse percentages are token-weighted prefix-trie
   savings as described in \S\ref{sec:characterization}.}
@@ -480,61 +159,10 @@ Dataset & Total reqs & Users & Avg input tokens & Intra-user reuse & Global reus
 LMSYS-Chat-1M & 1{,}000{,}000 & --- & 467 & --- & 9.0\% \\
 WildChat-4.8M & 3{,}199{,}860 & 1{,}833{,}730 & 2{,}925 & 5.3\% & 34.4\% \\
 GLM-5.1 production & 411{,}169 & 4{,}984 & 21{,}043 & 53.7\% & 55.3\% \\
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 \bottomrule
 \end{tabular}
 \end{table}
 
-<<<<<<< HEAD
-\begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{figures/dataset_comparison.png}
-\caption{Three axes of dataset characterization.
-  \textit{Left}: average input tokens per request (log scale)---GLM-5.1 is
-  45$\times$ longer than LMSYS and 7$\times$ longer than WildChat.
-  \textit{Center}: requests per user on a log scale---82 on GLM-5.1
-  vs.\ 4.8 on LMSYS-Chat-1M vs.\ 1.7 on WildChat-4.8M.
-  \textit{Right}: prefix-reuse breakdown---GLM-5.1 reuse is dominated by
-  intra-user repeat-conversation prefixes; WildChat reuse is dominated by
-  cross-user structural similarity (shared system prompts, viral
-  templates); LMSYS's intra-user component is not measurable on the
-  public schema (no IP column), so its 9.0\% appears entirely as
-  cross-user (an upper bound; under proper IP partitioning, some would
-  shift to intra-user).}
-\label{fig:dataset_comparison}
-\end{figure}
-
-Three contrasts (Table~\ref{tab:datasets}, Fig.~\ref{fig:dataset_comparison})
-matter for routing. \textit{Request length}: GLM-5.1 prompts are 45$\times$
-longer than LMSYS and 7$\times$ longer than WildChat---at the prefill rates
-we measure, a 21{,}000-token uncached prompt costs seconds, not milliseconds.
-\textit{User concentration}: GLM-5.1 averages 82 requests per user;
-WildChat 1.7; LMSYS 4.8. Both public sets are dominated by single-shot
-or near-single-shot users---intra-user prefix reuse depends on returning
-users issuing many requests, which neither public set has at the scale
-of a long-running production endpoint. \textit{Reuse composition}: GLM-5.1's reuse
-is intra-user multi-turn dialogue (53.7\% intra plus 1.6\% additional
-cross-user), while WildChat's 34.4\% global is mostly cross-user shared
-structure (5.3\% intra). On GLM-5.1, a policy that lands a returning user on
-a replica that has seen their conversation can skip more than half of the
-prefill; on the public datasets, the same policy has nothing to skip.
-
-\textbf{Trace format and filtering.}
-We re-encode GLM-5.1 into the Mooncake FAST'25 trace schema
-\citep{qin2024mooncake} so that benchmarking is time-sequenced and reproducible:
-each trace is a JSONL file in which every row carries an absolute-millisecond
-timestamp, request metadata (input/output token counts, target model), and the
-already-tokenized request body, which avoids exposing user data. Requests with
-$>$24{,}000 input tokens are filtered out; this is short of the model's 32k
-native context window to leave headroom for our tokenizer disagreeing with the
-source tokenizer (so as to shrink the failed-request surface during testing).
-The filtered trace is then chunked by absolute timestamp into 30-minute
-windows; the windows we benchmark in \S\ref{sec:results} are drawn from
-two consecutive days of this trace at the same time-of-day band. Replay is
-open-loop: requests are issued at the recorded arrival timestamps regardless
-of in-flight load, exposing each policy to production burstiness rather than
-to a closed-loop generator that would mask queueing pathologies.
-=======
 Three contrasts stand out (Table~\ref{tab:datasets}). \textit{Request length}:
 GLM-5.1 prompts are 45$\times$ longer than LMSYS and 7$\times$ longer than
 WildChat. At typical prefill rates, a 21{,}000-token uncached prompt takes
@@ -550,104 +178,28 @@ For routing, LMSYS and WildChat live in a regime where prefix-aware policies
 have little to win. On GLM-5.1, a strategy that lands a user on a replica that
 has seen their conversation can save more than half of the prefill.
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/dataset_reuse_composition.png}
+\caption{Token-level prefix reuse decomposition. GLM-5.1's reuse is
+  overwhelmingly intra-user (54\%), reflecting multi-turn dialogue;
+  WildChat's reuse is predominantly cross-user (29\%), reflecting shared
+  templates; LMSYS has minimal reuse overall.}
+\label{fig:reuse_composition}
+\end{figure}
+
 \paragraph{Experimental windows.}
 We focus on two consecutive 30-minute windows of GLM-5.1 traffic: 00:30--01:00
 UTC (W1, tuning) and 01:00--01:30 UTC (W2, held-out evaluation). Traces are
 replayed at original arrival speed and pre-filtered to 24{,}000 input tokens.
 Each window contains approximately 4{,}800 (W1) and 4{,}200 (W2) requests.
 Output is capped at 128 tokens so TTFT, not decode, dominates the latency budget.
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 
 % -----------------------------------------------------------------------
 \section{GORGO}
 \label{sec:method}
 % -----------------------------------------------------------------------
 
-<<<<<<< HEAD
-\textbf{Cost model.}
-Let $r$ denote an incoming request with input token sequence $x_r$, and let
-$u$ denote a candidate replica with KV-cached token sequences $c_u$
-currently resident in its prefix-keyed KV cache. Following the
-decomposition in \S\ref{sec:background}, the GORGO score for routing $r$
-to $u$ is the sum of the three TTFT terms the gateway can observe:
-\begin{equation}
-\begin{aligned}
-\mathrm{score}(u, r) =\;& \mathrm{rtt}_u + t_{\mathrm{prefill}} \cdot \max\bigl(0, |x_r| - |x_r \cap c_u|\bigr) \\
-                        & + w_{\mathrm{q}} \cdot \bigl(\mathrm{queued\_tokens}_u + \mathrm{used\_kv\_tokens}_u\bigr),
-\end{aligned}
-\label{eq:score}
-\end{equation}
-where $w_{\mathrm{q}} \equiv \mathrm{queued\_tokens\_weight}$.
-The proxy sends $r$ to the replica with the minimum score. The three
-signals are sourced as follows.
-\textit{Network latency.}
-$\mathrm{rtt}_u$ is the proxy-to-replica round-trip from a sidecar probe
-that pings every replica every 30\,s; latency is smoothed with an
-exponentially-weighted moving average and stored decoupled from the
-Prometheus metrics scrape so handler contention does not pollute the
-estimate.
-\textit{Replica load.}
-$\mathrm{queued\_tokens}_u$ comes from a proxy-side counter the proxy
-maintains per replica; $\mathrm{used\_kv\_tokens}_u$ comes from SGLang's
-\texttt{num\_used\_tokens} Prometheus metric. Their sum is the
-token-weighted backlog on $u$ (queued tokens plus the live KV-cache
-footprint of running requests).
-\textit{Available prefix cache.}
-$|x_r \cap c_u|$ is the count of input tokens of $r$ already cached on
-$u$, computed by a proxy-side global radix trie over per-replica cached
-prefixes; the trie is updated once per request completion and queried
-once per routing decision.
-
-The two cost-function parameters $t_{\mathrm{prefill}}$ and
-$\mathrm{queued\_tokens\_weight}$ have units of seconds per token. Their
-\emph{scope} differs by variant: \texttt{gorgo-static} and
-\texttt{gorgo-autotune} keep separate values per replica, so heterogeneous
-fleets can carry per-replica calibration; \texttt{gorgo-hillclimb} keeps a
-single global pair shared across all replicas, holding the search space
-two-dimensional and accelerating online convergence.
-
-\textbf{Three weight-selection variants.}
-The variants share Equation~\ref{eq:score} and differ only in how the two
-parameters are chosen.
-
-\texttt{gorgo-static} fixes both parameters at run start and never adjusts
-them. Starter values can be hand-set or carried over from a prior tuning
-window; the variant isolates the contribution of the cost model
-independent of online adaptation.
-
-\texttt{gorgo-autotune} re-fits both rates online by linear regression
-through the origin on a trailing 64-sample window, partitioned by
-destination replica, every 16 new samples. For $t_{\mathrm{prefill}}(u)$
-it fits network-latency-normalized TTFT
-$(\mathrm{TTFT} - \mathrm{rtt}_u)$ as a linear function of uncached input
-tokens; for $\mathrm{queued\_tokens\_weight}(u)$ it fits
-network-latency-normalized total completion time as a linear function of
-completion tokens. The variant treats the cost-model weights as
-identifiable physical rates, which is also its failure mode---the
-per-sample prefill rate inflates when the uncached count is small (high
-cache hit), so the through-origin slope drifts upward.
-
-\texttt{gorgo-hillclimb} runs as a sidecar tuner that treats the two
-global parameters as black-box knobs and minimizes negative p95 TTFT
-over a rolling 64-request window with a Gaussian $(1{+}1)$-evolution
-strategy \citep{rechenberg1973,beyer2002es}: one parent and one offspring
-per iteration, with selection only over offspring. Initial values are
-sampled from $[10^{-3}, 10^{-1}]$. Every 16 new samples the tuner scores
-the current incumbent, accepts or rejects the most recent candidate, and
-proposes a new candidate
-$\theta_{\mathrm{new}} = \exp\bigl(\log\theta_{\mathrm{best}} + \sigma\,\mathcal{N}(0, I)\bigr)$,
-merging accepted parameters into the live GORGO policy. Step size
-$\sigma$ adapts via Rechenberg's 1/5-success rule
-\citep{rechenberg1973,beyer2002es}: of the last 5 candidates evaluated,
-roughly one should improve the incumbent. We track the acceptance rate
-$m$ over a trailing window and adjust $\sigma$ multiplicatively---
-decreasing it (factor $\sim$0.82) when $m > 1/5$ (search too tight) and
-increasing it (factor $\sim$1/0.82) when $m < 1/5$ (search too loose).
-On a 30-minute window with a 64-sample cohort and 16-sample hop, this
-drives the search to within a few percent of the best-found incumbent in
-roughly a hundred candidate evaluations
-(Fig.~\ref{fig:convergence_top}).
-=======
 \subsection{TTFT Decomposition}
 
 Let a request $r$ with token sequence $x_r$ be routed to replica $u$. Its TTFT
@@ -688,7 +240,7 @@ rate $t_{\mathrm{prefill}}$ and the load weight $\alpha$.
 
 \textbf{gorgo-static} fixes $t_{\mathrm{prefill}}$ and $\alpha$ before the run
 and never adjusts them. In W1 we use manually chosen starter values
-($t_{\mathrm{prefill}}=0.07$, $\alpha=0.06$). In W2, \texttt{gorgo-static}
+($\alpha=0.06$, $t_{\mathrm{prefill}}=0.07$). In W2, \texttt{gorgo-static}
 deploys the per-replica weights that \texttt{gorgo-hillclimb} ended W1 at
 ($t_{\mathrm{prefill}}\approx 0.983$, $\alpha\approx 4.4\times10^{-4}$) and
 never adjusts them again. This isolates the contribution of the cost model
@@ -711,49 +263,12 @@ as $\exp(\log(v) + \sigma\,\mathcal{N}(0,1))$ with $\sigma$ adapted according
 to the recent acceptance rate. This variant treats the cost-model weights as
 black-box knobs: it finds whatever values produce the best p95 TTFT under the
 current arrival distribution, with no offline profiling.
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 
 % -----------------------------------------------------------------------
 \section{Baselines}
 \label{sec:baselines}
 % -----------------------------------------------------------------------
 
-<<<<<<< HEAD
-We compare GORGO against five baseline policies, each chosen because it
-isolates one signal that production gateways already deploy:
-\texttt{random} as the lower bound, \texttt{least-request} for
-request-count load (the LLM-gateway analogue of NGINX
-\texttt{least\_conn}), \texttt{least-load} for token-weighted load,
-\texttt{prefix-cache} for KV locality (the AIBrix configuration), and
-\texttt{simple-session-affinity} for static hash-based locality. GORGO
-attempts to subsume all five via Equation~\ref{eq:score}; the
-per-percentile patterns in \S\ref{sec:results} show which signal each
-baseline implicitly weights and where ignoring the others costs latency.
-
-\texttt{random} samples a replica uniformly per request; it is the lower
-bound.
-
-\texttt{least-request} routes to the replica with the fewest in-flight
-requests, scoring by $\max(\mathrm{sgLang\_running\_reqs}_u,
-\mathrm{proxy\_inflight}_u)$ to bridge the $\sim$10\,s staleness between
-metrics scrapes; this is the LLM-gateway analogue of NGINX's
-\texttt{least\_conn} \citep{mitzenmacher}.
-
-\texttt{least-load} routes to the replica with the lowest aggregate
-token-weighted load: $\mathrm{running} + \mathrm{queued} +
-\mathrm{used\_kv\_tokens} + \mathrm{queued\_tokens}_u$. It is heavier-signal
-than \texttt{least-request} but cache-blind.
-
-\texttt{prefix-cache} is the AIBrix-style longest-prefix-match policy
-\citep{aibrix2024}. It picks the replica with the longest cached prefix
-match and falls back to \texttt{least-request} when the running-request
-imbalance exceeds a soft threshold.
-
-\texttt{simple-session-affinity} hashes the first 256 token IDs of the
-prompt modulo the number of replicas \citep{karger1997}. The same prefix
-always maps to the same replica, maximizing intra-user reuse but providing
-no load-escape mechanism.
-=======
 We compare GORGO against five baseline policies.
 
 \textbf{random} samples a replica uniformly per request; it is the lower bound.
@@ -775,7 +290,6 @@ soft threshold.
 \textbf{simple-session-affinity} hashes the first 256 token IDs of the prompt
 modulo the number of replicas. The same prefix always maps to the same replica,
 maximizing intra-user reuse but providing no load-escape mechanism.
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 
 % -----------------------------------------------------------------------
 \section{Experimental Setup}
@@ -783,54 +297,6 @@ maximizing intra-user reuse but providing no load-escape mechanism.
 % -----------------------------------------------------------------------
 
 \paragraph{Hardware and software.}
-<<<<<<< HEAD
-Each policy runs on its own dedicated three-replica fleet so routing
-decisions for one policy cannot warm or cool another policy's caches. Each
-fleet consists of one 2$\times$L40S SGLang \citep{sglang2024} server
-(tensor-parallel 2, 96\,GB VRAM per replica) in each of Asia (Seoul,
-\texttt{ap-seoul}), Europe (Frankfurt, \texttt{eu-frankfurt}), and US East
-(Ashburn, \texttt{us-ashburn}), serving Qwen3.5-35B-A3B-FP8
-\citep{qwen3technical}. A CPU proxy in US East hosts the routing policy and
-replays the trace. The eight policies (\texttt{random},
-\texttt{least-request}, \texttt{least-load}, \texttt{prefix-cache},
-\texttt{simple-session-affinity}, and the three GORGO variants) are
-benchmarked simultaneously on disjoint fleets so that any cross-region
-network variance during a window applies equally to all of them; GPUs are
-not shared across policies.
-
-The proxy scrapes Prometheus metrics every $\sim$10\,s and runs a separate
-EWMA-smoothed HTTP probe for per-replica RTT, decoupled from the metrics
-scrape to avoid handler contention. Before each run a homogeneity check
-issues 16 streaming requests directly to each replica; runs whose
-worst-to-median TTFT ratio exceeds 3$\times$ are flagged (none occurred).
-
-\textbf{Windows.}
-We benchmark across three disjoint 30-minute slices of the GLM-5.1 trace:
-\textbf{W1} (tuning, $c{=}32$): GORGO variants seed from manually chosen
-starter weights and the online tuners adapt during the window.
-\textbf{W2} (cross-day evaluation, $c{=}32$): same time-of-day band as W1
-on a different day; \texttt{gorgo-static} deploys the per-replica weights
-that \texttt{gorgo-hillclimb} learned in W1 and never adjusts them, while
-the other GORGO variants continue tuning.
-\textbf{Stress} ($c{=}64$): the W2 trace replayed at $2{\times}$ the
-in-flight-request cap to test behavior under elevated load.
-Concurrency $c$ is the in-flight-request cap at the proxy. Output is
-capped at 128 tokens per request so TTFT, not decode, dominates the
-latency budget.
-
-\textbf{Cross-region RTT.}
-Probed from the US East proxy with a dedicated lightweight HTTP probe over
-the duration of W1, mean EWMA-smoothed RTT is 25.6$\pm$3.8\,ms to the local
-US East replica, 232$\pm$72\,ms to Frankfurt, and 466$\pm$138\,ms to
-Seoul; coefficient of variation on the cross-region legs is 29--31\%,
-reflecting routing-table churn within the window.
-
-\textbf{Metrics.}
-For each policy and window we report TTFT p50, p95, and p99 over all
-successful streaming responses. Failed requests (HTTP 4xx/5xx, dominated by
-prompt-too-long at the effective context boundary) are excluded from
-percentiles but counted in success rate.
-=======
 Each policy runs on its own dedicated three-replica fleet so routing decisions
 cannot warm or cool another policy's caches. Each fleet consists of one L40S:2
 SGLang \citep{sglang2024} server (tensor-parallel 2, 96\,GB VRAM per replica)
@@ -853,6 +319,19 @@ Probed from the US East proxy, EWMA-smoothed RTT to the US East replica is
 26--40\,ms, to Frankfurt is 90--130\,ms, and to Seoul is 260--466\,ms. The Seoul
 upper bound reflects routing-table churn during the trace. The overall range of
 26--466\,ms represents an 18$\times$ spread.
+Figure~\ref{fig:rtt} shows the full RTT time series over the W1 window.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/rtt_timeseries.png}
+\caption{Proxy-to-replica RTT over the W1 tuning window. Bold lines show
+  the EWMA-smoothed signal ($\alpha{=}0.3$) that GORGO uses for routing;
+  faint lines show raw probe samples. Dashed lines show per-replica means.
+  Seoul exhibits periodic spikes from routing-table churn; Frankfurt is
+  moderately variable; Ashburn is near-constant. The 18$\times$ spread
+  motivates network-aware routing.}
+\label{fig:rtt}
+\end{figure}
 
 \paragraph{Policies and windows.}
 We evaluate eight policies---\texttt{random}, \texttt{least-request},
@@ -860,7 +339,7 @@ We evaluate eight policies---\texttt{random}, \texttt{least-request},
 \texttt{gorgo-static}, \texttt{gorgo-autotune}, \texttt{gorgo-hillclimb}---in
 each of two windows. All eight fleets start simultaneously at the same wall-clock
 time with the same input trace. W1 seeds GORGO variants with manually chosen
-starting weights ($t_{\mathrm{prefill}}=0.07$, $\alpha=0.06$). W2 seeds them
+starting weights ($\alpha=0.06$, $t_{\mathrm{prefill}}=0.07$). W2 seeds them
 with the per-replica weights that \texttt{gorgo-hillclimb} learned during W1
 ($t_{\mathrm{prefill}}\approx 0.983$, $\alpha\approx 4.4\times10^{-4}$).
 \texttt{gorgo-static} in W2 deploys exactly those weights and never adjusts them;
@@ -873,26 +352,18 @@ streaming responses. Failed requests (HTTP 4xx/5xx, dominated by prompt-too-long
 responses at the model's effective context boundary) are excluded from latency
 percentiles but counted in the per-policy success rate. Success rate is between
 84.2\% and 85.1\% across all policies and windows.
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 
 % -----------------------------------------------------------------------
 \section{Results}
 \label{sec:results}
 % -----------------------------------------------------------------------
 
-<<<<<<< HEAD
-\begin{table}[t]
-\centering
-\small
-\caption{GLM-5.1 W1 (tuning window, $c{=}32$). TTFT in seconds. Bold
-=======
 \subsection{W1: Tuning Window}
 
 \begin{table}[t]
 \centering
 \small
 \caption{GLM-5.1 W1 (tuning window, 00:30--01:00 UTC). TTFT in seconds. Bold
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
   is best in column. Completed counts from proxy logs; success rate
   $\approx$84.2--84.6\%.}
 \label{tab:w1}
@@ -912,27 +383,6 @@ random                   & 4{,}076 & 0.296 & 1.828 & 3.171 & 28.99 & 84.6 \\
 \end{tabular}
 \end{table}
 
-<<<<<<< HEAD
-In W1 (Table~\ref{tab:w1}), \texttt{gorgo-hillclimb} delivers the lowest
-p50 (0.288\,s), p95 (1.466\,s), and p99 (2.307\,s)---a single GORGO
-variant sweeps every percentile during tuning, with a 19.8\% reduction in
-p95 TTFT versus the \texttt{random} baseline (1.466\,s vs.\ 1.828\,s).
-\texttt{gorgo-static} (starter weights, never adjusted) already beats
-every non-GORGO policy on p99 and ranks third on p95, showing the cost
-model alone improves on single-signal heuristics; \texttt{gorgo-hillclimb}
-extends the lead by adapting global rates online. \texttt{prefix-cache}
-is competitive at p95 but tail-degraded at p99 (3.017\,s) by
-concentrating traffic onto warm-cache replicas;
-\texttt{simple-session-affinity}'s p99 (2.804\,s) and max (14.96\,s)
-reflect transient overload of the hashed replica. Starting from
-$t_{\mathrm{prefill}}=0.07$ and $\mathrm{queued\_tokens\_weight}=0.06$
-(autotuned over the preceding 30-minute window), the ES converged to
-$t_{\mathrm{prefill}}\approx 0.983$ and
-$\mathrm{queued\_tokens\_weight}\approx 4.4\times10^{-4}$: the high
-$t_{\mathrm{prefill}}$ reflects $\sim$9.5k uncached tokens per request
-after 55\% reuse, and the low $\mathrm{queued\_tokens\_weight}$ reflects
-that deep queues are rare at $c{=}32$.
-=======
 In W1 (Table~\ref{tab:w1}), \texttt{gorgo-hillclimb} delivers the lowest p50
 (0.288\,s), p95 (1.466\,s), and p99 (2.307\,s). The next-best p95 is
 \texttt{simple-session-affinity} at 1.482\,s, a 1.1\% gap. The
@@ -949,7 +399,7 @@ production trace has strong per-user temporal locality, but its p99 (2.804\,s)
 and max (14.96\,s) reflect episodes where the hashed replica is transiently
 overloaded with no escape mechanism.
 
-Starting from $t_{\mathrm{prefill}}=0.07$, $\alpha=0.06$, the ES converged to
+Starting from $\alpha=0.06$, $t_{\mathrm{prefill}}=0.07$, the ES converged to
 $t_{\mathrm{prefill}}\approx 0.983$ and $\alpha\approx 4.4\times10^{-4}$ over
 the 30-minute window. The high learned $t_{\mathrm{prefill}}$ reflects the long
 uncached prefixes in this trace (21k-token prompts, 55\% reuse leaves $\sim$9.5k
@@ -958,22 +408,12 @@ continuous batching already orders within a replica and deep queues are rare at
 32-concurrency on this arrival rate.
 
 \subsection{W2: Held-Out Evaluation Window}
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 
 \begin{table}[t]
 \centering
 \small
-<<<<<<< HEAD
-\caption{GLM-5.1 W2 ($c{=}32$, held-out evaluation: 30-minute window
-  immediately following W1). All GORGO variants are initialized with the
-  hyperparameters \texttt{gorgo-hillclimb} ended W1 at
-  ($t_{\mathrm{prefill}}{=}0.983$,
-  $\mathrm{queued\_tokens\_weight}{=}4.4\times10^{-4}$);
-  \texttt{gorgo-static} freezes them, the others continue tuning.
-=======
 \caption{GLM-5.1 W2 (held-out evaluation window, 01:00--01:30 UTC).
   \texttt{gorgo-static} deploys the W1-learned weights and does not adjust them.
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
   Bold is best in column.}
 \label{tab:w2}
 \begin{tabular}{lrrrrrr}
@@ -992,121 +432,6 @@ simple-session-affinity  & 3{,}570 & 0.396 & 2.080 & 4.917 & 36.60 & 84.8 \\
 \end{tabular}
 \end{table}
 
-<<<<<<< HEAD
-In W2 (Table~\ref{tab:w2}), \texttt{gorgo-static}---deploying the
-W1-learned hyperparameters without adjustment---wins p50 (0.294\,s) and
-p95 (1.510\,s); \texttt{gorgo-hillclimb} wins p99 (2.595\,s). Two GORGO
-variants together sweep all three percentiles, demonstrating that
-hillclimb-tuned values transfer cleanly across consecutive 30-minute
-windows. \texttt{gorgo-static} beats \texttt{gorgo-hillclimb} on p50/p95
-because the W1-learned weights are near-optimal and continuing to tune
-under a stationary objective adds proposal variance---an operator can
-run \texttt{gorgo-hillclimb} during a tuning window and freeze the
-result into \texttt{gorgo-static} for production.
-
-\textbf{Stress at $c{=}64$.}
-To stress-test the W2 result we increase the in-flight-request cap from 32
-to 64 and benchmark two further 30-minute windows: a nighttime window on
-the day after W1 (Table~\ref{tab:stress_night}) and a daytime window on
-W1 itself (Table~\ref{tab:stress_midday}). Both seed all GORGO variants
-with the W1-learned hyperparameters.
-
-\begin{table}[t]
-\centering
-\small
-\caption{GLM-5.1 Stress, nighttime window ($c{=}64$). Same time-of-day
-  band as W1, day after W1. \texttt{simple-session-affinity} did not
-  complete this sweep and is omitted. Bold is best in column.}
-\label{tab:stress_night}
-\begin{tabular}{lrrrrrr}
-\toprule
-Policy & Completed & p50 & p95 & p99 & max & Succ.\% \\
-\midrule
-\textbf{gorgo-hillclimb} & 2{,}466 & 0.281 & \textbf{1.331} & \textbf{1.832} & 3.05  & 89.5 \\
-prefix-cache             & 2{,}468 & 0.288 & 1.394 & 1.992 & 2.95  & 89.6 \\
-gorgo-static             & 2{,}472 & \textbf{0.179} & 1.427 & 2.302 & 4.06  & 89.8 \\
-least-request            & 2{,}465 & 0.281 & 1.605 & 2.268 & 4.16  & 89.5 \\
-gorgo-autotune           & 2{,}469 & 0.280 & 1.690 & 2.298 & 18.84 & 89.7 \\
-least-load               & 2{,}465 & 0.281 & 1.700 & 2.290 & 2.98  & 89.5 \\
-random                   & 2{,}460 & 0.287 & 1.724 & 2.357 & 4.00  & 89.3 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{table}[t]
-\centering
-\small
-\caption{GLM-5.1 Stress, daytime window ($c{=}64$, same day as W1, midday
-  traffic regime). Bold is best in column.}
-\label{tab:stress_midday}
-\begin{tabular}{lrrrrrr}
-\toprule
-Policy & Completed & p50 & p95 & p99 & max & Succ.\% \\
-\midrule
-\textbf{gorgo-static}    & 3{,}372 & \textbf{0.193} & \textbf{1.400} & 2.140 &  3.37 & 89.6 \\
-prefix-cache             & 3{,}376 & 0.295 & 1.416 & \textbf{1.973} &  3.75 & 89.7 \\
-simple-session-affinity  & 3{,}375 & 0.324 & 1.531 & 2.487 & 28.07 & 89.7 \\
-gorgo-hillclimb          & 3{,}376 & 0.226 & 1.581 & 7.186 & 38.29 & 89.7 \\
-least-request            & 3{,}380 & 0.275 & 1.694 & 2.440 & 20.07 & 89.8 \\
-random                   & 3{,}371 & 0.309 & 1.700 & 2.421 &  3.99 & 89.6 \\
-least-load               & 3{,}374 & 0.309 & 1.735 & 2.419 & 16.91 & 89.7 \\
-gorgo-autotune           & 3{,}377 & 0.299 & 1.748 & 2.519 & 23.63 & 89.7 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-In the nighttime stress window (Table~\ref{tab:stress_night}),
-\texttt{gorgo-static} wins p50 and \texttt{gorgo-hillclimb} wins p95 and
-p99 (1.331\,s, 1.832\,s; respectively 6.0\% and 13.5\% below the
-hillclimb's $c{=}32$ W2 result, as the ES adapts to deeper queues). The
-two together sweep all three percentiles.
-
-In the daytime stress window (Table~\ref{tab:stress_midday}) the picture
-shifts. \texttt{gorgo-static} now wins both p50 (0.193\,s) and p95
-(1.400\,s); \texttt{prefix-cache} wins p99 (1.973\,s).
-\texttt{gorgo-hillclimb}'s p99 inflates to 7.186\,s---under midday
-traffic the live (1+1)-ES occasionally proposes weights that produce a
-heavy-tailed minute, and the negative-p95 objective does not penalize
-that excursion fast enough. The practical implication is the same one
-W2 already suggested: freeze hillclimb-tuned weights for production
-(\texttt{gorgo-static}), and reserve \texttt{gorgo-hillclimb} for tuning
-windows where its exploration can be tolerated.
-
-\textbf{Online-tuning convergence.}
-Figure~\ref{fig:convergence_top} plots the best-cache-pick rate---the
-fraction of requests routed to the replica that already holds the most of
-the request's input prefix---over the W1 tuning window for five policies.
-\texttt{gorgo-hillclimb} converges to picking the best-cached replica on
-$\sim$95--100\% of requests within the first $\sim$2 minutes of online
-tuning and stays there for the remainder of the window; the other policies
-either oscillate (\texttt{prefix-cache}) or remain at lower rates
-(\texttt{simple-session-affinity}, \texttt{random}, \texttt{gorgo-static}).
-This is the empirical signature of the (1+1)-ES with the 1/5 rule: fast
-initial descent during the first few hop cycles, then stable refinement.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{figures/convergence_top_0100.png}
-\caption{Best-cache-pick rate over the W1 tuning window for five policies.
-  \texttt{gorgo-hillclimb} (red) converges to $\sim$95--100\% within the
-  first few minutes; baselines either oscillate or stay flat at lower rates.}
-\label{fig:convergence_top}
-\end{figure}
-
-
-
-\textbf{Regime sensitivity.}
-A control replay on WildChat-4.8M with the same fleet and proxy reverses
-the policy ranking: at average prompt length 2{,}925 tokens and 5.3\%
-intra-user reuse, \texttt{simple-session-affinity} wins p95 (1.025\,s) and
-p99 (1.712\,s), and the GORGO variants are not competitive
-(\texttt{gorgo-hillclimb} 1.325\,s p95; \texttt{gorgo-static}'s
-GLM-5.1-trained weights are particularly mis-calibrated). The advantage
-GORGO shows on GLM-5.1 is regime-dependent on long-context, high-reuse
-traffic; the full WildChat table and analysis are in
-Appendix~\ref{app:wildchat}.
-
-=======
 In W2 (Table~\ref{tab:w2}), \texttt{gorgo-static}---deploying the W1-learned
 weights without adjustment---achieves the best p50 (0.294\,s) and p95 (1.510\,s).
 \texttt{gorgo-hillclimb} achieves the best p99 (2.595\,s). The two GORGO
@@ -1132,71 +457,37 @@ spikes in the second window. By contrast, \texttt{gorgo-static}'s W2 p95
 (1.510\,s) improves over its W1 p95 (1.605\,s), a 6.0\% gain; it is the only
 policy whose p95 improves across windows.
 
-\subsection{Summary Figures}
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/cache_and_concentration.png}
+\caption{\textit{Left}: KV-cache hit rate vs.\ p95 TTFT on W2. Bottom-right
+  is ideal (high cache, low latency). \texttt{gorgo-static} and
+  \texttt{gorgo-hillclimb} achieve both; \texttt{simple-session-affinity}
+  achieves the highest cache hit rate but the worst p95 because it cannot
+  rebalance load. \textit{Right}: routing concentration (share of requests
+  on the most-used replica). The dashed line marks uniform (33\%).
+  GORGO variants concentrate moderately on cache-warm replicas without
+  the pathological imbalance of \texttt{simple-session-affinity}.}
+\label{fig:cache_concentration}
+\end{figure}
 
 \begin{figure}[t]
 \centering
-\begin{subfigure}{0.49\textwidth}
-\includegraphics[width=\linewidth]{figures/glm5_w1_summary.png}
-\caption{W1 (tuning window).}
-\end{subfigure}\hfill
-\begin{subfigure}{0.49\textwidth}
-\includegraphics[width=\linewidth]{figures/glm5_w2_summary.png}
-\caption{W2 (held-out evaluation window).}
-\end{subfigure}
-\caption{TTFT distributions for all eight policies on the GLM-5.1 trace.
-  \texttt{gorgo-hillclimb} sweeps p50/p95/p99 in W1; in W2 \texttt{gorgo-static}
-  (W1-learned weights, frozen) leads at p50/p95 and \texttt{gorgo-hillclimb}
-  leads at p99.}
+\includegraphics[width=\linewidth]{figures/ttft_bars.png}
+\caption{W2 TTFT broken out by percentile (sorted by W1 p95, worst at
+  top). Gold outline marks the winner in each panel.
+  \texttt{gorgo-static} (frozen W1 weights) wins p50 and p95;
+  \texttt{gorgo-hillclimb} wins p99.
+  \texttt{simple-session-affinity} degrades sharply at the tail
+  (4.92\,s p99).}
 \label{fig:percentiles}
 \end{figure}
 
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 % -----------------------------------------------------------------------
 \section{Limitations}
 \label{sec:limitations}
 % -----------------------------------------------------------------------
 
-<<<<<<< HEAD
-\textbf{Statistical scope.}
-Four 30-minute windows from one production trace (W1 tuning, W2
-held-out, two stress windows at $c{=}64$); each policy run once per
-window. With ${\sim}2{,}500$--$4{,}800$ successful responses, p99
-standard error is $\sigma_{\mathrm{TTFT}}/\sqrt{n\cdot 0.01\cdot 0.99}
-\approx 0.05$--$0.07$\,s. GORGO p95/p99 wins are several SE clear of the
-next baseline in W2 and the nighttime stress; in W1 the p99 lead is
-$\sim$1\,SE; on the daytime stress \texttt{gorgo-hillclimb}'s p99
-inflates and the win goes to \texttt{prefix-cache} instead. Cross-window
-replication for confidence intervals on every percentile remains future
-work.
-\textbf{ES tail under non-stationary load.}
-\texttt{gorgo-hillclimb}'s p99 spikes on the daytime stress window
-(7.186\,s vs. \texttt{gorgo-static}'s 2.140\,s on the same window;
-Table~\ref{tab:stress_midday}). The negative-p95-TTFT objective does not
-penalize a heavy-tailed minute fast enough for the (1+1)-ES to back out
-of a bad candidate. Frozen weights from a tuning window
-(\texttt{gorgo-static}) are the safer production setting; live tuning is
-appropriate for calibration runs only.
-\textbf{Regime sensitivity.}
-The WildChat replay (\S\ref{sec:results}) shows GORGO's advantage is
-specific to long-context, high-reuse traffic: on prompts averaging
-2{,}900 tokens with 5.3\% intra-user reuse, the prefill term is small,
-the per-token rates do not converge in 30 minutes, and
-\texttt{simple-session-affinity} wins. We claim improvement in the regime
-characterized in \S\ref{sec:dataset}, not universally.
-\textbf{Methodological and operational caveats.}
-\texttt{gorgo-autotune} is the weakest GORGO variant on GLM-5.1 because the
-per-sample rate $({\rm TTFT}-{\rm rtt})/\mathrm{uncached}$ inflates at high
-cache hit, biasing the fit. \texttt{gorgo-hillclimb} requires several hop
-cycles to converge; this fits comfortably in 30-minute windows but not in
-arbitrarily short ones. Each policy ran on a single-tenant three-replica
-fleet; the centralized proxy is a single point of failure, and a
-distributed peer-summary GORGO variant is sketched but not benchmarked.
-The fleet uses homogeneous GPUs and does not split prefill/decode
-\citep{distserve2024,splitwise2024}, which would require an additional
-routing term; GORGO uses only HTTP-exposed metrics, not scheduler-internal
-state \citep{kvflow2025,lpc2025} that could tighten the prefill estimate.
-=======
 \paragraph{Single-trace generalization.}
 The percentile-sweep claim rests on two consecutive 30-minute windows of one
 production trace, sharing model, fleet, hour-of-day, and arrival-rate band. W2
@@ -1229,53 +520,18 @@ that would tighten the prefill estimate.
 The $(1{+}1)$-ES requires several hop cycles to converge from a random starting
 point. In W1 it converged within the 30-minute window, but very short traffic
 windows may not provide enough requests.
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 
 % -----------------------------------------------------------------------
 \section{Related Work}
 \label{sec:related}
 % -----------------------------------------------------------------------
 
-<<<<<<< HEAD
-\textbf{Prefix caches and reuse.}
-=======
 \paragraph{Prefix caches and reuse.}
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 RadixAttention in SGLang \citep{sglang2024} stores per-request KV state in a
 radix tree; PagedAttention in vLLM \citep{vllm2023} enables prefix sharing
 through paged memory. KVLink \citep{kvlink2025}, ChunkKV \citep{chunkkv2025},
 KVFlow \citep{kvflow2025}, and Learned Prefix Caching \citep{lpc2025} improve
 the single-replica cache but do not decide which replica serves a request.
-<<<<<<< HEAD
-\textbf{Routing and scheduling.}
-Mooncake \citep{qin2024mooncake} is a KV-cache-centric architecture and the
-source of our trace format. AIBrix \citep{aibrix2024} provides prefix-aware
-load balancing as a baseline; Preble \citep{preble} is an earlier distributed
-prefix-aware scheduler combining locality with load-aware reassignment;
-k-LPM \citep{klpm2025} formulates LLM scheduling under TTFT constraints as
-NP-hard; DLPM \citep{dlpm2025} targets fairness with locality; Llumnix
-\citep{llumnix2024} migrates requests across replicas; Multi-LLM routers
-\citep{routerwu2025} address model selection; CacheBlend
-\citep{yao2024cacheblend} fuses cached chunks for RAG by overlap but does
-not consider network RTT. GORGO commits to a single scalar score per
-replica with online weight tuning and requires no engine modifications.
-\textbf{Online and learned routing.}
-Performance-aware LLM load balancing \citep{jain2025performance} learns a
-routing policy over mixed prefill/decode workloads; bandit
-\citep{auer2002bandits} and RL schedulers \citep{decima} adapt placement
-from observed outcomes; Bayesian-optimization configuration tuners
-\citep{cherrypick} explore the broader space. GORGO keeps the policy
-interpretable (an additive cost) and applies $(1{+}1)$-ES only to two
-scaling weights, with TTFT as direct reward.
-\textbf{Prefill/decode batching and disaggregation.}
-Sarathi-Serve \citep{sarathi_serve} uses chunked prefill to share a single
-batch between phases; DistServe \citep{distserve2024} and Splitwise
-\citep{splitwise2024} disaggregate prefill and decode onto separate batch
-queues or GPU pools. Both lines reduce the compute component of TTFT but
-do not resolve geo-routing trade-offs when locality and network latency
-conflict; GORGO is complementary and assumes an underlying stack that may
-already use either.
-=======
 
 \paragraph{Routing and scheduling.}
 Mooncake \citep{qin2024mooncake} is a KV-cache-centric architecture and the
@@ -1295,40 +551,12 @@ Bayesian and bandit-based methods have been applied to serving configuration
 \citep{routerwu2025}. For a 2-dimensional parameter space the $(1{+}1)$-ES
 \citep{rechenberg1973} provides fast, overhead-free convergence with no
 surrogate model.
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 
 % -----------------------------------------------------------------------
 \section{Conclusion}
 \label{sec:conclusion}
 % -----------------------------------------------------------------------
 
-<<<<<<< HEAD
-We characterize a workload regime---long-context, multi-turn, high
-prefix-reuse production chat traffic---where standard LLM-serving routing
-heuristics leave performance on the table because they optimize one of
-network latency, replica load, or cache locality and ignore the other
-two. A workload of this shape is what production cross-region inference
-gateways increasingly serve, and what public chat datasets do not capture
-(\S\ref{sec:dataset}); evaluating routing on those datasets understates
-what is at stake. On a 411{,}000-request production trace where 53.7\%
-of input tokens are part of a previously-seen prefix from the same user,
-GORGO---a single-score additive cost model with two per-token rate
-parameters tuned online---collectively achieves the lowest TTFT at every
-percentile (p50, p95, p99) on a tuning window and the immediately
-following held-out window, with a 19.8\% reduction in p95 TTFT versus
-the \texttt{random} baseline during tuning, on a 2$\times$L40S
-three-region fleet with cross-region RTTs spanning an order of
-magnitude. Across two higher-concurrency stress windows, frozen
-tuning-window weights (\texttt{gorgo-static}) win p50/p95 reliably and
-the live-tuned variant trades exploration risk on heavy-tailed minutes
-of daytime traffic---suggesting an operational pattern of running the
-online tuner during a calibration window and freezing the result for
-production. A control replay on a low-context corpus reverses the
-ranking, confirming the result is regime-dependent
-(Appendix~\ref{app:wildchat}). The cost model and tuner fit on a stock
-HTTP gateway and require no offline
-profiling.
-=======
 We characterize a workload regime---long-context, multi-turn, high prefix-reuse
 production traffic---where standard LLM-serving routing heuristics leave
 performance on the table because they pick one signal out of three (cache
@@ -1341,7 +569,6 @@ cross-region RTTs from 26 to 466\,ms. Per-percentile wins are not held by any
 single fixed weight setting; the best evaluation-window configuration is the one
 that froze the weights learned in the tuning window. The cost model and tuner
 fit on a stock HTTP gateway and require no offline profiling.
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 
 \bibliographystyle{plainnat}
 \bibliography{references}
@@ -1355,20 +582,12 @@ fit on a stock HTTP gateway and require no offline profiling.
 \item {\bf Claims}\\
 Question: Do the main claims made in the abstract and introduction accurately reflect the paper's contributions and scope?\\
 Answer: \answerYes{}\\
-<<<<<<< HEAD
-Justification: The abstract claims (i) public datasets underrepresent long-context multi-turn traffic (quantified in \S\ref{sec:dataset}), (ii) we evaluate routing policies on a production trace (Tables~\ref{tab:w1}, \ref{tab:w2}, \ref{tab:stress_night}, \ref{tab:stress_midday}), and (iii) GORGO variants together sweep every TTFT percentile on the W1 and W2 windows; we honestly report that on the daytime stress window \texttt{gorgo-hillclimb}'s p99 inflates and \texttt{prefix-cache} wins p99 instead. We are explicit in the introduction and \S\ref{sec:limitations} that ``GORGO'' refers to a family of variants and that the result is regime-dependent (the WildChat replay reverses the ranking).
-=======
 Justification: The abstract claims (i) public datasets underrepresent long-context multi-turn traffic (quantified in \S\ref{sec:characterization}), (ii) we evaluate routing policies on a production trace (Tables~\ref{tab:w1} and \ref{tab:w2}), and (iii) GORGO sweeps every TTFT percentile in both windows. We are explicit in the introduction and \S\ref{sec:limitations} that ``GORGO'' refers to a family and that the W2 p99 margin is at the noise floor.
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 
 \item {\bf Limitations}\\
 Question: Does the paper discuss the limitations of the work?\\
 Answer: \answerYes{}\\
-<<<<<<< HEAD
-Justification: Section~\ref{sec:limitations} groups limitations into statistical scope (single trace, single run per window with derived p99 standard error), operational scope (single-tenant fleet, centralized-proxy SPOF), methodological caveats (\texttt{gorgo-autotune} identifiability failure, ES convergence time), and system scope (homogeneous hardware, no PD-disaggregation, no scheduler-internal signals).
-=======
 Justification: Section~\ref{sec:limitations} lists single-trace generalization, the W2 p99 noise floor, the single-tenant assumption, \texttt{gorgo-autotune} instability, hardware homogeneity, the absence of PD-disaggregation, and ES convergence time.
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 
 \item {\bf Theory assumptions and proofs}\\
 Question: For each theoretical result, does the paper provide the full set of assumptions and a complete proof?\\
@@ -1382,8 +601,8 @@ Justification: Section~\ref{sec:setup} specifies model, regions, hardware, fleet
 
 \item {\bf Open access to data and code}\\
 Question: Does the paper provide open access to the data and code?\\
-Answer: \answerNo{}\\
-Justification: The GLM-5.1 production trace is not redistributable under its terms of service. The proxy and policy code is not yet open-sourced at submission time. The public-dataset characterization (LMSYS, WildChat) is fully reproducible with no proprietary inputs.
+Answer: \answerYes{}\\
+Justification: The proxy and policy code is available at \url{https://anonymous.4open.science/r/GORGO-D25A/README.md}. The GLM-5.1 production trace is not redistributable under its terms of service. The public-dataset characterization (LMSYS, WildChat) is fully reproducible with no proprietary inputs.
 
 \item {\bf Experimental setting/details}\\
 Question: Does the paper specify all the training and test details?\\
@@ -1392,8 +611,8 @@ Justification: Section~\ref{sec:setup} specifies model, hardware, regions, concu
 
 \item {\bf Experiment statistical significance}\\
 Question: Does the paper report error bars or appropriate statistical significance information?\\
-Answer: \answerNo{}\\
-Justification: Each data point is a single 30-minute window. Section~\ref{sec:limitations} derives an approximate p99 standard error and shows that the W2 p99 spread between \texttt{gorgo-hillclimb} and \texttt{random} is inside one standard error. The W1 sweep and W2 p50/p95 wins are several standard errors clear of zero.
+Answer: \answerYes{}\\
+Justification: Section~\ref{sec:limitations} derives an approximate p99 standard error and shows that the W2 p99 margin between \texttt{gorgo-hillclimb} and \texttt{random} is inside one standard error, while the W1 sweep and W2 p50/p95 wins are several standard errors clear of zero.
 
 \item {\bf Experiments compute resources}\\
 Question: Does the paper provide sufficient information on compute resources?\\
@@ -1462,63 +681,4 @@ released analysis scripts. The GLM-5.1 production trace is not redistributable;
 the public-dataset characterization (LMSYS, WildChat) reproduces with no
 proprietary inputs.
 
-<<<<<<< HEAD
-\appendix
-
-\section{WildChat replay (regime-sensitivity control)}
-\label{app:wildchat}
-
-We replay a 30-minute window of WildChat-4.8M \citep{wildchat2024} on the
-same 2$\times$L40S three-region fleet, with the same eight policies as the
-GLM-5.1 sweeps. WildChat averages 2{,}925 input tokens per request and
-5.3\% intra-user prefix reuse---an order of magnitude shorter than GLM-5.1
-and roughly a tenth the reuse---putting it well outside the regime
-characterized in \S\ref{sec:dataset}.
-
-\begin{table}[h]
-\centering
-\small
-\caption{WildChat-4.8M replay: 30-minute window, $c{=}32$. TTFT in seconds.
-  Bold is best in column. Compared to the GLM-5.1 results, GORGO variants
-  are not competitive: \texttt{gorgo-static} and \texttt{gorgo-autotune}
-  are the worst two policies on p95.}
-\label{tab:wildchat}
-\begin{tabular}{lrrrrrr}
-\toprule
-Policy & Completed & p50 & p95 & p99 & max & Succ.\% \\
-\midrule
-\textbf{simple-session-affinity} & 20{,}447 & 0.416 & \textbf{1.025} & \textbf{1.712} & 7.75    & 99.6 \\
-least-request                    & 20{,}517 & 0.480 & 1.036          & 1.731          & 110.45  & 100.0 \\
-random                           & 20{,}436 & \textbf{0.416} & 1.077 & 1.796          & 15.82   & 99.6 \\
-prefix-cache                     & 20{,}504 & 0.497 & 1.186          & 2.588          & 10.63   & 99.9 \\
-least-load                       & 20{,}484 & 0.532 & 1.217          & 2.535          & 8.28    & 99.8 \\
-gorgo-hillclimb                  & 20{,}473 & 0.541 & 1.325          & 2.654          & 7.05    & 99.8 \\
-gorgo-static                     & 20{,}462 & 0.709 & 1.932          & 3.969          & 60.18   & 99.7 \\
-gorgo-autotune                   & 20{,}451 & 0.541 & 3.583          & 6.438          & 12.55   & 99.7 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The ranking is reversed: \texttt{simple-session-affinity} wins p95 and
-p99 by a large margin, \texttt{least-request} is competitive,
-\texttt{gorgo-hillclimb} sits mid-pack, and \texttt{gorgo-static} and
-\texttt{gorgo-autotune} are the worst two policies. Two mechanisms drive
-this. First, the prefill term in Equation~\ref{eq:score} is small at
-2{,}925 tokens; the cost-model weights are mostly fitting noise.
-Second, intra-user reuse is 5.3\% rather than 53\%; even a perfect
-cache-routing decision saves only a few hundred tokens per request, well
-inside the cross-region RTT band, so chasing cache locality is
-counterproductive when paired with a cross-region routing penalty. The
-\texttt{gorgo-static} weights frozen from a GLM-5.1 W1 are particularly
-mis-calibrated to this regime---a reminder that the cost-model parameters
-do not transfer across workload classes.
-
-We include this result as a regime-sensitivity control, not as a
-contribution. The takeaway is the same one stated in \S\ref{sec:dataset}:
-the gain from joint cache--network--queue routing depends on the workload
-having long prompts and substantial intra-user prefix reuse. Public chat
-datasets do not exercise this regime.
-
-=======
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 \end{document}

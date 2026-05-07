@@ -1,15 +1,10 @@
-<<<<<<< HEAD
 \begin{thebibliography}{37}
-=======
-\begin{thebibliography}{21}
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
   \providecommand{\doi}[1]{doi: #1}\else
   \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
 
-<<<<<<< HEAD
 \bibitem[Agrawal et~al.(2024)Agrawal, Kedia, Panwar, Mohan, Kwatra, Gulavani,
   Ramjee, and Tumanov]{sarathi_serve}
 A.~Agrawal, N.~Kedia, A.~Panwar, J.~Mohan, N.~Kwatra, B.~S. Gulavani,
@@ -17,14 +12,11 @@ A.~Agrawal, N.~Kedia, A.~Panwar, J.~Mohan, N.~Kwatra, B.~S. Gulavani,
 \newblock {Sarathi-Serve}: Llm inference made efficient and fair.
 \newblock arXiv preprint, 2024.
 
-=======
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 \bibitem[{AIBrix Team}(2024)]{aibrix2024}
 {AIBrix Team}.
 \newblock {AIBrix}: An open-source infrastructure for {LLM} inference at scale.
 \newblock \url{https://github.com/vllm-project/aibrix}, 2024.
 
-<<<<<<< HEAD
 \bibitem[Alipourfard et~al.(2017)Alipourfard, Liu, Chen, Venkataraman, Yu, and
   Zhang]{cherrypick}
 Omid Alipourfard, Hongqiang~Harry Liu, Jianshu Chen, Shivaram Venkataraman,
@@ -52,8 +44,6 @@ Hans-Georg Beyer and Hans-Paul Schwefel.
 \newblock \emph{Natural Computing}, 1\penalty0 (1):\penalty0 3--52, 2002.
 \newblock \doi{10.1023/A:1015059928466}.
 
-=======
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 \bibitem[Cao et~al.(2025)Cao, Wang, Mao, Hsu, Yin, Xia, Li, Liu, Zhang, Zhou,
   Sheng, Gonzalez, and Stoica]{dlpm2025}
 Shiyi Cao, Yichuan Wang, Ziming Mao, Pin-Lun Hsu, Liangsheng Yin, Tian Xia,
@@ -81,7 +71,6 @@ Gregory Dexter, Shao Tang, Ata Fatahi, Qingquan Song, Tejas Dharamsi, and Aman
 {GLM Team}.
 \newblock {GLM-4}: A family of open multilingual multimodal chat {LLMs}, 2024.
 
-<<<<<<< HEAD
 \bibitem[{Google Cloud}(2026)]{gke_gateway}
 {Google Cloud}.
 \newblock About multi-cluster gateways.
@@ -106,8 +95,6 @@ David Karger, Eric Lehman, Tom Leighton, Rina Panigrahy, Matthew Levine, and
 \newblock In \emph{Proceedings of the 29th Annual ACM Symposium on Theory of
   Computing (STOC '97)}, 1997.
 
-=======
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 \bibitem[Kwon et~al.(2023)Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang,
   and Stoica]{vllm2023}
 Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody~Hao Yu,
@@ -125,7 +112,6 @@ Xiang Liu, Zhenheng Tang, Peijie Dong, Zeyu Li, Yue Liu, Bo~Li, Xuming Hu, and
 \newblock In \emph{Advances in Neural Information Processing Systems
   (NeurIPS)}, 2025.
 
-<<<<<<< HEAD
 \bibitem[Mao et~al.(2019)Mao, Schwarzkopf, Venkatakrishnan, Meng, and
   Alizadeh]{decima}
 Hongzi Mao, Malte Schwarzkopf, Shaileshh~Bojja Venkatakrishnan, Zili Meng, and
@@ -156,8 +142,6 @@ Michael Mitzenmacher.
 \newblock Documentation, 2026.
 \newblock Accessed 2026-01-28.
 
-=======
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 \bibitem[Pan et~al.(2025)Pan, Patel, Hu, Shen, Guan, Li, Qin, Wang, and
   Ding]{kvflow2025}
 Zaifeng Pan, Ajjkumar Patel, Zhengding Hu, Yipeng Shen, Yue Guan, Wan-Lu Li,
@@ -197,7 +181,6 @@ Ingo Rechenberg.
   der biologischen evolution.
 \newblock 1973.
 
-<<<<<<< HEAD
 \bibitem[Srivatsa et~al.(2025)Srivatsa, Madhavan, Hu, Tarun, Cheng, Han, Yu,
   Rusti, Wang, Liu, and Zhang]{preble}
 Vikranth Srivatsa, Sumanth Madhavan, Tian Hu, Sarah Tarun, Yuhan Cheng, Wei
@@ -207,8 +190,6 @@ Vikranth Srivatsa, Sumanth Madhavan, Tian Hu, Sarah Tarun, Yuhan Cheng, Wei
 \newblock In \emph{International Conference on Learning Representations
   (ICLR)}, 2025.
 
-=======
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 \bibitem[Sun et~al.(2024)Sun, Huang, Tang, Wang, Zhang, Li, Yang, Zhang, Wang,
   Wu, Cao, Lin, et~al.]{llumnix2024}
 Biao Sun, Ziming Huang, Hanyu Tang, Chengquan Wang, Cheng Zhang, Yiming Li, Liu
@@ -224,7 +205,6 @@ Fangzhou Wu and Sandeep Silwal.
 \newblock In \emph{Advances in Neural Information Processing Systems
   (NeurIPS)}, 2025.
 
-<<<<<<< HEAD
 \bibitem[Xia et~al.(2025)Xia, Mao, Kerney, Jackson, Li, Xing, Shenker, and
   Stoica]{skywalker}
 Tian Xia, Ziming Mao, Jamison Kerney, Ethan~J. Jackson, Zhifei Li, Jiarong
@@ -233,8 +213,6 @@ Tian Xia, Ziming Mao, Jamison Kerney, Ethan~J. Jackson, Zhifei Li, Jiarong
   inference.
 \newblock arXiv preprint arXiv:2505.24095, 2025.
 
-=======
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 \bibitem[Yang et~al.(2025{\natexlab{a}})Yang, Li, Li, and Lloyd]{lpc2025}
 Dongsheng Yang, Austin Li, Kai Li, and Wyatt Lloyd.
 \newblock Learned prefix caching for efficient {LLM} inference.
@@ -248,14 +226,11 @@ Jingbo Yang, Bairu Hou, Wei Wei, Yujia Bao, and Shiyu Chang.
   reuse.
 \newblock \emph{arXiv preprint arXiv:2502.16002}, 2025{\natexlab{b}}.
 
-<<<<<<< HEAD
 \bibitem[Yang et~al.(2023)]{skypilot}
 Zongheng Yang et~al.
 \newblock {SkyPilot}: An intercloud broker for sky computing.
 \newblock Preprint, 2023.
 
-=======
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 \bibitem[Yao et~al.(2024)Yao, Li, Liu, Ray, Peng, Zhang, Stoica, Keutzer, and
   Mahoney]{yao2024cacheblend}
 Jiayi Yao, Hanchen Li, Yuhan Liu, Siddhant Ray, Yihua Peng, Hao Zhang, Ion
@@ -263,7 +238,6 @@ Jiayi Yao, Hanchen Li, Yuhan Liu, Siddhant Ray, Yihua Peng, Hao Zhang, Ion
 \newblock {CacheBlend}: Fast large language model serving for {RAG} with cached
   knowledge fusion, 2024.
 
-<<<<<<< HEAD
 \bibitem[Yu et~al.(2022)Yu, Jeong, Kim, Kim, and Chun]{orca}
 Gyeong-In Yu, Jinseok Jeong, Gyeongchan Kim, Suhyun Kim, and Byung-Gon Chun.
 \newblock Orca: A distributed serving system for transformer-based generative
@@ -271,8 +245,6 @@ Gyeong-In Yu, Jinseok Jeong, Gyeongchan Kim, Suhyun Kim, and Byung-Gon Chun.
 \newblock In \emph{Proceedings of the 16th USENIX Symposium on Operating
   Systems Design and Implementation (OSDI 22)}, 2022.
 
-=======
->>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 \bibitem[Zhao et~al.(2024)Zhao, Ren, Hessel, Cardie, Choi, and
   Deng]{wildchat2024}
 Wenting Zhao, Xiang Ren, Jack Hessel, Claire Cardie, Yejin Choi, and Yuntian

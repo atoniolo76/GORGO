@@ -26,9 +26,9 @@ DATASETS = {
 }
 
 COLORS = {
-    "GLM-5.1": "#d62728",
-    "LMSYS-Chat-1M": "#1f77b4",
-    "WildChat-4.8M": "#2ca02c",
+    "GLM-5.1": "#1b3a5c",
+    "LMSYS-Chat-1M": "#6a9fd8",
+    "WildChat-4.8M": "#a8cce8",
 }
 
 
@@ -156,8 +156,7 @@ def main() -> None:
     axes[2].set_ylim(0, 70)
     axes[2].grid(axis="y", alpha=0.3)
 
-    fig.suptitle("Dataset Characteristics: GLM-5.1 vs Public Chat Datasets", fontsize=13)
-    fig.tight_layout(rect=(0, 0, 1, 0.95))
+    fig.tight_layout()
     path1 = args.out_dir / "dataset_comparison.png"
     fig.savefig(path1, dpi=180)
     plt.close(fig)
@@ -170,27 +169,32 @@ def main() -> None:
     intra_pct = [stats[n]["intra_user_reuse"] for n in names]
     cross_pct = [stats[n]["cross_user_reuse"] for n in names]
 
-    ax.barh(y, unique_pct, color="#cccccc", label="Unique (no reuse)")
-    ax.barh(y, intra_pct, left=unique_pct, color="#d62728", alpha=0.8, label="Intra-user reuse")
-    left2 = [u + i for u, i in zip(unique_pct, intra_pct)]
-    ax.barh(y, cross_pct, left=left2, color="#1f77b4", alpha=0.8, label="Cross-user reuse")
+    ax.barh(y, intra_pct, color="#1b3a5c", label="Intra-user reuse")
+    ax.barh(y, cross_pct, left=intra_pct, color="#6a9fd8", label="Cross-user reuse")
+    left_unique = [i + c for i, c in zip(intra_pct, cross_pct)]
+    ax.barh(y, unique_pct, left=left_unique, color="#d5e4f0", label="Unique (no reuse)")
 
     ax.set_yticks(y)
     ax.set_yticklabels(names, fontsize=11)
     ax.set_xlabel("Token composition (%)")
-    ax.set_title("Where do tokens come from? (Unique vs Reusable)")
-    ax.legend(loc="lower right", fontsize=9)
+    ax.legend(loc="upper right", fontsize=9)
     ax.set_xlim(0, 100)
     ax.grid(axis="x", alpha=0.3)
 
     for i, n in enumerate(names):
         s = stats[n]
         ax.text(
-            2, i, f"{100 - s['global_reuse']:.0f}% unique", va="center", fontsize=8, color="#333"
+            left_unique[i] + unique_pct[i] / 2,
+            i,
+            f"{100 - s['global_reuse']:.0f}% unique",
+            va="center",
+            ha="center",
+            fontsize=8,
+            color="#333",
         )
         if s["intra_user_reuse"] > 5:
             ax.text(
-                unique_pct[i] + intra_pct[i] / 2,
+                intra_pct[i] / 2,
                 i,
                 f"{s['intra_user_reuse']:.0f}%",
                 va="center",
@@ -200,13 +204,23 @@ def main() -> None:
             )
         if s["cross_user_reuse"] > 5:
             ax.text(
-                left2[i] + cross_pct[i] / 2,
+                intra_pct[i] + cross_pct[i] / 2,
                 i,
                 f"{s['cross_user_reuse']:.0f}%",
                 va="center",
                 ha="center",
                 fontsize=8,
                 color="white",
+            )
+        elif s["cross_user_reuse"] > 0:
+            ax.text(
+                intra_pct[i] + cross_pct[i] + 1.5,
+                i,
+                f"{s['cross_user_reuse']:.0f}%",
+                va="center",
+                ha="left",
+                fontsize=8,
+                color="#1b3a5c",
             )
 
     fig.tight_layout()

@@ -1,0 +1,10 @@
+{
+  "_note": "GLM5 01:00-01:30 April 1 (evaluation window, unseen by tuner). 30 min chronological, pre-cleaned (max_input=24k). time_scale=1.0.",
+  "top": [
+    {
+      "result": {
+        "output_path": "/mooncake_traces/abstract_night_traces/with_bodies/glm5_0100_to_0130_cleaned.jsonl"
+      }
+    }
+  ]
+}
