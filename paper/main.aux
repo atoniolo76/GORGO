@@ -63,7 +63,7 @@
 \newlabel{fig:cache_concentration}{{5}{8}{\textit {Left}: KV-cache hit rate vs.\ p95 TTFT on W2. Bottom-right is ideal (high cache, low latency). \texttt {gorgo-static} and \texttt {gorgo-hillclimb} achieve both; \texttt {simple-session-affinity} achieves the highest cache hit rate but the worst p95 because it cannot rebalance load. \textit {Right}: routing concentration (share of requests on the most-used replica). The dashed line marks uniform (33\%). GORGO variants concentrate moderately on cache-warm replicas without the pathological imbalance of \texttt {simple-session-affinity}}{figure.caption.18}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {6}Limitations}{8}{section.6}\protected@file@percent }
 \newlabel{sec:limitations}{{6}{8}{Limitations}{section.6}{}}
-\@writefile{toc}{\contentsline {paragraph}{Single-trace generalization.}{8}{section*.20}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Single trace, single seed.}{8}{section*.20}\protected@file@percent }
 \citation{distserve2024,splitwise2024}
 \citation{kvflow2025,lpc2025}
 \citation{sglang2024}
@@ -87,13 +87,12 @@
 \@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces W2 TTFT broken out by percentile (sorted by W1 p95, worst at top). Gold outline marks the winner in each panel. \texttt  {gorgo-static} (frozen W1 weights) wins p50 and p95; \texttt  {gorgo-hillclimb} wins p99. \texttt  {simple-session-affinity} degrades sharply at the tail (4.92\,s p99).}}{9}{figure.caption.19}\protected@file@percent }
 \newlabel{fig:percentiles}{{6}{9}{W2 TTFT broken out by percentile (sorted by W1 p95, worst at top). Gold outline marks the winner in each panel. \texttt {gorgo-static} (frozen W1 weights) wins p50 and p95; \texttt {gorgo-hillclimb} wins p99. \texttt {simple-session-affinity} degrades sharply at the tail (4.92\,s p99)}{figure.caption.19}{}}
 \@writefile{toc}{\contentsline {paragraph}{p99 noise floor.}{9}{section*.21}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Single-tenant traffic.}{9}{section*.22}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Homogeneous hardware and no PD-disaggregation.}{9}{section*.23}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{ES convergence time and live-tuning instability.}{9}{section*.24}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Scope of fleet.}{9}{section*.22}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Live-tuning instability.}{9}{section*.23}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {7}Related Work}{9}{section.7}\protected@file@percent }
 \newlabel{sec:related}{{7}{9}{Related Work}{section.7}{}}
-\@writefile{toc}{\contentsline {paragraph}{Prefix caches and reuse.}{9}{section*.25}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Cross-replica routing and cross-region serving.}{9}{section*.26}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Prefix caches and reuse.}{9}{section*.24}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Cross-replica routing and cross-region serving.}{9}{section*.25}\protected@file@percent }
 \citation{routerwu2025}
 \citation{rechenberg1973}
 \bibstyle{plainnat}
@@ -106,10 +105,10 @@
 \bibcite{chunkkv2025}{{6}{2025}{{Liu et~al.}}{{Liu, Tang, Dong, Li, Liu, Li, Hu, and Chu}}}
 \bibcite{skyserve}{{7}{2025}{{Mao et~al.}}{{Mao, Xia, Wu, Chiang, Griggs, Bhardwaj, Yang, Shenker, and Stoica}}}
 \bibcite{kvflow2025}{{8}{2025}{{Pan et~al.}}{{Pan, Patel, Hu, Shen, Guan, Li, Qin, Wang, and Ding}}}
-\@writefile{toc}{\contentsline {paragraph}{Online hyperparameter adaptation.}{10}{section*.27}\protected@file@percent }
+\bibcite{splitwise2024}{{9}{2024}{{Patel et~al.}}{{Patel, Choukse, Zhang, Shah, Goiri, Maleki, and Bianchini}}}
+\@writefile{toc}{\contentsline {paragraph}{Online hyperparameter adaptation.}{10}{section*.26}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {8}Conclusion}{10}{section.8}\protected@file@percent }
 \newlabel{sec:conclusion}{{8}{10}{Conclusion}{section.8}{}}
-\bibcite{splitwise2024}{{9}{2024}{{Patel et~al.}}{{Patel, Choukse, Zhang, Shah, Goiri, Maleki, and Bianchini}}}
 \bibcite{qin2024mooncake}{{10}{2024}{{Qin et~al.}}{{Qin, Li, He, Zhang, Wu, Zheng, Chen, Xu, Yao, Wei, Zhao, Huang, Yang, and Wu}}}
 \bibcite{qwen3technical}{{11}{2025}{{Qwen Team}}{{}}}
 \bibcite{rechenberg1973}{{12}{1973}{{Rechenberg}}{{}}}
@@ -127,8 +126,8 @@
 \citation{wildchat2024}
 \@writefile{toc}{\contentsline {section}{\numberline {A}WildChat replay (regime-sensitivity control)}{14}{appendix.A}\protected@file@percent }
 \newlabel{app:wildchat}{{A}{14}{WildChat replay (regime-sensitivity control)}{appendix.A}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces WildChat-4.8M replay: 30-minute window, $c{=}32$. TTFT in seconds. Bold is best in column. Compared to the GLM-5.1 results, GORGO variants are not competitive: \texttt  {gorgo-static} and \texttt  {gorgo-autotune} are the worst two policies on p95.}}{14}{table.caption.31}\protected@file@percent }
-\newlabel{tab:wildchat}{{6}{14}{WildChat-4.8M replay: 30-minute window, $c{=}32$. TTFT in seconds. Bold is best in column. Compared to the GLM-5.1 results, GORGO variants are not competitive: \texttt {gorgo-static} and \texttt {gorgo-autotune} are the worst two policies on p95}{table.caption.31}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces WildChat-4.8M replay, per-percentile TTFT (p50/p95/p99) across the eight policies. GORGO variants (dark blues) are not competitive: \texttt  {gorgo-static} and \texttt  {gorgo-autotune} are the slowest two policies at the tail, and \texttt  {gorgo-hillclimb} sits mid-pack. The ranking inverts the GLM-5.1 result, consistent with the regime argument in \S  \ref {sec:characterization}.}}{15}{figure.caption.32}\protected@file@percent }
-\newlabel{fig:ttft_bars_wildchat}{{7}{15}{WildChat-4.8M replay, per-percentile TTFT (p50/p95/p99) across the eight policies. GORGO variants (dark blues) are not competitive: \texttt {gorgo-static} and \texttt {gorgo-autotune} are the slowest two policies at the tail, and \texttt {gorgo-hillclimb} sits mid-pack. The ranking inverts the GLM-5.1 result, consistent with the regime argument in \S \ref {sec:characterization}}{figure.caption.32}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces WildChat-4.8M replay: 30-minute window, $c{=}32$. TTFT in seconds. Bold is best in column. Compared to the GLM-5.1 results, GORGO variants are not competitive: \texttt  {gorgo-static} and \texttt  {gorgo-autotune} are the worst two policies on p95.}}{14}{table.caption.30}\protected@file@percent }
+\newlabel{tab:wildchat}{{6}{14}{WildChat-4.8M replay: 30-minute window, $c{=}32$. TTFT in seconds. Bold is best in column. Compared to the GLM-5.1 results, GORGO variants are not competitive: \texttt {gorgo-static} and \texttt {gorgo-autotune} are the worst two policies on p95}{table.caption.30}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces WildChat-4.8M replay, per-percentile TTFT (p50/p95/p99) across the eight policies. GORGO variants (dark blues) are not competitive: \texttt  {gorgo-static} and \texttt  {gorgo-autotune} are the slowest two policies at the tail, and \texttt  {gorgo-hillclimb} sits mid-pack. The ranking inverts the GLM-5.1 result, consistent with the regime argument in \S  \ref {sec:characterization}.}}{15}{figure.caption.31}\protected@file@percent }
+\newlabel{fig:ttft_bars_wildchat}{{7}{15}{WildChat-4.8M replay, per-percentile TTFT (p50/p95/p99) across the eight policies. GORGO variants (dark blues) are not competitive: \texttt {gorgo-static} and \texttt {gorgo-autotune} are the slowest two policies at the tail, and \texttt {gorgo-hillclimb} sits mid-pack. The ranking inverts the GLM-5.1 result, consistent with the regime argument in \S \ref {sec:characterization}}{figure.caption.31}{}}
 \gdef \@abspage@last{15}

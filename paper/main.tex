@@ -574,45 +574,34 @@ for tuning windows where its exploration can be tolerated.
 \label{sec:limitations}
 % -----------------------------------------------------------------------
 
-\paragraph{Single-trace generalization.}
+\paragraph{Single trace, single seed.}
 The percentile-sweep claim rests on two consecutive 30-minute windows of one
-production trace, sharing model, fleet, hour-of-day, and arrival-rate band. W2
-demonstrates that tuned weights survive a held-out window of the same workload,
-not arbitrary transfer across hours, days, or models.
+GLM-5.1 trace, with one ES run per policy. W2 demonstrates that tuned weights
+survive a held-out window of the same workload; transfer across days, models,
+or arrival regimes is not characterized.
 
 \paragraph{p99 noise floor.}
-Each window has approximately 4{,}200--4{,}800 successful responses. p99 over a
-sample of size $n$ has standard error approximately $\sigma_{\mathrm{TTFT}} /
-\sqrt{n \cdot 0.01 \cdot 0.99} \approx 0.05\,$s. The W2 p99 spread between
-\texttt{gorgo-hillclimb} (2.595\,s) and \texttt{random} (2.612\,s) is 0.017\,s,
-inside one standard error. This margin is reported for completeness but should
-not be interpreted as a reliable advantage. The W1 sweep and W2 p50/p95 wins are
-several standard errors clear of zero.
+Each window has $\approx\!4{,}200$--$4{,}800$ successful responses, so the p99
+standard error is $\sigma_{\mathrm{TTFT}}/\sqrt{n\cdot 0.01\cdot 0.99}\approx
+0.05$\,s. The W2 p99 gap between \texttt{gorgo-hillclimb} (2.595\,s) and
+\texttt{random} (2.612\,s) is 0.017\,s---inside one SE---and should be read as
+a tie; the W1 sweep and W2 p50/p95 wins are several SEs clear of zero.
 
-\paragraph{Single-tenant traffic.}
-Each policy ran on its own three-replica fleet, so cache state is single-tenant.
-Multi-tenant sharing changes the queue and cache dynamics that GORGO's load
-weight captures; convergence under non-stationary multi-tenant load is not
-validated here.
+\paragraph{Scope of fleet.}
+Each policy runs on its own dedicated three-replica fleet of identical GPUs.
+Multi-tenant sharing, heterogeneous hardware, and prefill/decode
+disaggregation \citep{distserve2024,splitwise2024} are not characterized here
+and would require additional cost terms. The score uses only HTTP-exposed
+metrics, not scheduler-internal signals \citep{kvflow2025,lpc2025} that could
+tighten the prefill estimate.
 
-\paragraph{Homogeneous hardware and no PD-disaggregation.}
-All replicas use identical GPU configurations. The fleet does not split prefill
-and decode \citep{distserve2024,splitwise2024}; such architectures would require
-an additional routing term. GORGO uses only metrics exposed by an HTTP-fronted
-SGLang/vLLM server, not scheduler-internal information \citep{kvflow2025,lpc2025}
-that would tighten the prefill estimate.
-
-\paragraph{ES convergence time and live-tuning instability.}
-The $(1{+}1)$-ES requires several hop cycles to converge from a random starting
-point. In W1 it converged within the 30-minute window, but very short traffic
-windows may not provide enough requests. The daytime stress window
-(Table~\ref{tab:stress_midday}) further shows that running the ES live in a
-non-tuning regime can produce a heavy-tailed p99 excursion
-(\texttt{gorgo-hillclimb} p99 inflates to 7.186\,s); the negative-p95 objective
-does not penalize a single bad-minute proposal fast enough. The practical
-recommendation in \S\ref{sec:results:stress}---freeze hillclimb-tuned weights
-for production---is therefore not just a convenience but a safety property of
-this regime.
+\paragraph{Live-tuning instability.}
+Running the $(1{+}1)$-ES live can produce a heavy-tailed p99 excursion
+(Table~\ref{tab:stress_midday}: \texttt{gorgo-hillclimb} p99 inflates to
+7.186\,s) because the negative-p95 objective does not penalize a single
+bad-minute proposal fast enough. The freeze-for-production recommendation in
+\S\ref{sec:results:stress} is therefore a safety property, not just a
+convenience.
 
 % -----------------------------------------------------------------------
 \section{Related Work}
