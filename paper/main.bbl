@@ -1,48 +1,14 @@
-\begin{thebibliography}{37}
+\begin{thebibliography}{21}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
   \providecommand{\doi}[1]{doi: #1}\else
   \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
 
-\bibitem[Agrawal et~al.(2024)Agrawal, Kedia, Panwar, Mohan, Kwatra, Gulavani,
-  Ramjee, and Tumanov]{sarathi_serve}
-A.~Agrawal, N.~Kedia, A.~Panwar, J.~Mohan, N.~Kwatra, B.~S. Gulavani,
-  R.~Ramjee, and A.~Tumanov.
-\newblock {Sarathi-Serve}: Llm inference made efficient and fair.
-\newblock arXiv preprint, 2024.
-
 \bibitem[{AIBrix Team}(2024)]{aibrix2024}
 {AIBrix Team}.
 \newblock {AIBrix}: An open-source infrastructure for {LLM} inference at scale.
 \newblock \url{https://github.com/vllm-project/aibrix}, 2024.
-
-\bibitem[Alipourfard et~al.(2017)Alipourfard, Liu, Chen, Venkataraman, Yu, and
-  Zhang]{cherrypick}
-Omid Alipourfard, Hongqiang~Harry Liu, Jianshu Chen, Shivaram Venkataraman,
-  Minlan Yu, and Ming Zhang.
-\newblock {CherryPick}: Adaptively unearthing the best cloud configurations for
-  big data analytics.
-\newblock In \emph{Proceedings of the 14th USENIX Symposium on Networked
-  Systems Design and Implementation (NSDI '17)}, 2017.
-
-\bibitem[{Amazon Web Services}(2026)]{aws_bedrock_xregion}
-{Amazon Web Services}.
-\newblock Increase throughput with cross-region inference.
-\newblock Documentation, 2026.
-\newblock Accessed 2026-01-28.
-
-\bibitem[Auer et~al.(2002)Auer, Cesa-Bianchi, and Fischer]{auer2002bandits}
-Peter Auer, Nicol{\`o} Cesa-Bianchi, and Paul Fischer.
-\newblock Finite-time analysis of the multiarmed bandit problem.
-\newblock \emph{Machine Learning}, 47\penalty0 (2--3):\penalty0 235--256, 2002.
-\newblock \doi{10.1023/A:1013689704352}.
-
-\bibitem[Beyer and Schwefel(2002)]{beyer2002es}
-Hans-Georg Beyer and Hans-Paul Schwefel.
-\newblock Evolution strategies---a comprehensive introduction.
-\newblock \emph{Natural Computing}, 1\penalty0 (1):\penalty0 3--52, 2002.
-\newblock \doi{10.1023/A:1015059928466}.
 
 \bibitem[Cao et~al.(2025)Cao, Wang, Mao, Hsu, Yin, Xia, Li, Liu, Zhang, Zhou,
   Sheng, Gonzalez, and Stoica]{dlpm2025}
@@ -71,30 +37,6 @@ Gregory Dexter, Shao Tang, Ata Fatahi, Qingquan Song, Tejas Dharamsi, and Aman
 {GLM Team}.
 \newblock {GLM-4}: A family of open multilingual multimodal chat {LLMs}, 2024.
 
-\bibitem[{Google Cloud}(2026)]{gke_gateway}
-{Google Cloud}.
-\newblock About multi-cluster gateways.
-\newblock Documentation, 2026.
-\newblock Accessed 2026-01-28.
-
-\bibitem[Jain et~al.(2025)Jain, Parayil, Mallick, Choukse, Qin, Zhang, Goiri,
-  Wang, Bansal, R{\"u}hle, Kulkarni, Kofsky, and Rajmohan]{jain2025performance}
-Kunal Jain, Anjaly Parayil, Ankur Mallick, Esha Choukse, Xiaoting Qin, Jue
-  Zhang, {\'I}{\~n}igo Goiri, Rujia Wang, Chetan Bansal, Victor R{\"u}hle,
-  Anoop Kulkarni, Steve Kofsky, and Saravan Rajmohan.
-\newblock Performance aware {LLM} load balancer for mixed workloads.
-\newblock In \emph{Proceedings of the 5th Workshop on Machine Learning and
-  Systems (EuroMLSys '25)}, 2025.
-
-\bibitem[Karger et~al.(1997)Karger, Lehman, Leighton, Panigrahy, Levine, and
-  Lewin]{karger1997}
-David Karger, Eric Lehman, Tom Leighton, Rina Panigrahy, Matthew Levine, and
-  Daniel Lewin.
-\newblock Consistent hashing and random trees: Distributed caching protocols
-  for relieving hot spots on the world wide web.
-\newblock In \emph{Proceedings of the 29th Annual ACM Symposium on Theory of
-  Computing (STOC '97)}, 1997.
-
 \bibitem[Kwon et~al.(2023)Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang,
   and Stoica]{vllm2023}
 Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody~Hao Yu,
@@ -111,36 +53,6 @@ Xiang Liu, Zhenheng Tang, Peijie Dong, Zeyu Li, Yue Liu, Bo~Li, Xuming Hu, and
   long-context {LLM} inference.
 \newblock In \emph{Advances in Neural Information Processing Systems
   (NeurIPS)}, 2025.
-
-\bibitem[Mao et~al.(2019)Mao, Schwarzkopf, Venkatakrishnan, Meng, and
-  Alizadeh]{decima}
-Hongzi Mao, Malte Schwarzkopf, Shaileshh~Bojja Venkatakrishnan, Zili Meng, and
-  Mohammad Alizadeh.
-\newblock Learning scheduling algorithms for data processing clusters.
-\newblock In \emph{Proceedings of the ACM Special Interest Group on Data
-  Communication (SIGCOMM '19)}, 2019.
-
-\bibitem[Mao et~al.(2025)Mao, Xia, Wu, Chiang, Griggs, Bhardwaj, Yang, Shenker,
-  and Stoica]{skyserve}
-Ziming Mao, Tian Xia, Zhanghao Wu, Wei-Lin Chiang, Tyler Griggs, Romil
-  Bhardwaj, Zongheng Yang, Scott Shenker, and Ion Stoica.
-\newblock {SkyServe}: Serving ai models across regions and clouds with spot
-  instances.
-\newblock In \emph{Proceedings of the Twentieth European Conference on Computer
-  Systems (EuroSys '25)}, 2025.
-\newblock \doi{10.1145/3689031.3717459}.
-
-\bibitem[Mitzenmacher(2001)]{mitzenmacher}
-Michael Mitzenmacher.
-\newblock The power of two choices in randomized load balancing.
-\newblock \emph{IEEE Transactions on Parallel and Distributed Systems},
-  12\penalty0 (10):\penalty0 1094--1104, 2001.
-
-\bibitem[{Modal}(2026)]{modal_prefix_caching}
-{Modal}.
-\newblock Prefix caching.
-\newblock Documentation, 2026.
-\newblock Accessed 2026-01-28.
 
 \bibitem[Pan et~al.(2025)Pan, Patel, Hu, Shen, Guan, Li, Qin, Wang, and
   Ding]{kvflow2025}
@@ -181,15 +93,6 @@ Ingo Rechenberg.
   der biologischen evolution.
 \newblock 1973.
 
-\bibitem[Srivatsa et~al.(2025)Srivatsa, Madhavan, Hu, Tarun, Cheng, Han, Yu,
-  Rusti, Wang, Liu, and Zhang]{preble}
-Vikranth Srivatsa, Sumanth Madhavan, Tian Hu, Sarah Tarun, Yuhan Cheng, Wei
-  Han, Jingyu Yu, Roberto~Cristian Rusti, Lifeng Wang, Yiying Liu, and Hao
-  Zhang.
-\newblock {Preble}: Efficient distributed prompt scheduling for {LLM} serving.
-\newblock In \emph{International Conference on Learning Representations
-  (ICLR)}, 2025.
-
 \bibitem[Sun et~al.(2024)Sun, Huang, Tang, Wang, Zhang, Li, Yang, Zhang, Wang,
   Wu, Cao, Lin, et~al.]{llumnix2024}
 Biao Sun, Ziming Huang, Hanyu Tang, Chengquan Wang, Cheng Zhang, Yiming Li, Liu
@@ -205,14 +108,6 @@ Fangzhou Wu and Sandeep Silwal.
 \newblock In \emph{Advances in Neural Information Processing Systems
   (NeurIPS)}, 2025.
 
-\bibitem[Xia et~al.(2025)Xia, Mao, Kerney, Jackson, Li, Xing, Shenker, and
-  Stoica]{skywalker}
-Tian Xia, Ziming Mao, Jamison Kerney, Ethan~J. Jackson, Zhifei Li, Jiarong
-  Xing, Scott Shenker, and Ion Stoica.
-\newblock {SkyWalker}: A locality-aware cross-region load balancer for {LLM}
-  inference.
-\newblock arXiv preprint arXiv:2505.24095, 2025.
-
 \bibitem[Yang et~al.(2025{\natexlab{a}})Yang, Li, Li, and Lloyd]{lpc2025}
 Dongsheng Yang, Austin Li, Kai Li, and Wyatt Lloyd.
 \newblock Learned prefix caching for efficient {LLM} inference.
@@ -226,24 +121,12 @@ Jingbo Yang, Bairu Hou, Wei Wei, Yujia Bao, and Shiyu Chang.
   reuse.
 \newblock \emph{arXiv preprint arXiv:2502.16002}, 2025{\natexlab{b}}.
 
-\bibitem[Yang et~al.(2023)]{skypilot}
-Zongheng Yang et~al.
-\newblock {SkyPilot}: An intercloud broker for sky computing.
-\newblock Preprint, 2023.
-
 \bibitem[Yao et~al.(2024)Yao, Li, Liu, Ray, Peng, Zhang, Stoica, Keutzer, and
   Mahoney]{yao2024cacheblend}
 Jiayi Yao, Hanchen Li, Yuhan Liu, Siddhant Ray, Yihua Peng, Hao Zhang, Ion
   Stoica, Kurt Keutzer, and Michael~W. Mahoney.
 \newblock {CacheBlend}: Fast large language model serving for {RAG} with cached
   knowledge fusion, 2024.
-
-\bibitem[Yu et~al.(2022)Yu, Jeong, Kim, Kim, and Chun]{orca}
-Gyeong-In Yu, Jinseok Jeong, Gyeongchan Kim, Suhyun Kim, and Byung-Gon Chun.
-\newblock Orca: A distributed serving system for transformer-based generative
-  models.
-\newblock In \emph{Proceedings of the 16th USENIX Symposium on Operating
-  Systems Design and Implementation (OSDI 22)}, 2022.
 
 \bibitem[Zhao et~al.(2024)Zhao, Ren, Hessel, Cardie, Choi, and
   Deng]{wildchat2024}

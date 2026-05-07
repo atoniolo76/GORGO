@@ -681,4 +681,72 @@ released analysis scripts. The GLM-5.1 production trace is not redistributable;
 the public-dataset characterization (LMSYS, WildChat) reproduces with no
 proprietary inputs.
 
+\appendix
+
+\section{WildChat replay (regime-sensitivity control)}
+\label{app:wildchat}
+
+We replay a 30-minute window of WildChat-4.8M \citep{wildchat2024} on the
+same 2$\times$L40S three-region fleet, with the same eight policies as the
+GLM-5.1 sweeps. WildChat averages 2{,}925 input tokens per request and
+5.3\% intra-user prefix reuse---an order of magnitude shorter than GLM-5.1
+and roughly a tenth the reuse---putting it well outside the regime
+characterized in \S\ref{sec:characterization}.
+
+\begin{table}[h]
+\centering
+\small
+\caption{WildChat-4.8M replay: 30-minute window, $c{=}32$. TTFT in seconds.
+  Bold is best in column. Compared to the GLM-5.1 results, GORGO variants
+  are not competitive: \texttt{gorgo-static} and \texttt{gorgo-autotune}
+  are the worst two policies on p95.}
+\label{tab:wildchat}
+\begin{tabular}{lrrrrrr}
+\toprule
+Policy & Completed & p50 & p95 & p99 & max & Succ.\% \\
+\midrule
+\textbf{simple-session-affinity} & 20{,}447 & 0.416 & \textbf{1.025} & \textbf{1.712} & 7.75    & 99.6 \\
+least-request                    & 20{,}517 & 0.480 & 1.036          & 1.731          & 110.45  & 100.0 \\
+random                           & 20{,}436 & \textbf{0.416} & 1.077 & 1.796          & 15.82   & 99.6 \\
+prefix-cache                     & 20{,}504 & 0.497 & 1.186          & 2.588          & 10.63   & 99.9 \\
+least-load                       & 20{,}484 & 0.532 & 1.217          & 2.535          & 8.28    & 99.8 \\
+gorgo-hillclimb                  & 20{,}473 & 0.541 & 1.325          & 2.654          & 7.05    & 99.8 \\
+gorgo-static                     & 20{,}462 & 0.709 & 1.932          & 3.969          & 60.18   & 99.7 \\
+gorgo-autotune                   & 20{,}451 & 0.541 & 3.583          & 6.438          & 12.55   & 99.7 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/ttft_bars_wildchat.png}
+\caption{WildChat-4.8M replay, per-percentile TTFT (p50/p95/p99) across
+  the eight policies. GORGO variants (dark blues) are not competitive:
+  \texttt{gorgo-static} and \texttt{gorgo-autotune} are the slowest two
+  policies at the tail, and \texttt{gorgo-hillclimb} sits mid-pack. The
+  ranking inverts the GLM-5.1 result, consistent with the regime
+  argument in \S\ref{sec:characterization}.}
+\label{fig:ttft_bars_wildchat}
+\end{figure}
+
+The ranking is reversed: \texttt{simple-session-affinity} wins p95 and
+p99 by a large margin, \texttt{least-request} is competitive,
+\texttt{gorgo-hillclimb} sits mid-pack, and \texttt{gorgo-static} and
+\texttt{gorgo-autotune} are the worst two policies. Two mechanisms drive
+this. First, the prefill term in Equation~\ref{eq:score} is small at
+2{,}925 tokens; the cost-model weights are mostly fitting noise.
+Second, intra-user reuse is 5.3\% rather than 53\%; even a perfect
+cache-routing decision saves only a few hundred tokens per request, well
+inside the cross-region RTT band, so chasing cache locality is
+counterproductive when paired with a cross-region routing penalty. The
+\texttt{gorgo-static} weights frozen from a GLM-5.1 W1 are particularly
+mis-calibrated to this regime---a reminder that the cost-model parameters
+do not transfer across workload classes.
+
+We include this result as a regime-sensitivity control, not as a
+contribution. The takeaway is the same one stated in \S\ref{sec:characterization}:
+the gain from joint cache--network--queue routing depends on the workload
+having long prompts and substantial intra-user prefix reuse. Public chat
+datasets do not exercise this regime.
+
 \end{document}
