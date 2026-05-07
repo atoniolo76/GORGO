@@ -51,6 +51,34 @@ modal run proxy/workload.py --proxy-url https://... \
 - *policy*: Various load-balancing policies constructed from both Arcadia Research's GORGO paper and vLLM's AI-Brix model gateway.
 - *utils*: Helpful util classes including RadixTrie, which is used for storing KV-cache state across sglang servers in the proxy.
 
+## Running Policy Experiments
+
+The experiment runner spawns isolated per-policy engine fleets + proxies across regions, replays a Mooncake trace, and saves results. See `experiment_runner/BENCHMARK_PLAN.md` for full methodology.
+
+```bash
+# 1. Build a trace (GLM-5.1 example; also supports --source lmsys / --source wildchat)
+modal run --env=alessio-dev data_processing/build_mooncake_trace.py::main \
+  --source glm5 --start-time 2026-04-01T00:30:00 --end-time 2026-04-01T01:00:00 \
+  --num-requests 200000 --include-bodies --max-input-tokens 24000 --time-scale 1.0 \
+  --output-path mooncake_traces/my_trace/with_bodies/glm5.jsonl
+
+# 2. Launch (spec defines policies/regions/concurrency; manifest points at the trace)
+modal run --detach --env=alessio-dev experiment_runner/policy_matrix_app.py::main \
+  --base-spec-path specs/policy_matrix_abstract_night.json \
+  --sweep-manifest-path specs/manifest_glm5_0030_0100.json \
+  --experiment-id my_experiment_v1 --start-index 0 --top-k 1 \
+  --output-dir /results/policy_matrix_sweep/my_experiment_v1
+
+# 3. Monitor / early-stop
+python scripts/experiment_status.py --experiment-id my_experiment_v1 --env alessio-dev
+python scripts/stop_experiment.py --experiment-id my_experiment_v1  # saves partial results
+
+# 4. Pull + analyze
+modal volume get --env=alessio-dev --force GORGO-bench-results /workload_runs results/
+python scripts/analyze_results.py --prefix <run_prefix> --label "My Run"
+python scripts/plot_policy_summary.py --results-dir results --run-prefix <run_prefix> --out results/analysis/summary.png
+```
+
 ## Tuning Parameters
 
 The tuning script is now a lightweight client for the running proxy. It
@@ -80,10 +108,3 @@ modal run proxy/tuning.py::tune_cli --proxy-url https://your-proxy.modal.run \
   --t-prefill-min 1e-4 --t-prefill-max 0.1 \
   --queued-tokens-weight-min 1e-3 --queued-tokens-weight-max 0.05
 ```
-
-## Notes
-- [*] Do some smoke tests on the hyperparameter ranges in tuning.py
-  - 0.001 < x < 0.1 is a good range
-- [*] Validate on-the-fly parameter tuning for proxy and adjust window size + hop rate to suitable values
-  - Program runs successfully but no validation with GORGO policy yet
-- [*] Test the TUI-based tuning utility for running tuning workloads and adjusting defaults + parameters manually
