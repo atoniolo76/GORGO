@@ -5,6 +5,7 @@ The style file: plainnat.bst
 Database file #1: references.bib
 Warning--empty journal in qwen3technical
 Warning--empty journal in rechenberg1973
+<<<<<<< HEAD
 You've used 37 entries,
             2773 wiz_defined-function locations,
             750 strings with 12785 characters,
@@ -46,4 +47,47 @@ warning$ -- 2
 while$ -- 117
 width$ -- 0
 write$ -- 462
+=======
+You've used 21 entries,
+            2773 wiz_defined-function locations,
+            671 strings with 9379 characters,
+and the built_in function-call counts, 12952 in all, are:
+= -- 937
+> -- 1339
+< -- 6
++ -- 452
+- -- 429
+* -- 1164
+:= -- 2110
+add.period$ -- 62
+call.type$ -- 21
+change.case$ -- 205
+chr.to.int$ -- 19
+cite$ -- 44
+duplicate$ -- 442
+empty$ -- 776
+format.name$ -- 452
+if$ -- 2587
+int.to.chr$ -- 3
+int.to.str$ -- 1
+missing$ -- 16
+newline$ -- 112
+num.names$ -- 84
+pop$ -- 483
+preamble$ -- 1
+purify$ -- 184
+quote$ -- 0
+skip$ -- 395
+stack$ -- 0
+substring$ -- 42
+swap$ -- 35
+text.length$ -- 0
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 231
+warning$ -- 2
+while$ -- 63
+width$ -- 0
+write$ -- 255
+>>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
 (There were 2 warnings)

@@ -46,7 +46,7 @@ STATS = {
 }
 
 COLORS = {
-    "GLM-5.1": "#1f3a5f",        # navy
+    "GLM-5.1": "#1f3a5f",  # navy
     "LMSYS-Chat-1M": "#3d8a3d",  # green
     "WildChat-4.8M": "#5a3a7a",  # purple
 }
@@ -105,10 +105,20 @@ def main() -> None:
     # Panel 3: intra-user + cross-user reuse stacked
     intra = [STATS[n]["intra_user_reuse"] for n in NAMES]
     cross = [STATS[n]["cross_user_reuse"] for n in NAMES]
-    bars1 = axes[2].bar(x, intra, color=bar_colors, edgecolor="black", linewidth=0.5,
-                       alpha=0.95, label="Intra-user")
-    bars2 = axes[2].bar(x, cross, bottom=intra, color=bar_colors, edgecolor="black",
-                       linewidth=0.5, alpha=0.45, hatch="//", label="Cross-user")
+    bars1 = axes[2].bar(
+        x, intra, color=bar_colors, edgecolor="black", linewidth=0.5, alpha=0.95, label="Intra-user"
+    )
+    bars2 = axes[2].bar(
+        x,
+        cross,
+        bottom=intra,
+        color=bar_colors,
+        edgecolor="black",
+        linewidth=0.5,
+        alpha=0.45,
+        hatch="//",
+        label="Cross-user",
+    )
     axes[2].set_xticks(x)
     axes[2].set_xticklabels(NAMES, fontsize=10)
     axes[2].set_ylabel("KV-cache reuse (%)")
@@ -118,17 +128,17 @@ def main() -> None:
     axes[2].grid(axis="y", alpha=0.3)
     for i, (iv, cv) in enumerate(zip(intra, cross)):
         total = iv + cv
-        axes[2].text(i, total + 1, f"{total:.0f}%", ha="center", va="bottom",
-                     fontsize=10, fontweight="bold")
+        axes[2].text(
+            i, total + 1, f"{total:.0f}%", ha="center", va="bottom", fontsize=10, fontweight="bold"
+        )
         if iv > 2:
-            axes[2].text(i, iv / 2, f"{iv:.0f}%", ha="center", va="center",
-                         fontsize=9, color="white")
+            axes[2].text(
+                i, iv / 2, f"{iv:.0f}%", ha="center", va="center", fontsize=9, color="white"
+            )
         if cv > 5:
-            axes[2].text(i, iv + cv / 2, f"{cv:.0f}%", ha="center", va="center",
-                         fontsize=9)
+            axes[2].text(i, iv + cv / 2, f"{cv:.0f}%", ha="center", va="center", fontsize=9)
 
-    fig.suptitle("Dataset Characteristics: GLM-5.1 vs Public Chat Datasets",
-                 fontsize=13)
+    fig.suptitle("Dataset Characteristics: GLM-5.1 vs Public Chat Datasets", fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, 0.95))
 
     out_path = out_dir / "dataset_comparison.png"
