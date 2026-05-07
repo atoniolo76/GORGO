@@ -265,33 +265,6 @@ black-box knobs: it finds whatever values produce the best p95 TTFT under the
 current arrival distribution, with no offline profiling.
 
 % -----------------------------------------------------------------------
-\section{Baselines}
-\label{sec:baselines}
-% -----------------------------------------------------------------------
-
-We compare GORGO against five baseline policies.
-
-\textbf{random} samples a replica uniformly per request; it is the lower bound.
-
-\textbf{least-request} routes to the replica with the fewest in-flight requests,
-scoring by $\max(\mathrm{sgLang\_running\_reqs}_u, \mathrm{proxy\_inflight}_u)$
-to bridge the $\sim$10\,s staleness between metrics scrapes \citep{nginx2024}.
-
-\textbf{least-load} routes to the replica with the lowest aggregate
-token-weighted load: $\mathrm{running} + \mathrm{queued} +
-\mathrm{used\_kv\_tokens} + \mathrm{queued\_tokens}_u$. It is heavier-signal
-than least-request but cache-blind.
-
-\textbf{prefix-cache} is the AIBrix-style longest-prefix-match policy
-\citep{aibrix2024}. It picks the replica with the longest cached prefix match
-and falls back to least-request when the running-request imbalance exceeds a
-soft threshold.
-
-\textbf{simple-session-affinity} hashes the first 256 token IDs of the prompt
-modulo the number of replicas. The same prefix always maps to the same replica,
-maximizing intra-user reuse but providing no load-escape mechanism.
-
-% -----------------------------------------------------------------------
 \section{Experimental Setup}
 \label{sec:setup}
 % -----------------------------------------------------------------------
@@ -333,18 +306,30 @@ Figure~\ref{fig:rtt} shows the full RTT time series over the W1 window.
 \label{fig:rtt}
 \end{figure}
 
-\paragraph{Policies and windows.}
-We evaluate eight policies---\texttt{random}, \texttt{least-request},
-\texttt{least-load}, \texttt{prefix-cache}, \texttt{simple-session-affinity},
-\texttt{gorgo-static}, \texttt{gorgo-autotune}, \texttt{gorgo-hillclimb}---in
-each of two windows. All eight fleets start simultaneously at the same wall-clock
-time with the same input trace. W1 seeds GORGO variants with manually chosen
-starting weights ($\alpha=0.06$, $t_{\mathrm{prefill}}=0.07$). W2 seeds them
-with the per-replica weights that \texttt{gorgo-hillclimb} learned during W1
-($t_{\mathrm{prefill}}\approx 0.983$, $\alpha\approx 4.4\times10^{-4}$).
-\texttt{gorgo-static} in W2 deploys exactly those weights and never adjusts them;
-the other GORGO variants continue tuning on the held-out window. Concurrency is
-32 in-flight requests per proxy.
+\paragraph{Baselines, policies, and windows.}
+We compare the three GORGO variants of \S\ref{sec:method}
+(\texttt{gorgo-static}, \texttt{gorgo-autotune}, \texttt{gorgo-hillclimb})
+against five baseline policies. \texttt{random} samples a replica uniformly per
+request and serves as the lower bound. \texttt{least-request} routes to the
+replica with the fewest in-flight requests, taking the larger of the proxy's
+in-flight view and SGLang's scraped running-request count to bridge the
+$\sim$10\,s staleness between metrics scrapes. \texttt{least-load} routes to the
+replica with the lowest aggregate token-weighted load, summing running and
+queued requests with used and queued KV tokens; it is heavier-signal than
+least-request but cache-blind. \texttt{prefix-cache} is the AIBrix-style
+longest-prefix-match policy \citep{aibrix2024}: it picks the replica with the
+longest cached prefix match and falls back to least-request when the
+running-request imbalance exceeds a soft threshold. \texttt{simple-session-affinity}
+hashes the first 256 token IDs of the prompt modulo the number of replicas,
+maximizing intra-user reuse but providing no load-escape mechanism. We evaluate
+these eight policies in each of two windows; all eight fleets start
+simultaneously at the same wall-clock time with the same input trace. W1 seeds
+the GORGO variants with manually chosen starting weights ($\alpha=0.06$,
+$t_{\mathrm{prefill}}=0.07$); W2 seeds them with the per-replica weights that
+\texttt{gorgo-hillclimb} learned during W1 ($t_{\mathrm{prefill}}\approx 0.983$,
+$\alpha\approx 4.4\times10^{-4}$). \texttt{gorgo-static} in W2 deploys those
+weights without further adjustment; the other GORGO variants continue tuning on
+the held-out window. Concurrency is 32 in-flight requests per proxy.
 
 \paragraph{Metrics.}
 For each policy and window we report TTFT p50, p95, and p99 over all successful
