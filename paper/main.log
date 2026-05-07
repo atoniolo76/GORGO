@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.4.19)  7 MAY 2026 04:32
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.4.19)  7 MAY 2026 04:38
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -537,61 +537,61 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 {/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}{/usr/share/texlive/texmf-di
 st/fonts/enc/dvips/base/8r.enc}]
 LaTeX Font Info:    Trying to load font information for TS1+ptm on input line 9
-7.
+8.
  (/usr/share/texlive/texmf-dist/tex/latex/psnfss/ts1ptm.fd
 File: ts1ptm.fd 2001/06/04 font definitions for TS1/ptm.
 )
 LaTeX Font Info:    Trying to load font information for T1+cmtt on input line 1
-16.
+17.
 
 (/usr/share/texlive/texmf-dist/tex/latex/base/t1cmtt.fd
 File: t1cmtt.fd 2023/04/13 v2.5m Standard LaTeX font definitions
 ) [2]
-<figures/dataset_reuse_composition.png, id=109, 722.7pt x 289.08pt>
+<figures/dataset_reuse_composition.png, id=106, 722.7pt x 289.08pt>
 File: figures/dataset_reuse_composition.png Graphic file (type png)
 <use figures/dataset_reuse_composition.png>
 Package pdftex.def Info: figures/dataset_reuse_composition.png  used on input l
-ine 183.
+ine 184.
 (pdftex.def)             Requested size: 397.48499pt x 158.99448pt.
  [3 <./figures/dataset_reuse_composition.png>]
-<figures/rtt_timeseries.png, id=131, 711.1368pt x 277.5168pt>
+<figures/rtt_timeseries.png, id=128, 711.1368pt x 277.5168pt>
 File: figures/rtt_timeseries.png Graphic file (type png)
 <use figures/rtt_timeseries.png>
-Package pdftex.def Info: figures/rtt_timeseries.png  used on input line 299.
+Package pdftex.def Info: figures/rtt_timeseries.png  used on input line 300.
 (pdftex.def)             Requested size: 397.48499pt x 155.11615pt.
  [4] [5 <./figures/rtt_timeseries.png>]
-<figures/cache_and_concentration.png, id=158, 855.6768pt x 349.7868pt>
+<figures/cache_and_concentration.png, id=159, 855.6768pt x 349.7868pt>
 File: figures/cache_and_concentration.png Graphic file (type png)
 <use figures/cache_and_concentration.png>
 Package pdftex.def Info: figures/cache_and_concentration.png  used on input lin
-e 447.
+e 452.
 (pdftex.def)             Requested size: 397.48499pt x 162.48372pt.
-<figures/ttft_bars.png, id=159, 715.473pt x 281.853pt>
+<figures/ttft_bars.png, id=160, 715.473pt x 281.853pt>
 File: figures/ttft_bars.png Graphic file (type png)
 <use figures/ttft_bars.png>
-Package pdftex.def Info: figures/ttft_bars.png  used on input line 461.
+Package pdftex.def Info: figures/ttft_bars.png  used on input line 466.
 (pdftex.def)             Requested size: 397.48499pt x 156.58508pt.
  [6]
 Underfull \vbox (badness 5260) has occurred while \output is active []
 
  [7 <./figures/cache_and_concentration.png> <./figures/ttft_bars.png>] (./main.
-bbl [8])
-[9] [10] [11]
-Underfull \hbox (badness 6001) in paragraph at lines 669--670
+bbl [8]
+[9]) [10] [11] [12]
+Underfull \hbox (badness 6001) in paragraph at lines 680--681
 []$\T1/cmtt/m/n/10 specs / policy _ matrix _ abstract _ night _ w2 . json$ \T1/
 ptm/m/n/10 --- W2 spec (eight poli-cies,
  []
 
-<figures/ttft_bars_wildchat.png, id=294, 715.11165pt x 281.853pt>
+<figures/ttft_bars_wildchat.png, id=307, 715.11165pt x 281.853pt>
 File: figures/ttft_bars_wildchat.png Graphic file (type png)
 <use figures/ttft_bars_wildchat.png>
-Package pdftex.def Info: figures/ttft_bars_wildchat.png  used on input line 718
+Package pdftex.def Info: figures/ttft_bars_wildchat.png  used on input line 729
 .
 (pdftex.def)             Requested size: 397.48499pt x 156.6668pt.
 
 LaTeX Warning: `h' float specifier changed to `ht'.
 
-[12] [13 <./figures/ttft_bars_wildchat.png>] (./main.aux)
+[13] [14 <./figures/ttft_bars_wildchat.png>] (./main.aux)
  ***********
 LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
@@ -600,13 +600,13 @@ Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: B5D7F0AE0FE565C1E0B71E28043B4438;2000.
  ) 
 Here is how much of TeX's memory you used:
- 12770 strings out of 476106
- 200289 string characters out of 5793933
+ 12781 strings out of 476106
+ 200432 string characters out of 5793933
  1940975 words of memory out of 5000000
- 34502 multiletter control sequences out of 15000+600000
+ 34510 multiletter control sequences out of 15000+600000
  592299 words of font info for 78 fonts, out of 8000000 for 9000
  59 hyphenation exceptions out of 8191
- 75i,8n,79p,707b,563s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 75i,8n,79p,707b,588s stack positions out of 10000i,1000n,20000p,200000b,200000s
  </home/rome/.texlive2023/texmf-var/fonts/pk/ljfour/jknappen/ec/ectt1000.600p
 k></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></us
 r/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/share
@@ -616,10 +616,10 @@ dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texmf-dist/f
 onts/type1/public/amsfonts/cm/cmsy7.pfb></usr/share/texlive/texmf-dist/fonts/ty
 pe1/urw/times/utmb8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/u
 tmr8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
-Output written on main.pdf (13 pages, 633264 bytes).
+Output written on main.pdf (14 pages, 635371 bytes).
 PDF statistics:
- 418 PDF objects out of 1000 (max. 8388607)
- 329 compressed objects within 4 object streams
- 95 named destinations out of 1000 (max. 500000)
+ 432 PDF objects out of 1000 (max. 8388607)
+ 342 compressed objects within 4 object streams
+ 98 named destinations out of 1000 (max. 500000)
  138 words of extra memory for PDF output out of 10000 (max. 10000000)
 

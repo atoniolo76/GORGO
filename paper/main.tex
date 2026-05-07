@@ -41,9 +41,10 @@ reuse (55\%). We evaluate policies on a multi-region GPU cluster where
 cross-region network latency ranges from 26ms to 466ms across replicas to test
 GORGO, a policy that jointly optimizes cache reuse, network latency, and queue
 depth with weights optimized online to minimize p95 TTFT with no offline
-profiling. GORGO achieves the lowest TTFT at every percentile (p50, p95, p99)
-across both a tuning window and a held-out evaluation window against all other
-load balancing policies, highlighting the impact of online joint optimization.
+profiling. The GORGO family collectively achieves the lowest TTFT at every
+percentile (p50, p95, p99) across both a tuning window and a held-out evaluation
+window against all other load balancing policies, highlighting the impact of
+online joint optimization.
 \end{abstract}
 
 % -----------------------------------------------------------------------
@@ -74,7 +75,7 @@ reusable cache state for the incoming prompt.
 Standard heuristics---least-request, least-load, prefix-aware routing,
 session-affinity---each optimize one of these signals and ignore the others. For
 workloads with weak prefix reuse and uniform replica latencies, these heuristics
-work well \citep{nginx2024}. Interactive long-context traffic breaks both
+are standard practice. Interactive long-context traffic breaks both
 assumptions: production chat traces concentrate most tokens in a small set of
 returning users with substantial prefix overlap, and replicas placed in different
 regions have round-trip times that differ by an order of magnitude. The right
@@ -316,9 +317,9 @@ in-flight view and SGLang's scraped running-request count to bridge the
 $\sim$10\,s staleness between metrics scrapes. \texttt{least-load} routes to the
 replica with the lowest aggregate token-weighted load, summing running and
 queued requests with used and queued KV tokens; it is heavier-signal than
-least-request but cache-blind. \texttt{prefix-cache} is the AIBrix-style
-longest-prefix-match policy \citep{aibrix2024}: it picks the replica with the
-longest cached prefix match and falls back to least-request when the
+least-request but cache-blind. \texttt{prefix-cache} is the longest-prefix-match policy of Preble
+\citep{preble} as packaged in AIBrix \citep{aibrix2024}: it picks the replica
+with the longest cached prefix match and falls back to least-request when the
 running-request imbalance exceeds a soft threshold. \texttt{simple-session-affinity}
 hashes the first 256 token IDs of the prompt modulo the number of replicas,
 maximizing intra-user reuse but providing no load-escape mechanism. We evaluate
@@ -419,9 +420,13 @@ simple-session-affinity  & 3{,}570 & 0.396 & 2.080 & 4.917 & 36.60 & 84.8 \\
 
 In W2 (Table~\ref{tab:w2}), \texttt{gorgo-static}---deploying the W1-learned
 weights without adjustment---achieves the best p50 (0.294\,s) and p95 (1.510\,s).
-\texttt{gorgo-hillclimb} achieves the best p99 (2.595\,s). The two GORGO
-variants together sweep all three percentiles; no single GORGO variant does.
-The p95 spread in W2 is 1.38$\times$, wider than W1's 1.25$\times$.
+\texttt{gorgo-hillclimb} achieves the best p99 (2.595\,s); the margin over the
+next-best policy (\texttt{random}, 2.612\,s) is 0.017\,s, inside one standard
+error of the p99 estimator at this sample size, so the p99 win in W2 should be
+read as a tie rather than a reliable advantage---we quantify the noise floor in
+\S\ref{sec:limitations}. The two GORGO variants together sweep all three
+percentiles; no single GORGO variant does. The p95 spread in W2 is 1.38$\times$,
+wider than W1's 1.25$\times$.
 
 \texttt{gorgo-static} beats \texttt{gorgo-hillclimb} on p50/p95 in W2 because
 the W1-learned weights are near-optimal for the W2 distribution; continuing to
@@ -518,18 +523,24 @@ through paged memory. KVLink \citep{kvlink2025}, ChunkKV \citep{chunkkv2025},
 KVFlow \citep{kvflow2025}, and Learned Prefix Caching \citep{lpc2025} improve
 the single-replica cache but do not decide which replica serves a request.
 
-\paragraph{Routing and scheduling.}
+\paragraph{Cross-replica routing and cross-region serving.}
+Preble \citep{preble} introduces longest-prefix-match routing across replicas
+with a load-balance fallback; AIBrix \citep{aibrix2024} packages a
+production-grade variant of the same design and supplies the baseline we run.
 Mooncake \citep{qin2024mooncake} is a KV-cache-centric architecture and the
-source of our trace format. AIBrix \citep{aibrix2024} provides prefix-aware
-load balancing as a baseline; k-LPM \citep{klpm2025} formulates LLM scheduling
-under TTFT constraints as NP-hard. DLPM \citep{dlpm2025} targets fairness with
-locality. Llumnix \citep{llumnix2024} migrates requests across replicas.
-Multi-LLM routers \citep{routerwu2025} address model selection. CacheBlend
+source of our trace format. SkyServe \citep{skyserve} and SkyWalker
+\citep{skywalker} address cross-region LLM serving at the placement and
+spillover layers respectively, but treat per-request routing as out of scope.
+k-LPM \citep{klpm2025} formulates LLM scheduling under TTFT constraints as
+NP-hard. DLPM \citep{dlpm2025} targets fairness with locality. Llumnix
+\citep{llumnix2024} migrates requests across replicas. Multi-LLM routers
+\citep{routerwu2025} address model selection. CacheBlend
 \citep{yao2024cacheblend} routes by trie-measured prefix length but does not
 measure network RTT. DistServe \citep{distserve2024} and Splitwise
-\citep{splitwise2024} disaggregate prefill from decode. GORGO commits to a
-single scalar score per replica with online weight tuning and requires no engine
-modifications.
+\citep{splitwise2024} disaggregate prefill from decode. GORGO is the first
+single-router policy in this space that scores cache locality, replica load,
+and wide-area latency in one cost and derives the cost weights from the
+deployment's own per-request TTFT stream, with no engine modifications.
 
 \paragraph{Online hyperparameter adaptation.}
 Bayesian and bandit-based methods have been applied to serving configuration

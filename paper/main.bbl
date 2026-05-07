@@ -1,4 +1,4 @@
-\begin{thebibliography}{21}
+\begin{thebibliography}{23}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -26,13 +26,6 @@ Gregory Dexter, Shao Tang, Ata Fatahi, Qingquan Song, Tejas Dharamsi, and Aman
 \newblock In \emph{Advances in Neural Information Processing Systems
   (NeurIPS)}, 2025.
 
-\bibitem[{F5 NGINX}(2024)]{nginx2024}
-{F5 NGINX}.
-\newblock {NGINX} documentation: Load balancing methods.
-\newblock
-  \url{https://docs.nginx.com/nginx/admin-guide/load-balancer/http-load-balancer/},
-  2024.
-
 \bibitem[{GLM Team}(2024)]{glm2024}
 {GLM Team}.
 \newblock {GLM-4}: A family of open multilingual multimodal chat {LLMs}, 2024.
@@ -53,6 +46,16 @@ Xiang Liu, Zhenheng Tang, Peijie Dong, Zeyu Li, Yue Liu, Bo~Li, Xuming Hu, and
   long-context {LLM} inference.
 \newblock In \emph{Advances in Neural Information Processing Systems
   (NeurIPS)}, 2025.
+
+\bibitem[Mao et~al.(2025)Mao, Xia, Wu, Chiang, Griggs, Bhardwaj, Yang, Shenker,
+  and Stoica]{skyserve}
+Ziming Mao, Tian Xia, Zhanghao Wu, Wei-Lin Chiang, Tyler Griggs, Romil
+  Bhardwaj, Zongheng Yang, Scott Shenker, and Ion Stoica.
+\newblock {SkyServe}: Serving ai models across regions and clouds with spot
+  instances.
+\newblock In \emph{Proceedings of the Twentieth European Conference on Computer
+  Systems (EuroSys '25)}, 2025.
+\newblock \doi{10.1145/3689031.3717459}.
 
 \bibitem[Pan et~al.(2025)Pan, Patel, Hu, Shen, Guan, Li, Qin, Wang, and
   Ding]{kvflow2025}
@@ -93,6 +96,15 @@ Ingo Rechenberg.
   der biologischen evolution.
 \newblock 1973.
 
+\bibitem[Srivatsa et~al.(2025)Srivatsa, Madhavan, Hu, Tarun, Cheng, Han, Yu,
+  Rusti, Wang, Liu, and Zhang]{preble}
+Vikranth Srivatsa, Sumanth Madhavan, Tian Hu, Sarah Tarun, Yuhan Cheng, Wei
+  Han, Jingyu Yu, Roberto~Cristian Rusti, Lifeng Wang, Yiying Liu, and Hao
+  Zhang.
+\newblock {Preble}: Efficient distributed prompt scheduling for {LLM} serving.
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2025.
+
 \bibitem[Sun et~al.(2024)Sun, Huang, Tang, Wang, Zhang, Li, Yang, Zhang, Wang,
   Wu, Cao, Lin, et~al.]{llumnix2024}
 Biao Sun, Ziming Huang, Hanyu Tang, Chengquan Wang, Cheng Zhang, Yiming Li, Liu
@@ -107,6 +119,14 @@ Fangzhou Wu and Sandeep Silwal.
   serving.
 \newblock In \emph{Advances in Neural Information Processing Systems
   (NeurIPS)}, 2025.
+
+\bibitem[Xia et~al.(2025)Xia, Mao, Kerney, Jackson, Li, Xing, Shenker, and
+  Stoica]{skywalker}
+Tian Xia, Ziming Mao, Jamison Kerney, Ethan~J. Jackson, Zhifei Li, Jiarong
+  Xing, Scott Shenker, and Ion Stoica.
+\newblock {SkyWalker}: A locality-aware cross-region load balancer for {LLM}
+  inference.
+\newblock arXiv preprint arXiv:2505.24095, 2025.
 
 \bibitem[Yang et~al.(2025{\natexlab{a}})Yang, Li, Li, and Lloyd]{lpc2025}
 Dongsheng Yang, Austin Li, Kai Li, and Wyatt Lloyd.
