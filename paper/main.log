@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.1)  7 MAY 2026 00:47
+This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.1)  7 MAY 2026 01:10
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -534,46 +534,55 @@ LaTeX Font Info:    Trying to load font information for TS1+ptm on input line 9
 (/usr/local/texlive/2026basic/texmf-dist/tex/latex/psnfss/ts1ptm.fd
 File: ts1ptm.fd 2001/06/04 font definitions for TS1/ptm.
 ) [2]
-<figures/dataset_reuse_composition.png, id=106, 722.7pt x 289.08pt>
-File: figures/dataset_reuse_composition.png Graphic file (type png)
-<use figures/dataset_reuse_composition.png>
-Package pdftex.def Info: figures/dataset_reuse_composition.png  used on input l
-ine 184.
-(pdftex.def)             Requested size: 397.48499pt x 158.99448pt.
+<figures/dataset_combined.png, id=106, 858.92896pt x 380.1402pt>
+File: figures/dataset_combined.png Graphic file (type png)
+<use figures/dataset_combined.png>
+Package pdftex.def Info: figures/dataset_combined.png  used on input line 184.
+(pdftex.def)             Requested size: 397.48499pt x 175.91649pt.
 
-[3 <./figures/dataset_reuse_composition.png>]
-<figures/rtt_timeseries.png, id=128, 711.1368pt x 277.5168pt>
+[3 <./figures/dataset_combined.png>]
+<figures/rtt_timeseries.png, id=127, 711.1368pt x 277.5168pt>
 File: figures/rtt_timeseries.png Graphic file (type png)
 <use figures/rtt_timeseries.png>
-Package pdftex.def Info: figures/rtt_timeseries.png  used on input line 300.
+Package pdftex.def Info: figures/rtt_timeseries.png  used on input line 303.
 (pdftex.def)             Requested size: 397.48499pt x 155.11615pt.
  [4] [5 <./figures/rtt_timeseries.png>]
 <figures/cache_convergence.png, id=156, 422.0568pt x 313.6518pt>
 File: figures/cache_convergence.png Graphic file (type png)
 <use figures/cache_convergence.png>
-Package pdftex.def Info: figures/cache_convergence.png  used on input line 398.
+Package pdftex.def Info: figures/cache_convergence.png  used on input line 401.
 
 (pdftex.def)             Requested size: 298.11374pt x 221.55527pt.
+
+Underfull \vbox (badness 10000) has occurred while \output is active []
+
  [6 <./figures/cache_convergence.png>]
 <figures/ttft_bars_w1.png, id=167, 715.11165pt x 281.853pt>
 File: figures/ttft_bars_w1.png Graphic file (type png)
 <use figures/ttft_bars_w1.png>
-Package pdftex.def Info: figures/ttft_bars_w1.png  used on input line 466.
+Package pdftex.def Info: figures/ttft_bars_w1.png  used on input line 469.
 (pdftex.def)             Requested size: 397.48499pt x 156.6668pt.
 <figures/cache_and_concentration.png, id=168, 855.6768pt x 349.7868pt>
 File: figures/cache_and_concentration.png Graphic file (type png)
 <use figures/cache_and_concentration.png>
 Package pdftex.def Info: figures/cache_and_concentration.png  used on input lin
-e 475.
+e 478.
 (pdftex.def)             Requested size: 397.48499pt x 162.48372pt.
 <figures/ttft_bars.png, id=169, 715.473pt x 281.853pt>
 File: figures/ttft_bars.png Graphic file (type png)
 <use figures/ttft_bars.png>
-Package pdftex.def Info: figures/ttft_bars.png  used on input line 489.
+Package pdftex.def Info: figures/ttft_bars.png  used on input line 492.
 (pdftex.def)             Requested size: 397.48499pt x 156.58508pt.
- [7 <./figures/ttft_bars_w1.png> <./figures/cache_and_concentration.png>] [8 <.
-/figures/ttft_bars.png>] (./main.bbl [9] [10]) [11] [12] [13]
-Underfull \hbox (badness 6001) in paragraph at lines 703--704
+
+Underfull \vbox (badness 7814) has occurred while \output is active []
+
+ [7 <./figures/ttft_bars_w1.png>]
+Underfull \vbox (badness 5260) has occurred while \output is active []
+
+ [8 <./figures/cache_and_concentration.png> <./figures/ttft_bars.png>] (./main.
+bbl [9]
+[10]) [11] [12] [13]
+Underfull \hbox (badness 6001) in paragraph at lines 706--707
 []$\T1/cmtt/m/n/10 specs / policy _ matrix _ abstract _ night _ w2 . json$ \T1/
 ptm/m/n/10 --- W2 spec (eight poli-cies,
  []
@@ -581,7 +590,7 @@ ptm/m/n/10 --- W2 spec (eight poli-cies,
 <figures/ttft_bars_wildchat.png, id=318, 715.11165pt x 281.853pt>
 File: figures/ttft_bars_wildchat.png Graphic file (type png)
 <use figures/ttft_bars_wildchat.png>
-Package pdftex.def Info: figures/ttft_bars_wildchat.png  used on input line 752
+Package pdftex.def Info: figures/ttft_bars_wildchat.png  used on input line 755
 .
 (pdftex.def)             Requested size: 397.48499pt x 156.6668pt.
 
@@ -592,21 +601,17 @@ LaTeX Warning: `h' float specifier changed to `ht'.
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-01-19>
  ***********
-
-
-LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
-
 Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: B5D7F0AE0FE565C1E0B71E28043B4438;2000.
  ) 
 Here is how much of TeX's memory you used:
  12869 strings out of 469006
- 202673 string characters out of 5454814
- 626674 words of memory out of 5000000
+ 202609 string characters out of 5454814
+ 626889 words of memory out of 5000000
  41289 multiletter control sequences out of 15000+600000
  661951 words of font info for 82 fonts, out of 8000000 for 9000
  319 hyphenation exceptions out of 8191
- 75i,8n,79p,703b,596s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 75i,8n,79p,703b,592s stack positions out of 10000i,1000n,20000p,200000b,200000s
  </Users/alessio/Library/texlive/2026basic/texmf-var/fonts/pk/ljfour/jknappen
 /ec/ectt1000.600pk></usr/local/texlive/2026basic/texmf-dist/fonts/type1/public/
 amsfonts/cm/cmmi10.pfb></usr/local/texlive/2026basic/texmf-dist/fonts/type1/pub
@@ -618,7 +623,7 @@ ts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/texlive/2026basic/texmf-dist/
 fonts/type1/urw/times/utmb8a.pfb></usr/local/texlive/2026basic/texmf-dist/fonts
 /type1/urw/times/utmr8a.pfb></usr/local/texlive/2026basic/texmf-dist/fonts/type
 1/urw/times/utmri8a.pfb>
-Output written on main.pdf (15 pages, 766112 bytes).
+Output written on main.pdf (15 pages, 895838 bytes).
 PDF statistics:
  442 PDF objects out of 1000 (max. 8388607)
  347 compressed objects within 4 object streams

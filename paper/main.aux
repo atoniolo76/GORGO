@@ -18,20 +18,20 @@
 \@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Workload characterization. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings as described in \S  \ref {sec:characterization}.}}{3}{table.caption.4}\protected@file@percent }
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
 \newlabel{tab:datasets}{{1}{3}{Workload characterization. Token counts use the same byte-pair tokenizer in all rows. Reuse percentages are token-weighted prefix-trie savings as described in \S \ref {sec:characterization}}{table.caption.4}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Token-level prefix reuse decomposition. GLM-5.1's reuse is overwhelmingly intra-user (54\%), reflecting multi-turn dialogue; WildChat's reuse is predominantly cross-user (29\%), reflecting shared templates; LMSYS has minimal reuse overall.}}{3}{figure.caption.5}\protected@file@percent }
-\newlabel{fig:reuse_composition}{{1}{3}{Token-level prefix reuse decomposition. GLM-5.1's reuse is overwhelmingly intra-user (54\%), reflecting multi-turn dialogue; WildChat's reuse is predominantly cross-user (29\%), reflecting shared templates; LMSYS has minimal reuse overall}{figure.caption.5}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces \textit  {Left}: Token composition per dataset. GLM-5.1's reuse is overwhelmingly intra-user (54\%), reflecting multi-turn dialogue; WildChat's is predominantly cross-user (29\%, shared templates); LMSYS has minimal reuse (9\%, all cross-user). \textit  {Right}: Radar chart with six axes normalized to the dataset maximum. GLM-5.1 dominates on every axis relevant to routing: long prompts, high multi-turn density, concentrated users, and strong intra-user prefix reuse.}}{3}{figure.caption.5}\protected@file@percent }
+\newlabel{fig:dataset_combined}{{1}{3}{\textit {Left}: Token composition per dataset. GLM-5.1's reuse is overwhelmingly intra-user (54\%), reflecting multi-turn dialogue; WildChat's is predominantly cross-user (29\%, shared templates); LMSYS has minimal reuse (9\%, all cross-user). \textit {Right}: Radar chart with six axes normalized to the dataset maximum. GLM-5.1 dominates on every axis relevant to routing: long prompts, high multi-turn density, concentrated users, and strong intra-user prefix reuse}{figure.caption.5}{}}
 \@writefile{toc}{\contentsline {paragraph}{Experimental windows.}{3}{section*.6}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {3}GORGO}{3}{section.3}\protected@file@percent }
 \newlabel{sec:method}{{3}{3}{GORGO}{section.3}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.1}TTFT Decomposition}{3}{subsection.3.1}\protected@file@percent }
 \newlabel{eq:ttft}{{1}{3}{TTFT Decomposition}{equation.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Cost Model}{3}{subsection.3.2}\protected@file@percent }
-\newlabel{eq:score}{{2}{3}{Cost Model}{equation.2}{}}
 \citation{rechenberg1973}
 \citation{sglang2024}
 \citation{qwen3technical}
 \citation{preble}
 \citation{aibrix2024}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Cost Model}{4}{subsection.3.2}\protected@file@percent }
+\newlabel{eq:score}{{2}{4}{Cost Model}{equation.2}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Three Variants of Weight Selection}{4}{subsection.3.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {4}Experimental Setup}{4}{section.4}\protected@file@percent }
 \newlabel{sec:setup}{{4}{4}{Experimental Setup}{section.4}{}}
@@ -50,11 +50,13 @@
 \newlabel{fig:cache_convergence}{{3}{6}{Achieved prefix hit rate over the W1 tuning window: the fraction of each request's input tokens that were already cached on the replica the policy routed to (not the total cache available across all replicas). A higher rate means the routing decision exploited more of the available cache. Bold lines are EWMA-smoothed ($\alpha {=}0.06$); faint lines are 64-request rolling averages. \texttt {gorgo-hillclimb} converges from $\sim $45\% to $\sim $95\% within the first 5 minutes as the ES learns to route requests to their best-cached replica}{figure.caption.13}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GLM-5.1 W2 (held-out evaluation window, 01:00--01:30 UTC). \texttt  {gorgo-static} deploys the W1-learned weights and does not adjust them. Bold is best in column.}}{6}{table.caption.14}\protected@file@percent }
 \newlabel{tab:w2}{{3}{6}{GLM-5.1 W2 (held-out evaluation window, 01:00--01:30 UTC). \texttt {gorgo-static} deploys the W1-learned weights and does not adjust them. Bold is best in column}{table.caption.14}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}W2: Held-Out Evaluation Window}{6}{subsection.5.2}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces W1 TTFT broken out by percentile (sorted by p95, worst at top). \texttt  {gorgo-hillclimb} (gold outline) wins all three percentiles during the tuning window.}}{7}{figure.caption.15}\protected@file@percent }
 \newlabel{fig:ttft_bars_w1}{{4}{7}{W1 TTFT broken out by percentile (sorted by p95, worst at top). \texttt {gorgo-hillclimb} (gold outline) wins all three percentiles during the tuning window}{figure.caption.15}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces \textit  {Left}: KV-cache hit rate vs.\ p95 TTFT on W2. Bottom-right is ideal (high cache, low latency). \texttt  {gorgo-static} and \texttt  {gorgo-hillclimb} achieve both; \texttt  {simple-session-affinity} achieves the highest cache hit rate but the worst p95 because it cannot rebalance load. \textit  {Right}: routing concentration (share of requests on the most-used replica). The dashed line marks uniform (33\%). GORGO variants concentrate moderately on cache-warm replicas without the pathological imbalance of \texttt  {simple-session-affinity}.}}{7}{figure.caption.16}\protected@file@percent }
-\newlabel{fig:cache_concentration}{{5}{7}{\textit {Left}: KV-cache hit rate vs.\ p95 TTFT on W2. Bottom-right is ideal (high cache, low latency). \texttt {gorgo-static} and \texttt {gorgo-hillclimb} achieve both; \texttt {simple-session-affinity} achieves the highest cache hit rate but the worst p95 because it cannot rebalance load. \textit {Right}: routing concentration (share of requests on the most-used replica). The dashed line marks uniform (33\%). GORGO variants concentrate moderately on cache-warm replicas without the pathological imbalance of \texttt {simple-session-affinity}}{figure.caption.16}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}W2: Held-Out Evaluation Window}{7}{subsection.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Limitations}{7}{section.6}\protected@file@percent }
+\newlabel{sec:limitations}{{6}{7}{Limitations}{section.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{Single-trace generalization.}{7}{section*.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{p99 noise floor.}{7}{section*.19}\protected@file@percent }
 \citation{distserve2024,splitwise2024}
 \citation{kvflow2025,lpc2025}
 \citation{sglang2024}
@@ -63,6 +65,13 @@
 \citation{chunkkv2025}
 \citation{kvflow2025}
 \citation{lpc2025}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces \textit  {Left}: KV-cache hit rate vs.\ p95 TTFT on W2. Bottom-right is ideal (high cache, low latency). \texttt  {gorgo-static} and \texttt  {gorgo-hillclimb} achieve both; \texttt  {simple-session-affinity} achieves the highest cache hit rate but the worst p95 because it cannot rebalance load. \textit  {Right}: routing concentration (share of requests on the most-used replica). The dashed line marks uniform (33\%). GORGO variants concentrate moderately on cache-warm replicas without the pathological imbalance of \texttt  {simple-session-affinity}.}}{8}{figure.caption.16}\protected@file@percent }
+\newlabel{fig:cache_concentration}{{5}{8}{\textit {Left}: KV-cache hit rate vs.\ p95 TTFT on W2. Bottom-right is ideal (high cache, low latency). \texttt {gorgo-static} and \texttt {gorgo-hillclimb} achieve both; \texttt {simple-session-affinity} achieves the highest cache hit rate but the worst p95 because it cannot rebalance load. \textit {Right}: routing concentration (share of requests on the most-used replica). The dashed line marks uniform (33\%). GORGO variants concentrate moderately on cache-warm replicas without the pathological imbalance of \texttt {simple-session-affinity}}{figure.caption.16}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces W2 TTFT broken out by percentile (sorted by W1 p95, worst at top). Gold outline marks the winner in each panel. \texttt  {gorgo-static} (frozen W1 weights) wins p50 and p95; \texttt  {gorgo-hillclimb} wins p99. \texttt  {simple-session-affinity} degrades sharply at the tail (4.92\,s p99).}}{8}{figure.caption.17}\protected@file@percent }
+\newlabel{fig:percentiles}{{6}{8}{W2 TTFT broken out by percentile (sorted by W1 p95, worst at top). Gold outline marks the winner in each panel. \texttt {gorgo-static} (frozen W1 weights) wins p50 and p95; \texttt {gorgo-hillclimb} wins p99. \texttt {simple-session-affinity} degrades sharply at the tail (4.92\,s p99)}{figure.caption.17}{}}
+\@writefile{toc}{\contentsline {paragraph}{Single-tenant traffic.}{8}{section*.20}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Homogeneous hardware and no PD-disaggregation.}{8}{section*.21}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{ES convergence time.}{8}{section*.22}\protected@file@percent }
 \citation{preble}
 \citation{aibrix2024}
 \citation{qin2024mooncake}
@@ -75,19 +84,6 @@
 \citation{yao2024cacheblend}
 \citation{distserve2024}
 \citation{splitwise2024}
-\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces W2 TTFT broken out by percentile (sorted by W1 p95, worst at top). Gold outline marks the winner in each panel. \texttt  {gorgo-static} (frozen W1 weights) wins p50 and p95; \texttt  {gorgo-hillclimb} wins p99. \texttt  {simple-session-affinity} degrades sharply at the tail (4.92\,s p99).}}{8}{figure.caption.17}\protected@file@percent }
-\newlabel{fig:percentiles}{{6}{8}{W2 TTFT broken out by percentile (sorted by W1 p95, worst at top). Gold outline marks the winner in each panel. \texttt {gorgo-static} (frozen W1 weights) wins p50 and p95; \texttt {gorgo-hillclimb} wins p99. \texttt {simple-session-affinity} degrades sharply at the tail (4.92\,s p99)}{figure.caption.17}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {6}Limitations}{8}{section.6}\protected@file@percent }
-\newlabel{sec:limitations}{{6}{8}{Limitations}{section.6}{}}
-\@writefile{toc}{\contentsline {paragraph}{Single-trace generalization.}{8}{section*.18}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{p99 noise floor.}{8}{section*.19}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Single-tenant traffic.}{8}{section*.20}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Homogeneous hardware and no PD-disaggregation.}{8}{section*.21}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{ES convergence time.}{8}{section*.22}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {7}Related Work}{8}{section.7}\protected@file@percent }
-\newlabel{sec:related}{{7}{8}{Related Work}{section.7}{}}
-\@writefile{toc}{\contentsline {paragraph}{Prefix caches and reuse.}{8}{section*.23}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Cross-replica routing and cross-region serving.}{8}{section*.24}\protected@file@percent }
 \citation{routerwu2025}
 \citation{rechenberg1973}
 \bibstyle{plainnat}
@@ -96,12 +92,16 @@
 \bibcite{dlpm2025}{{2}{2025}{{Cao et~al.}}{{Cao, Wang, Mao, Hsu, Yin, Xia, Li, Liu, Zhang, Zhou, Sheng, Gonzalez, and Stoica}}}
 \bibcite{klpm2025}{{3}{2025}{{Dexter et~al.}}{{Dexter, Tang, Fatahi, Song, Dharamsi, and Gupta}}}
 \bibcite{glm2024}{{4}{2024}{{GLM Team}}{{}}}
-\bibcite{vllm2023}{{5}{2023}{{Kwon et~al.}}{{Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, and Stoica}}}
-\bibcite{chunkkv2025}{{6}{2025}{{Liu et~al.}}{{Liu, Tang, Dong, Li, Liu, Li, Hu, and Chu}}}
-\bibcite{skyserve}{{7}{2025}{{Mao et~al.}}{{Mao, Xia, Wu, Chiang, Griggs, Bhardwaj, Yang, Shenker, and Stoica}}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Related Work}{9}{section.7}\protected@file@percent }
+\newlabel{sec:related}{{7}{9}{Related Work}{section.7}{}}
+\@writefile{toc}{\contentsline {paragraph}{Prefix caches and reuse.}{9}{section*.23}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Cross-replica routing and cross-region serving.}{9}{section*.24}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Online hyperparameter adaptation.}{9}{section*.25}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {8}Conclusion}{9}{section.8}\protected@file@percent }
 \newlabel{sec:conclusion}{{8}{9}{Conclusion}{section.8}{}}
+\bibcite{vllm2023}{{5}{2023}{{Kwon et~al.}}{{Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, and Stoica}}}
+\bibcite{chunkkv2025}{{6}{2025}{{Liu et~al.}}{{Liu, Tang, Dong, Li, Liu, Li, Hu, and Chu}}}
+\bibcite{skyserve}{{7}{2025}{{Mao et~al.}}{{Mao, Xia, Wu, Chiang, Griggs, Bhardwaj, Yang, Shenker, and Stoica}}}
 \bibcite{kvflow2025}{{8}{2025}{{Pan et~al.}}{{Pan, Patel, Hu, Shen, Guan, Li, Qin, Wang, and Ding}}}
 \bibcite{splitwise2024}{{9}{2024}{{Patel et~al.}}{{Patel, Choukse, Zhang, Shah, Goiri, Maleki, and Bianchini}}}
 \bibcite{qin2024mooncake}{{10}{2024}{{Qin et~al.}}{{Qin, Li, He, Zhang, Wu, Zheng, Chen, Xu, Yao, Wei, Zhao, Huang, Yang, and Wu}}}

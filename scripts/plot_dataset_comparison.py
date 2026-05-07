@@ -39,6 +39,9 @@ def _load_stats() -> dict[str, dict]:
         total_seqs = s["total_sequences"]
         total_tokens = s["total_tokens"]
         users = s["user_count"]
+        top_key = "top_users" if "top_users" in s else "top_groups"
+        top_entries = s.get(top_key, [])
+        top10_tokens = sum(e["tokens"] for e in top_entries[:10])
         out[name] = {
             "total_sequences": total_seqs,
             "total_tokens": total_tokens,
@@ -49,6 +52,7 @@ def _load_stats() -> dict[str, dict]:
             "cross_user_reuse": s["cross_user_extra_pct"],
             "global_reuse": s["global_savings_pct"],
             "global_unique_tokens": s["global_unique_tokens"],
+            "top10_pct": 100.0 * top10_tokens / total_tokens if total_tokens else 0,
         }
     return out
 
@@ -83,7 +87,7 @@ def main() -> None:
             fontsize=9,
         )
     axes[0].set_yscale("log")
-    axes[0].grid(axis="y", alpha=0.3)
+    axes[0].grid(visible=False)
 
     # Panel 2: Requests per user
     vals = [stats[n]["requests_per_user"] for n in names]
@@ -103,58 +107,26 @@ def main() -> None:
             fontsize=9,
         )
     axes[1].set_yscale("log")
-    axes[1].grid(axis="y", alpha=0.3)
+    axes[1].grid(visible=False)
 
-    # Panel 3: Reuse breakdown (stacked: intra + cross)
-    intra = [stats[n]["intra_user_reuse"] for n in names]
-    cross = [stats[n]["cross_user_reuse"] for n in names]
-    bars1 = axes[2].bar(x, intra, color=[COLORS[n] for n in names], alpha=0.9, label="Intra-user")
-    bars2 = axes[2].bar(
-        x,
-        cross,
-        bottom=intra,
-        color=[COLORS[n] for n in names],
-        alpha=0.5,
-        label="Cross-user",
-        hatch="//",
-    )
+    # Panel 3: Top-10 user token concentration
+    vals = [stats[n]["top10_pct"] for n in names]
+    bars = axes[2].bar(x, vals, color=[COLORS[n] for n in names])
     axes[2].set_xticks(x)
     axes[2].set_xticklabels(names, fontsize=9)
-    axes[2].set_ylabel("KV-cache reuse (%)")
-    axes[2].set_title("Prefix Reuse Breakdown")
-    for b, iv, cv in zip(bars1, intra, cross):
-        total = iv + cv
+    axes[2].set_ylabel("Tokens from top 10 users (%)")
+    axes[2].set_title("User Concentration")
+    for b, v in zip(bars, vals):
         axes[2].text(
             b.get_x() + b.get_width() / 2,
-            total + 1,
-            f"{total:.0f}%",
+            b.get_height(),
+            f"{v:.1f}%",
             ha="center",
             va="bottom",
             fontsize=9,
-            fontweight="bold",
         )
-        if iv > 2:
-            axes[2].text(
-                b.get_x() + b.get_width() / 2,
-                iv / 2,
-                f"{iv:.0f}%",
-                ha="center",
-                va="center",
-                fontsize=8,
-                color="white",
-            )
-        if cv > 5:
-            axes[2].text(
-                b.get_x() + b.get_width() / 2,
-                iv + cv / 2,
-                f"{cv:.0f}%",
-                ha="center",
-                va="center",
-                fontsize=8,
-            )
-    axes[2].legend(fontsize=8, loc="upper right")
-    axes[2].set_ylim(0, 70)
-    axes[2].grid(axis="y", alpha=0.3)
+    axes[2].grid(visible=False)
+    axes[2].set_ylim(0, max(vals) * 1.3)
 
     fig.tight_layout()
     path1 = args.out_dir / "dataset_comparison.png"

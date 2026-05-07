@@ -181,12 +181,15 @@ has seen their conversation can save more than half of the prefill.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\linewidth]{figures/dataset_reuse_composition.png}
-\caption{Token-level prefix reuse decomposition. GLM-5.1's reuse is
-  overwhelmingly intra-user (54\%), reflecting multi-turn dialogue;
-  WildChat's reuse is predominantly cross-user (29\%), reflecting shared
-  templates; LMSYS has minimal reuse overall.}
-\label{fig:reuse_composition}
+\includegraphics[width=\linewidth]{figures/dataset_combined.png}
+\caption{\textit{Left}: Token composition per dataset. GLM-5.1's reuse
+  is overwhelmingly intra-user (54\%), reflecting multi-turn dialogue;
+  WildChat's is predominantly cross-user (29\%, shared templates); LMSYS
+  has minimal reuse (9\%, all cross-user). \textit{Right}: Radar chart
+  with six axes normalized to the dataset maximum. GLM-5.1 dominates on
+  every axis relevant to routing: long prompts, high multi-turn density,
+  concentrated users, and strong intra-user prefix reuse.}
+\label{fig:dataset_combined}
 \end{figure}
 
 \paragraph{Experimental windows.}
