@@ -464,6 +464,76 @@ spikes in the second window. By contrast, \texttt{gorgo-static}'s W2 p95
 (1.510\,s) improves over its W1 p95 (1.605\,s), a 6.0\% gain; it is the only
 policy whose p95 improves across windows.
 
+\subsection{Stress at $c{=}64$}
+\label{sec:results:stress}
+
+To stress-test the W2 result we double the in-flight-request cap from 32 to 64
+and benchmark two further 30-minute windows: a nighttime window the day after
+W1 (Table~\ref{tab:stress_night}), in the same time-of-day band, and a daytime
+window on W1 itself (Table~\ref{tab:stress_midday}). Both seed all GORGO
+variants with the W1-learned hyperparameters; \texttt{simple-session-affinity}
+did not complete the nighttime sweep and is omitted from that table.
+
+\begin{table}[t]
+\centering
+\small
+\caption{GLM-5.1 stress, nighttime window ($c{=}64$). Same time-of-day band as
+  W1, the day after W1. Bold is best in column. \texttt{simple-session-affinity}
+  did not complete and is omitted.}
+\label{tab:stress_night}
+\begin{tabular}{lrrrrrr}
+\toprule
+Policy & Completed & p50 & p95 & p99 & max & Succ.\% \\
+\midrule
+\textbf{gorgo-hillclimb} & 2{,}466 & 0.281          & \textbf{1.331} & \textbf{1.832} & 3.05  & 89.5 \\
+prefix-cache             & 2{,}468 & 0.288          & 1.394          & 1.992          & 2.95  & 89.6 \\
+gorgo-static             & 2{,}472 & \textbf{0.179} & 1.427          & 2.302          & 4.06  & 89.8 \\
+least-request            & 2{,}465 & 0.281          & 1.605          & 2.268          & 4.16  & 89.5 \\
+gorgo-autotune           & 2{,}469 & 0.280          & 1.690          & 2.298          & 18.84 & 89.7 \\
+least-load               & 2{,}465 & 0.281          & 1.700          & 2.290          & 2.98  & 89.5 \\
+random                   & 2{,}460 & 0.287          & 1.724          & 2.357          & 4.00  & 89.3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\caption{GLM-5.1 stress, daytime window ($c{=}64$, same day as W1, midday
+  traffic regime). Bold is best in column.}
+\label{tab:stress_midday}
+\begin{tabular}{lrrrrrr}
+\toprule
+Policy & Completed & p50 & p95 & p99 & max & Succ.\% \\
+\midrule
+\textbf{gorgo-static}    & 3{,}372 & \textbf{0.193} & \textbf{1.400} & 2.140          &  3.37 & 89.6 \\
+prefix-cache             & 3{,}376 & 0.295          & 1.416          & \textbf{1.973} &  3.75 & 89.7 \\
+simple-session-affinity  & 3{,}375 & 0.324          & 1.531          & 2.487          & 28.07 & 89.7 \\
+gorgo-hillclimb          & 3{,}376 & 0.226          & 1.581          & 7.186          & 38.29 & 89.7 \\
+least-request            & 3{,}380 & 0.275          & 1.694          & 2.440          & 20.07 & 89.8 \\
+random                   & 3{,}371 & 0.309          & 1.700          & 2.421          &  3.99 & 89.6 \\
+least-load               & 3{,}374 & 0.309          & 1.735          & 2.419          & 16.91 & 89.7 \\
+gorgo-autotune           & 3{,}377 & 0.299          & 1.748          & 2.519          & 23.63 & 89.7 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+In the nighttime stress window (Table~\ref{tab:stress_night}),
+\texttt{gorgo-static} wins p50 and \texttt{gorgo-hillclimb} wins p95 (1.331\,s)
+and p99 (1.832\,s); the two together sweep all three percentiles, and the
+hillclimb's p95 and p99 are 6.0\% and 13.5\% below its $c{=}32$ W2 result as
+the ES adapts to deeper queues.
+
+In the daytime stress window (Table~\ref{tab:stress_midday}) the picture
+shifts. \texttt{gorgo-static} wins p50 (0.193\,s) and p95 (1.400\,s);
+\texttt{prefix-cache} wins p99 (1.973\,s); \texttt{gorgo-hillclimb}'s p99
+inflates to 7.186\,s. Under midday traffic the live $(1{+}1)$-ES occasionally
+proposes weights that produce a heavy-tailed minute, and the negative-p95
+objective does not penalize that excursion fast enough. The practical
+implication is the one W2 already suggested: freeze hillclimb-tuned weights
+into \texttt{gorgo-static} for production, and reserve \texttt{gorgo-hillclimb}
+for tuning windows where its exploration can be tolerated.
+
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figures/ttft_bars_w1.png}
@@ -532,10 +602,17 @@ an additional routing term. GORGO uses only metrics exposed by an HTTP-fronted
 SGLang/vLLM server, not scheduler-internal information \citep{kvflow2025,lpc2025}
 that would tighten the prefill estimate.
 
-\paragraph{ES convergence time.}
+\paragraph{ES convergence time and live-tuning instability.}
 The $(1{+}1)$-ES requires several hop cycles to converge from a random starting
 point. In W1 it converged within the 30-minute window, but very short traffic
-windows may not provide enough requests.
+windows may not provide enough requests. The daytime stress window
+(Table~\ref{tab:stress_midday}) further shows that running the ES live in a
+non-tuning regime can produce a heavy-tailed p99 excursion
+(\texttt{gorgo-hillclimb} p99 inflates to 7.186\,s); the negative-p95 objective
+does not penalize a single bad-minute proposal fast enough. The practical
+recommendation in \S\ref{sec:results:stress}---freeze hillclimb-tuned weights
+for production---is therefore not just a convenience but a safety property of
+this regime.
 
 % -----------------------------------------------------------------------
 \section{Related Work}
@@ -615,7 +692,7 @@ calibration window before each redeploy is not affordable.
 \item {\bf Claims}\\
 Question: Do the main claims made in the abstract and introduction accurately reflect the paper's contributions and scope?\\
 Answer: \answerYes{}\\
-Justification: The abstract claims (i) public datasets underrepresent long-context multi-turn traffic (quantified in \S\ref{sec:characterization}), (ii) we evaluate routing policies on a production trace (Tables~\ref{tab:w1} and \ref{tab:w2}), and (iii) GORGO sweeps every TTFT percentile in both windows. We are explicit in the introduction and \S\ref{sec:limitations} that ``GORGO'' refers to a family and that the W2 p99 margin is at the noise floor.
+Justification: The abstract claims (i) public datasets underrepresent long-context multi-turn traffic (quantified in \S\ref{sec:characterization}), (ii) we evaluate routing policies on a production trace (Tables~\ref{tab:w1}, \ref{tab:w2}, \ref{tab:stress_night}, \ref{tab:stress_midday}), and (iii) GORGO sweeps every TTFT percentile in both 30-minute windows. We are explicit in the introduction, \S\ref{sec:results:stress}, and \S\ref{sec:limitations} that ``GORGO'' refers to a family, that the W2 p99 margin is at the noise floor, and that on the daytime stress window \texttt{gorgo-hillclimb}'s p99 inflates and \texttt{prefix-cache} wins p99 instead.
 
 \item {\bf Limitations}\\
 Question: Does the paper discuss the limitations of the work?\\
