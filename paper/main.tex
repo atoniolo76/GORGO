@@ -95,30 +95,22 @@ replica saturates. Reporting only one percentile hides this trade-off.
 
 \paragraph{Contributions.}
 \begin{itemize}
-\item A workload characterization (\S\ref{sec:characterization}) placing three
-  datasets on the same prefix-reuse and request-length axes. The production
-  GLM-5.1 trace has 7--45$\times$ longer prompts and 2--6$\times$ higher
-  token-weighted reuse than LMSYS-Chat-1M and WildChat-4.8M.
-\item A routing cost model and three variants collectively called GORGO
-  (\S\ref{sec:method}), which score each replica by an additive combination of
-  EWMA network RTT, estimated prefill cost over uncached tokens, and a
-  queue-depth penalty. Variants differ only in how the two scalar weights are
-  set: a static configuration, a per-replica online fit, and a Gaussian
-  $(1{+}1)$-evolution-strategy hill climb that directly minimizes p95 TTFT.
-\item An experimental setup (\S\ref{sec:setup}) running each of eight policies
-  on its own dedicated three-replica fleet of L40S:2 SGLang servers in Asia,
-  Europe, and the US East coast, with cross-region RTTs spanning 26--466\,ms.
-\item Empirical results (\S\ref{sec:results}) on two consecutive 30-minute
-  production-trace windows. GORGO achieves the lowest TTFT at every percentile
-  (p50, p95, p99) on both a tuning and a held-out evaluation window, against
-  seven baseline policies.
+\item Workload characterization (\S\ref{sec:characterization}): GLM-5.1 has
+  7--45$\times$ longer prompts and 2--6$\times$ more token-weighted prefix
+  reuse than LMSYS-Chat-1M and WildChat-4.8M.
+\item GORGO (\S\ref{sec:method}): an additive cost over RTT, uncached prefill,
+  and queue depth, with three weight-setting variants---static, online
+  median-of-rates, and Gaussian $(1{+}1)$-ES on p95 TTFT.
+\item Evaluation (\S\ref{sec:results}) on a three-region L40S:2 fleet across
+  two 30-minute GLM-5.1 windows and two $c{=}64$ stress windows: the GORGO
+  family collectively achieves the lowest TTFT at every percentile in both
+  30-minute windows against five baselines.
 \end{itemize}
 
-We do not claim any single GORGO variant dominates everywhere: \texttt{gorgo-hillclimb}
-wins all three percentiles in the tuning window, while in the evaluation window
-\texttt{gorgo-static} (deploying the tuning-window learned weights) wins p50 and
-p95 and \texttt{gorgo-hillclimb} wins p99. The W2 p99 margin is at the noise
-floor of one 30-minute window (\S\ref{sec:limitations}).
+No single GORGO variant dominates everywhere: \texttt{gorgo-hillclimb} sweeps
+W1; \texttt{gorgo-static} (W1-learned weights, frozen) wins W2 p50 and p95
+while \texttt{gorgo-hillclimb} wins W2 p99 at a noise-floor margin
+(\S\ref{sec:limitations}).
 
 % -----------------------------------------------------------------------
 \section{Workload Characterization}
