@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 % partial rewrite of the LaTeX2e package for submissions to the
 % Conference on Neural Information Processing Systems (NeurIPS):
 %
@@ -435,3 +436,21 @@
 
 
 \endinput
+=======
+% Minimal NeurIPS 2026 style file (draft placeholder)
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{neurips_2026}[2026/01/01 NeurIPS 2026 draft style]
+
+\DeclareOption{final}{}
+\DeclareOption{preprint}{}
+\DeclareOption{nonatbib}{}
+\ProcessOptions\relax
+
+% NeurIPS checklist answer macros
+\AtBeginDocument{%
+  \providecommand{\answerYes}[1][]{\textcolor{blue}{\textbf{[Yes]}}}%
+  \providecommand{\answerNo}[1][]{\textcolor{orange}{\textbf{[No]}}}%
+  \providecommand{\answerNA}[1][]{\textcolor{gray}{\textbf{[N/A]}}}%
+  \providecommand{\answerTODO}[1][]{\textcolor{red}{\textbf{[TODO]}}}%
+}
+>>>>>>> 576cac5 (Add GORGO paper v4: synthesized NeurIPS 2026 draft)
