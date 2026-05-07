@@ -407,6 +407,20 @@ tokens to prefill on average); the low $\alpha$ reflects that SGLang's
 continuous batching already orders within a replica and deep queues are rare at
 32-concurrency on this arrival rate.
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.75\linewidth]{figures/cache_convergence.png}
+\caption{Achieved prefix hit rate over the W1 tuning window: the fraction
+  of each request's input tokens that were already cached on the replica
+  the policy routed to (not the total cache available across all replicas).
+  A higher rate means the routing decision exploited more of the available
+  cache. Bold lines are EWMA-smoothed ($\alpha{=}0.06$); faint lines are
+  64-request rolling averages. \texttt{gorgo-hillclimb} converges from
+  $\sim$45\% to $\sim$95\% within the first 5 minutes as the ES learns
+  to route requests to their best-cached replica.}
+\label{fig:cache_convergence}
+\end{figure}
+
 \subsection{W2: Held-Out Evaluation Window}
 
 \begin{table}[t]
@@ -456,6 +470,15 @@ p99 by 75.4\%---a hash-to-replica mapping cannot rebalance when a hash bucket
 spikes in the second window. By contrast, \texttt{gorgo-static}'s W2 p95
 (1.510\,s) improves over its W1 p95 (1.605\,s), a 6.0\% gain; it is the only
 policy whose p95 improves across windows.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/ttft_bars_w1.png}
+\caption{W1 TTFT broken out by percentile (sorted by p95, worst at top).
+  \texttt{gorgo-hillclimb} (gold outline) wins all three percentiles
+  during the tuning window.}
+\label{fig:ttft_bars_w1}
+\end{figure}
 
 \begin{figure}[t]
 \centering
