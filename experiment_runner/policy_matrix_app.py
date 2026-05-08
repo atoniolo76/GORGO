@@ -114,6 +114,8 @@ def _serve_model(registry_key: str, tp_size: int | None = None) -> None:
     region="CANADA-2",
     gpu="H100",
     scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    max_containers=8,
+    retries=0,
     volumes={
         "/root/.cache/huggingface": modal.Volume.from_name(
             "Qwen3.5-35B-A3B-FP8-huggingface-cache",
@@ -132,6 +134,8 @@ def engine_canada(registry_key: str) -> None:
     region="sines-2",
     gpu="H100",
     scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    max_containers=8,
+    retries=0,
     volumes={
         "/root/.cache/huggingface": modal.Volume.from_name(
             "Qwen3.5-35B-A3B-FP8-huggingface-cache",
@@ -150,6 +154,8 @@ def engine_sines(registry_key: str) -> None:
     region="us-west4",
     gpu="H100",
     scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    max_containers=8,
+    retries=0,
     volumes={
         "/root/.cache/huggingface": modal.Volume.from_name(
             "Qwen3.5-35B-A3B-FP8-huggingface-cache",
@@ -179,6 +185,8 @@ _L40S_HF_VOLUME = {
     region="ap-seoul-1",
     gpu="L40S:2",
     scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    max_containers=8,
+    retries=0,
     volumes=_L40S_HF_VOLUME,
 )
 def engine_ap_seoul(registry_key: str) -> None:
@@ -191,6 +199,8 @@ def engine_ap_seoul(registry_key: str) -> None:
     region="eu-frankfurt-1",
     gpu="L40S:2",
     scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    max_containers=8,
+    retries=0,
     volumes=_L40S_HF_VOLUME,
 )
 def engine_eu_frankfurt(registry_key: str) -> None:
@@ -203,6 +213,8 @@ def engine_eu_frankfurt(registry_key: str) -> None:
     region="us-ashburn-1",
     gpu="L40S:2",
     scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    max_containers=8,
+    retries=0,
     volumes=_L40S_HF_VOLUME,
 )
 def engine_us_ashburn(registry_key: str) -> None:
@@ -213,6 +225,8 @@ def engine_us_ashburn(registry_key: str) -> None:
     image=PROXY_IMAGE,
     region="us-east",
     timeout=24 * 60 * 60,
+    max_containers=8,
+    retries=0,
     volumes={
         "/data": completions_volume,
         "/lmsys": lmsys_chat_1m_volume,
@@ -842,12 +856,19 @@ def _workload_payload(
     return payload
 
 
-async def _wait_for_workload(url: str, poll_interval: float) -> dict:
+async def _wait_for_workload(
+    url: str,
+    poll_interval: float,
+    timeout_seconds: float | None = None,
+) -> dict:
+    deadline = time.time() + timeout_seconds if timeout_seconds else None
     while True:
         status_doc = await _get_json(url, "/workload/status")
         workload = status_doc.get("workload") or {}
         if workload.get("status") in TERMINAL_WORKLOAD_STATUS:
             return workload
+        if deadline and time.time() > deadline:
+            raise TimeoutError(f"workload on {url} did not finish within {timeout_seconds:.0f}s")
         await asyncio.sleep(poll_interval)
 
 
@@ -918,7 +939,13 @@ async def _run_one_policy(global_spec: dict, policy_spec: dict) -> dict:
         ),
     )
     started = time.time()
-    workload = await _wait_for_workload(url, float(global_spec.get("poll_interval_seconds", 5.0)))
+    max_minutes = global_spec.get("max_experiment_minutes")
+    workload_timeout = max_minutes * 60.0 if max_minutes else None
+    workload = await _wait_for_workload(
+        url,
+        float(global_spec.get("poll_interval_seconds", 5.0)),
+        timeout_seconds=workload_timeout,
+    )
     final_hyperparameters = None
     if auto_tune_config:
         await _post_json(url, "/tune", {"enabled": False})
