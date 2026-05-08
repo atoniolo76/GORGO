@@ -1,0 +1,386 @@
+{
+  "run_id": "abstract_night_stress_w1params_000_glm5_0030_to_0100",
+  "trace_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_0030_to_0100.jsonl",
+  "start_at_wall_time": "2026-05-07T20:58:54.711730Z",
+  "policies": [
+    "random",
+    "least-request",
+    "least-load",
+    "prefix-cache",
+    "simple-session-affinity",
+    "gorgo-static",
+    "gorgo-autotune",
+    "gorgo-hillclimb"
+  ],
+  "results": [
+    {
+      "policy": "random",
+      "label": "random",
+      "proxy_url": "https://ta-01kr227n4rk12d6f1cd9zsfh0z-8000-81jdgnem2fjsbjggzvr1fe4e1.w.modal.host",
+      "error": "HTTPStatusError: Client error '409 Conflict' for url 'https://ta-01kr227n4rk12d6f1cd9zsfh0z-8000-81jdgnem2fjsbjggzvr1fe4e1.w.modal.host/workload/start'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/409"
+    },
+    {
+      "policy": "least-request",
+      "label": "least-request",
+      "proxy_url": "https://ta-01kr227xq3djytp5c10scq8v2g-8000-4yu374kejxm3iu11p4tceyd5e.w.modal.host",
+      "run_id": "abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request",
+      "trace_id": "abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request",
+        "started_at": "2026-05-07T20:58:31.672143Z",
+        "finished_at": "2026-05-07T21:29:56.925862Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_0030_to_0100.jsonl",
+          "run_id": "abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request",
+          "concurrency": 64,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-07T20:58:54.711730Z"
+        },
+        "stats": {
+          "sent": 4817,
+          "ok": 4078,
+          "fail": 739,
+          "success_rate": 0.846585011417895,
+          "status_breakdown": {
+            "400": 719,
+            "200": 4078,
+            "0": 2,
+            "502": 18
+          },
+          "elapsed_seconds": 1858.2175737300001,
+          "request_throughput_rps": 2.5922691013683807,
+          "input_token_throughput": 8558.120009638167,
+          "output_token_throughput": 484.08055801257944,
+          "total_token_throughput": 9042.200567650747,
+          "total_input_tokens": 15902849,
+          "total_output_tokens": 899527,
+          "ttft_seconds": {
+            "avg": 0.5152170762064738,
+            "min": 0.109157718,
+            "max": 5.686826457,
+            "p50": 0.293707734,
+            "p95": 1.6712662,
+            "p99": 2.497328641,
+            "n": 4078
+          },
+          "request_e2e_seconds": {
+            "avg": 3.0482487831199117,
+            "min": 0.520342601,
+            "max": 99.839622096,
+            "p50": 1.650274417,
+            "p95": 7.996947474,
+            "p99": 38.368094616,
+            "n": 4078
+          },
+          "itl_ms": {
+            "avg": 12.6759325590572,
+            "min": 4.581279015151515,
+            "max": 125.87862656666667,
+            "p50": 10.193575228346456,
+            "p95": 24.873296598425195,
+            "p99": 65.49431140944883,
+            "n": 4078
+          },
+          "decode_tokens_per_second": {
+            "avg": 94.18579685520231,
+            "min": 7.944160397002658,
+            "max": 218.27965437004218,
+            "p50": 98.10819163724291,
+            "p95": 134.87360854431188,
+            "p99": 140.75788576548396,
+            "n": 4078
+          },
+          "input_tokens": {
+            "avg": 3899.668710152035,
+            "min": 11.0,
+            "max": 32097.0,
+            "p50": 18.0,
+            "p95": 21174.0,
+            "p99": 27305.0,
+            "n": 4078
+          },
+          "output_tokens": {
+            "avg": 220.58043158410985,
+            "min": 14.0,
+            "max": 8745.0,
+            "p50": 128.0,
+            "p95": 239.0,
+            "p99": 3548.0,
+            "n": 4078
+          },
+          "output_path": "/results/workload_runs/abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-07T20:58:31.348854Z",
+          "stopped_at": "2026-05-07T21:30:46.547606Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "dropped_tune": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request/requests.jsonl",
+            "tune_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request/tune.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 4815,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 189,
+          "request_events": 4815,
+          "tune_events": 0,
+          "first_event_ts": "2026-05-07T20:58:40.859503Z",
+          "last_event_ts": "2026-05-07T21:30:19.765961Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request/requests.jsonl",
+          "tune_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request/tune.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_least-request/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 4815,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 4815,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 20.17066895799985
+      },
+      "elapsed_seconds": 1942.890632867813
+    },
+    {
+      "policy": "least-load",
+      "label": "least-load",
+      "proxy_url": "https://ta-01kr227nmh6gqc5gmkt9dxptj9-8000-8d5zjjok9kjoiw0fa8hcw9dki.w.modal.host",
+      "error": "HTTPStatusError: Client error '409 Conflict' for url 'https://ta-01kr227nmh6gqc5gmkt9dxptj9-8000-8d5zjjok9kjoiw0fa8hcw9dki.w.modal.host/workload/start'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/409"
+    },
+    {
+      "policy": "prefix-cache",
+      "label": "prefix-cache",
+      "proxy_url": "https://ta-01kr227ntpqwsvzrjr770v6mf2-8000-1qfxme4kv361zn37o4ktbpgd5.w.modal.host",
+      "error": "HTTPStatusError: Client error '409 Conflict' for url 'https://ta-01kr227ntpqwsvzrjr770v6mf2-8000-1qfxme4kv361zn37o4ktbpgd5.w.modal.host/workload/start'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/409"
+    },
+    {
+      "policy": "simple-session-affinity",
+      "label": "simple-session-affinity",
+      "proxy_url": "https://ta-01kr23j35yx8cfb4cg0xgpjv1z-8000-2yb3574kaj2n88jfclp9p5pu6.w.modal.host",
+      "run_id": "abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity",
+      "trace_id": "abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity",
+      "auto_tune": null,
+      "workload": {
+        "running": false,
+        "status": "succeeded",
+        "phase": "done",
+        "run_id": "abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity",
+        "started_at": "2026-05-07T20:58:31.475269Z",
+        "finished_at": "2026-05-07T21:29:45.417396Z",
+        "config": {
+          "data_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_0030_to_0100.jsonl",
+          "run_id": "abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity",
+          "concurrency": 64,
+          "model": "",
+          "stream": true,
+          "max_tokens": 128,
+          "max_input_tokens": 24000,
+          "num_requests": null,
+          "arrival_mode": "open-loop",
+          "time_scale": 1.0,
+          "output_path": "/results/workload_runs/abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity.json",
+          "save_per_request": true,
+          "start_at_wall_time": "2026-05-07T20:58:54.711730Z"
+        },
+        "stats": {
+          "sent": 4817,
+          "ok": 4059,
+          "fail": 758,
+          "success_rate": 0.8426406477060411,
+          "status_breakdown": {
+            "400": 721,
+            "200": 4059,
+            "502": 37
+          },
+          "elapsed_seconds": 1846.8572860729998,
+          "request_throughput_rps": 2.608214525466913,
+          "input_token_throughput": 8601.48540972434,
+          "output_token_throughput": 488.2077282306917,
+          "total_token_throughput": 9089.693137955031,
+          "total_input_tokens": 15885716,
+          "total_output_tokens": 901650,
+          "ttft_seconds": {
+            "avg": 0.6253236741980783,
+            "min": 0.098637837,
+            "max": 45.045655818,
+            "p50": 0.318322386,
+            "p95": 1.499162751,
+            "p99": 4.079312346,
+            "n": 4059
+          },
+          "request_e2e_seconds": {
+            "avg": 3.164721325359695,
+            "min": 0.438964603,
+            "max": 82.650253863,
+            "p50": 1.994736789,
+            "p95": 6.593887376,
+            "p99": 40.275060692,
+            "n": 4059
+          },
+          "itl_ms": {
+            "avg": 12.719291156778208,
+            "min": 0.18821357142857145,
+            "max": 169.0881408243243,
+            "p50": 11.98830246456693,
+            "p95": 19.664815283464566,
+            "p99": 30.53093287401575,
+            "n": 4059
+          },
+          "decode_tokens_per_second": {
+            "avg": 88.8900625888287,
+            "min": 5.914075316724661,
+            "max": 5313.113142744375,
+            "p50": 83.41464548092918,
+            "p95": 132.62884246051107,
+            "p99": 139.98583127346387,
+            "n": 4059
+          },
+          "input_tokens": {
+            "avg": 3913.70189701897,
+            "min": 11.0,
+            "max": 32097.0,
+            "p50": 18.0,
+            "p95": 21174.0,
+            "p99": 27305.0,
+            "n": 4059
+          },
+          "output_tokens": {
+            "avg": 222.1359940872136,
+            "min": 6.0,
+            "max": 9045.0,
+            "p50": 128.0,
+            "p95": 234.0,
+            "p99": 3556.0,
+            "n": 4059
+          },
+          "output_path": "/results/workload_runs/abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity.json"
+        },
+        "output_path": "/results/workload_runs/abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity.json",
+        "error": null,
+        "stop_requested": false
+      },
+      "trace": {
+        "trace": {
+          "enabled": false,
+          "trace_id": "abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity",
+          "sample_metrics": true,
+          "sample_requests": true,
+          "max_events": 200000,
+          "started_at": "2026-05-07T20:58:31.150615Z",
+          "stopped_at": "2026-05-07T21:29:46.145958Z",
+          "dropped_metrics": 0,
+          "dropped_requests": 0,
+          "dropped_tune": 0,
+          "saved_paths": {
+            "metrics_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity/metrics.jsonl",
+            "requests_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity/requests.jsonl",
+            "tune_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity/tune.jsonl",
+            "manifest_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity/manifest.json"
+          },
+          "fallback_summary": {
+            "total_requests": 4817,
+            "fallback_count": 0,
+            "fallback_rate": 0.0,
+            "single_replica_count": 0,
+            "by_effective_policy": {}
+          },
+          "metrics_events": 183,
+          "request_events": 4817,
+          "tune_events": 0,
+          "first_event_ts": "2026-05-07T20:58:42.784100Z",
+          "last_event_ts": "2026-05-07T21:29:15.510878Z"
+        },
+        "paths": {
+          "metrics_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity/metrics.jsonl",
+          "requests_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity/requests.jsonl",
+          "tune_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity/tune.jsonl",
+          "manifest_path": "/results/proxy_traces/abstract_night_stress_w1params_000_glm5_0030_to_0100_simple-session-affinity/manifest.json"
+        },
+        "fallback_summary": {
+          "total_requests": 4817,
+          "fallback_count": 0,
+          "fallback_rate": 0.0,
+          "single_replica_count": 0,
+          "by_effective_policy": {}
+        }
+      },
+      "fallback_summary": {
+        "total_requests": 4817,
+        "fallback_count": 0,
+        "fallback_rate": 0.0,
+        "single_replica_count": 0,
+        "by_effective_policy": {}
+      },
+      "metrics_ready": {
+        "replica_count": 3,
+        "metrics_count": 3,
+        "errors": {},
+        "last_refresh_age_seconds": 18.03089681
+      },
+      "elapsed_seconds": 1879.3801696300507
+    },
+    {
+      "policy": "gorgo",
+      "label": "gorgo-static",
+      "proxy_url": "https://ta-01kr227pdesq4rkd208n9mmtde-8000-rg797mq4pz9dvhozl9l67ehuu.w.modal.host",
+      "error": "HTTPStatusError: Client error '409 Conflict' for url 'https://ta-01kr227pdesq4rkd208n9mmtde-8000-rg797mq4pz9dvhozl9l67ehuu.w.modal.host/workload/start'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/409"
+    },
+    {
+      "policy": "gorgo",
+      "label": "gorgo-autotune",
+      "proxy_url": "https://ta-01kr227q2qf7cdf93cqf33nw6p-8000-8d5zjjok9kjoiw0fa8hcw9dki.w.modal.host",
+      "error": "HTTPStatusError: Client error '409 Conflict' for url 'https://ta-01kr227q2qf7cdf93cqf33nw6p-8000-8d5zjjok9kjoiw0fa8hcw9dki.w.modal.host/workload/start'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/409"
+    },
+    {
+      "policy": "gorgo",
+      "label": "gorgo-hillclimb",
+      "proxy_url": "https://ta-01kr227pphhsz13sa7t372z1md-8000-og9com9lf96u5cfzonv3qx8co.w.modal.host",
+      "error": "HTTPStatusError: Client error '409 Conflict' for url 'https://ta-01kr227pphhsz13sa7t372z1md-8000-og9com9lf96u5cfzonv3qx8co.w.modal.host/workload/start'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/409"
+    }
+  ]
+}
