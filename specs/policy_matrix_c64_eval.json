@@ -1,5 +1,5 @@
 {
-  "_note": "GLM5 c=64 held-out eval window. gorgo-static deploys the hillclimb-learned parameters from the c=64 tuning window (policy_matrix_c64_tuning.json) without further adjustment. Pair with manifest_glm5_apr2_0030_0100.json (same time-of-day as tuning, different day -- tests generalization). REPLACE hyperparameters below with learned values from the c=64 tuning run.",
+  "_note": "GLM5 c=64 held-out eval window. gorgo-static deploys hillclimb-learned params from c=64 tuning (prefill_weight=0.038, load_weight=0.009, rtt_weight=1084). Pair with manifest_glm5_apr2_0030_0100.json (same time-of-day as tuning, different day -- tests generalization).",
   "run_id": "glm5_c64_eval",
   "trace_path": "",
   "start_delay_seconds": 30,
@@ -20,9 +20,9 @@
     {"name": "prefix-cache"},
     {"name": "simple-session-affinity"},
     {
-      "_note": "REPLACE with learned params from c=64 tuning hillclimb.",
+      "_note": "Learned params from c=64 tuning hillclimb (glm5_c64_tuning_v1).",
       "name": "gorgo", "label": "gorgo-static",
-      "hyperparameters": {"prefill_weight": 0.20, "load_weight": 0.01, "rtt_weight": 2000.0}
+      "hyperparameters": {"prefill_weight": 0.038, "load_weight": 0.009, "rtt_weight": 1084.0}
     }
   ],
   "replica_homogeneity_check": {

@@ -651,6 +651,8 @@ async def _measure_replica_ttft(
                 buffer = bytearray()
                 buffer_first_chunk_ns: int | None = None
                 async for chunk in resp.aiter_raw():
+                    if ttft_ns is not None:
+                        continue
                     chunk_ns = time.perf_counter_ns()
                     if not buffer:
                         buffer_first_chunk_ns = chunk_ns
@@ -682,11 +684,6 @@ async def _measure_replica_ttft(
                             if delta.get("content"):
                                 ttft_ns = (event_arrival_ns or chunk_ns) - started_ns
                                 break
-                    if ttft_ns is not None:
-                        break
-                # Drain the rest so the connection returns to the pool.
-                async for _ in resp.aiter_raw():
-                    pass
         except Exception as e:
             error_count += 1
             last_error = f"{type(e).__name__}: {e}"
