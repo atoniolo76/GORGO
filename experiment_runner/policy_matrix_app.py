@@ -251,13 +251,19 @@ ENGINE_BY_REGION = {
     "us-ashburn-1": engine_us_ashburn,
 }
 
+# ---------- Fleet GPU configuration ----------
+# Change these when switching GPU tiers for the entire fleet.
+# All regions in the experiment use the same GPU type.
+FLEET_GPU = "L40S:2"
+FLEET_TP_SIZE = 2
+
 GPU_BY_REGION = {
     "CANADA-2": "H100",
     "sines-2": "H100",
     "us-west4": "H100",
-    "ap-seoul-1": "L40S:2",
-    "eu-frankfurt-1": "L40S:2",
-    "us-ashburn-1": "L40S:2",
+    "ap-seoul-1": FLEET_GPU,
+    "eu-frankfurt-1": FLEET_GPU,
+    "us-ashburn-1": FLEET_GPU,
 }
 
 TERMINAL_WORKLOAD_STATUS = {"succeeded", "failed", "cancelled"}
@@ -434,7 +440,6 @@ def _capture_environment(base_spec: dict, sweep_manifest: dict) -> dict:
             return None
 
     fleet_regions = base_spec.get("fleet_regions") or []
-    fleet_gpu_config = {region: GPU_BY_REGION.get(region, "unknown") for region in fleet_regions}
 
     return {
         "gorgo_commit": _git(["rev-parse", "HEAD"]),
@@ -449,8 +454,9 @@ def _capture_environment(base_spec: dict, sweep_manifest: dict) -> dict:
         "tensor_parallel_size": N_GPUS,
         "environment_name": ENVIRONMENT_NAME,
         "fleet": {
+            "gpu": FLEET_GPU,
+            "tp_size": FLEET_TP_SIZE,
             "regions": fleet_regions,
-            "gpu_by_region": fleet_gpu_config,
             "replicas_per_policy": len(fleet_regions),
             "scaledown_window_seconds": SCALEDOWN_WINDOW_SECONDS,
         },

@@ -1,5 +1,5 @@
 {
-  "_note": "GLM5 c=64 held-out eval window. gorgo-static deploys the hillclimb-learned parameters from the c=64 tuning window (policy_matrix_c64_tuning.json). gorgo-autotune and gorgo-hillclimb start from the same learned values and continue tuning on fresh data. Pair with manifest_glm5_apr1_midday.json (different time-of-day from tuning window). REPLACE hyperparameters below with values from the c=64 tuning run's gorgo-hillclimb learned params.",
+  "_note": "GLM5 c=64 held-out eval window. gorgo-static deploys the hillclimb-learned parameters from the c=64 tuning window (policy_matrix_c64_tuning.json) without further adjustment. Pair with manifest_glm5_0100_0130.json (same W2 trace as c=32 for direct comparison). REPLACE hyperparameters below with learned values from the c=64 tuning run.",
   "run_id": "glm5_c64_eval",
   "trace_path": "",
   "start_delay_seconds": 30,
@@ -16,27 +16,13 @@
     "us-ashburn-1"
   ],
   "policies": [
-    {"name": "random"},
     {"name": "least-request"},
-    {"name": "least-load"},
     {"name": "prefix-cache"},
     {"name": "simple-session-affinity"},
     {
-      "_note": "REPLACE with learned params from c=64 tuning hillclimb. Values below are the tuning starters as a reasonable gorgo-static default before tuning completes.",
+      "_note": "REPLACE with learned params from c=64 tuning hillclimb.",
       "name": "gorgo", "label": "gorgo-static",
       "hyperparameters": {"prefill_weight": 0.20, "load_weight": 0.01, "rtt_weight": 2000.0}
-    },
-    {
-      "_note": "REPLACE with learned params from c=64 tuning hillclimb. rtt_weight=1.0 because fit mode produces physical s/token rates.",
-      "name": "gorgo", "label": "gorgo-autotune",
-      "hyperparameters": {"prefill_weight": 0.20, "load_weight": 0.01, "rtt_weight": 1.0},
-      "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "fit"}
-    },
-    {
-      "_note": "REPLACE with learned params from c=64 tuning hillclimb.",
-      "name": "gorgo", "label": "gorgo-hillclimb",
-      "hyperparameters": {"prefill_weight": 0.20, "load_weight": 0.01, "rtt_weight": 2000.0},
-      "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "online-es", "objective_metric": "neg_p95_ttft"}
     }
   ],
   "replica_homogeneity_check": {

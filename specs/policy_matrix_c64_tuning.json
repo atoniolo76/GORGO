@@ -1,5 +1,5 @@
 {
-  "_note": "GLM5 c=64 tuning window. 3-parameter model (rtt_weight, prefill_weight, load_weight). Starters chosen so cache:queue:RTT score contributions are ~2:1:1 at typical c=64 inter-replica diffs (9k uncached tokens, 100k queue tokens, 440ms RTT). gorgo-autotune uses rtt_weight=1.0 because fit mode produces physical s/token rates (~1e-4) and higher rtt_weight would drown out cache/queue. Pair with manifest_glm5_apr2_0030_0100.json. Freeze learned params into gorgo-static in the c=64 eval spec.",
+  "_note": "GLM5 c=64 tuning window. 3-parameter model (rtt_weight, prefill_weight, load_weight). Starters chosen so cache:queue:RTT score contributions are ~2:1:1 at typical c=64 inter-replica diffs (9k uncached tokens, 100k queue tokens, 440ms RTT). Pair with manifest_glm5_0030_0100.json (same W1 trace as c=32 for direct comparison). Freeze learned params into gorgo-static in the c=64 eval spec.",
   "run_id": "glm5_c64_tuning",
   "trace_path": "",
   "start_delay_seconds": 30,
@@ -16,20 +16,9 @@
     "us-ashburn-1"
   ],
   "policies": [
-    {"name": "random"},
     {"name": "least-request"},
-    {"name": "least-load"},
     {"name": "prefix-cache"},
     {"name": "simple-session-affinity"},
-    {
-      "name": "gorgo", "label": "gorgo-static",
-      "hyperparameters": {"prefill_weight": 0.20, "load_weight": 0.01, "rtt_weight": 2000.0}
-    },
-    {
-      "name": "gorgo", "label": "gorgo-autotune",
-      "hyperparameters": {"prefill_weight": 0.20, "load_weight": 0.01, "rtt_weight": 1.0},
-      "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "fit"}
-    },
     {
       "name": "gorgo", "label": "gorgo-hillclimb",
       "hyperparameters": {"prefill_weight": 0.20, "load_weight": 0.01, "rtt_weight": 2000.0},

@@ -2432,6 +2432,16 @@ def proxy(registry_key: str = ""):
                             sum(tuner._recent) / len(tuner._recent) if tuner._recent else None
                         ),
                         "objective_metric": metric,
+                        "rechenberg": {
+                            "recent_outcomes": list(tuner._recent),
+                            "success_window": tuner.success_window,
+                            "target_rate": tuner.target_rate,
+                            "sigma_decay": tuner.sigma_decay,
+                            "sigma_min": tuner.sigma_min,
+                            "evaluated_after_baseline": tuner.evaluated_after_baseline,
+                            "max_steps": tuner.max_steps,
+                            "tol": tuner.tol,
+                        },
                     },
                 )
                 _log(
@@ -2477,6 +2487,16 @@ def proxy(registry_key: str = ""):
                         sum(tuner._recent) / len(tuner._recent) if tuner._recent else None
                     ),
                     "objective_metric": metric,
+                    "rechenberg": {
+                        "recent_outcomes": list(tuner._recent),
+                        "success_window": tuner.success_window,
+                        "target_rate": tuner.target_rate,
+                        "sigma_decay": tuner.sigma_decay,
+                        "sigma_min": tuner.sigma_min,
+                        "evaluated_after_baseline": tuner.evaluated_after_baseline,
+                        "max_steps": tuner.max_steps,
+                        "tol": tuner.tol,
+                    },
                 },
             )
             _log(
