@@ -59,10 +59,18 @@ class RouteDecision(NamedTuple):
     The proxy concatenates these onto the configured policy name when
     writing the trace's ``effective_policy`` field, e.g.
     ``"random-fallback:internal:least-request:empty-candidates"``.
+
+    ``scores`` is an optional per-replica cost-model output dict
+    (``{replica_url: float}``). Only populated by policies that compute
+    explicit scores (currently just GORGO). Other policies leave it as
+    ``None``. Used by the proxy to write ``candidate_scores`` into the
+    request trace event so post-hoc analysis can explain *why* a target
+    was chosen without re-running the policy.
     """
 
     target: str
     fallback_reason: str | None = None
+    scores: dict[str, float] | None = None
 
 
 def normalize_policy(name: str) -> str:

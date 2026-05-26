@@ -629,6 +629,9 @@ async def _send_one(
     request_id: str | None = None,
     scheduled_delay_ms: float | None = None,
     sent_delay_ms: float | None = None,
+    trace_row_index: int | None = None,
+    source_row_id: str | None = None,
+    source_row_hash: str | None = None,
 ) -> dict:
     """Send one chat-completions request and capture streaming-aware timings.
 
@@ -644,15 +647,28 @@ async def _send_one(
     output_tokens = 0
     usage_prompt_tokens: int | None = None
     usage_completion_tokens: int | None = None
+    scheduling_slip_ms = (
+        (sent_delay_ms - scheduled_delay_ms)
+        if sent_delay_ms is not None and scheduled_delay_ms is not None
+        else None
+    )
     try:
+        hdrs: dict[str, str] = {"accept-encoding": "identity"}
+        if request_id:
+            hdrs["x-gorgo-request-id"] = request_id
+        if trace_row_index is not None:
+            hdrs["x-gorgo-trace-row-index"] = str(trace_row_index)
+        if scheduling_slip_ms is not None:
+            hdrs["x-gorgo-scheduling-slip-ms"] = f"{scheduling_slip_ms:.2f}"
+        if source_row_id:
+            hdrs["x-gorgo-source-row-id"] = source_row_id
+        if source_row_hash:
+            hdrs["x-gorgo-source-row-hash"] = source_row_hash
         async with client.stream(
             "POST",
             "/v1/chat/completions",
             json=body,
-            headers={
-                "accept-encoding": "identity",
-                **({"x-gorgo-request-id": request_id} if request_id else {}),
-            },
+            headers=hdrs,
         ) as resp:
             is_sse = resp.headers.get("content-type", "").startswith("text/event-stream")
             if not is_sse:
@@ -1032,13 +1048,25 @@ async def run_replay_async(
                 item = await queue.get()
                 if item is None:
                     return
-                _, body, request_id, scheduled_delay_ms, sent_delay_ms = item
+                (
+                    _,
+                    body,
+                    request_id,
+                    scheduled_delay_ms,
+                    sent_delay_ms,
+                    trace_row_index,
+                    source_row_id,
+                    source_row_hash,
+                ) = item
                 res = await _send_one(
                     client,
                     body,
                     request_id=request_id,
                     scheduled_delay_ms=scheduled_delay_ms,
                     sent_delay_ms=sent_delay_ms,
+                    trace_row_index=trace_row_index,
+                    source_row_id=source_row_id,
+                    source_row_hash=source_row_hash,
                 )
                 results.append(res)
                 done += 1
@@ -1099,6 +1127,8 @@ async def run_replay_async(
             ):
                 embedded_request_id = body.pop("_gorgo_request_id", None)
                 raw_delay_ms = body.pop("_gorgo_scheduled_delay_ms", None)
+                source_row_id = body.pop("_gorgo_source_row_id", None)
+                source_row_hash = body.pop("_gorgo_source_row_hash", None)
                 scheduled_delay_ms = (
                     float(raw_delay_ms) * time_scale
                     if raw_delay_ms is not None and arrival_mode == "open-loop"
@@ -1110,7 +1140,19 @@ async def run_replay_async(
                         await asyncio.sleep(sleep_for)
                 request_id = embedded_request_id or f"{run_id}-{sent:06d}"
                 sent_delay_ms = (time.perf_counter() - t_start) * 1000.0
-                await queue.put((ts, body, request_id, scheduled_delay_ms, sent_delay_ms))
+                trace_row_index = sent
+                await queue.put(
+                    (
+                        ts,
+                        body,
+                        request_id,
+                        scheduled_delay_ms,
+                        sent_delay_ms,
+                        trace_row_index,
+                        source_row_id,
+                        source_row_hash,
+                    )
+                )
                 sent += 1
                 # Yield periodically so embedded proxy runs don't monopolize
                 # uvicorn's event loop while scanning/filtering large rows.

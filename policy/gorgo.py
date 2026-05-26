@@ -270,8 +270,8 @@ def route_gorgo(ctx: RouteContext) -> RouteDecision:
         rtt = snap.network_rtt if snap.network_rtt > 0.0 else snap.latency
         scores[u] = eff["rtt_weight"] * rtt + prefill_cost + queue_cost
     if not scores:
-        return RouteDecision(route_random(ctx.replica_urls).target, "empty-candidates")
-    return RouteDecision(min(scores, key=scores.get))
+        return RouteDecision(route_random(ctx.replica_urls).target, "empty-candidates", None)
+    return RouteDecision(min(scores, key=scores.get), None, scores)
 
 
 # ---------------------------------------------------------------------------

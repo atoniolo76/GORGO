@@ -1157,10 +1157,10 @@ def proxy(registry_key: str = ""):
 
     # ---------- Routing ----------
 
-    def _select_endpoint(token_ids: list[int]) -> tuple[str, str, str]:
+    def _select_endpoint(token_ids: list[int]) -> tuple[str, str, str, dict[str, float] | None]:
         """Pick an upstream URL using the policy registry in :mod:`policy`.
 
-        Returns ``(target, configured, effective_policy)``.
+        Returns ``(target, configured, effective_policy, scores)``.
 
         * ``configured`` is the policy name read from ``state["policy"]``
           atomically at the start of the call. The caller writes this
@@ -1198,10 +1198,7 @@ def proxy(registry_key: str = ""):
         if not replica_urls:
             raise ValueError("no replicas configured")
         if len(replica_urls) == 1:
-            # Tag explicitly so post-hoc analysis can spot single-replica
-            # runs that snuck into a multi-replica comparison instead of
-            # silently treating them as if the policy had picked.
-            return replica_urls[0], configured, "single-replica"
+            return replica_urls[0], configured, "single-replica", None
 
         pdef: PolicyDef = POLICY_REGISTRY[normalize_policy(configured)]
 
@@ -1220,6 +1217,7 @@ def proxy(registry_key: str = ""):
                     random.choice(replica_urls),
                     configured,
                     "random-fallback:missing-metrics",
+                    None,
                 )
         else:
             metrics = {}
@@ -1241,8 +1239,9 @@ def proxy(registry_key: str = ""):
                 decision.target,
                 configured,
                 f"random-fallback:internal:{configured}:{decision.fallback_reason}",
+                decision.scores,
             )
-        return decision.target, configured, configured
+        return decision.target, configured, configured, decision.scores
 
     # ---------- JSON route handlers ----------
     #
@@ -2550,6 +2549,12 @@ def proxy(registry_key: str = ""):
             k.decode("latin1").lower(): v.decode("latin1") for k, v in (scope.get("headers") or [])
         }
         request_id = headers.get("x-gorgo-request-id") or f"proxy-{uuid.uuid4().hex}"
+        raw_trace_row = headers.get("x-gorgo-trace-row-index")
+        trace_row_index = int(raw_trace_row) if raw_trace_row else None
+        raw_slip = headers.get("x-gorgo-scheduling-slip-ms")
+        scheduling_slip_ms = float(raw_slip) if raw_slip else None
+        source_row_id = headers.get("x-gorgo-source-row-id")
+        source_row_hash = headers.get("x-gorgo-source-row-hash")
         try:
             data = await _read_json_body(receive)
         except json.JSONDecodeError:
@@ -2598,8 +2603,11 @@ def proxy(registry_key: str = ""):
                     "cached_prefix_tokens": cached_by_replica.get(u, 0),
                 }
 
+        candidate_scores = None
         try:
-            target, configured_policy, effective_policy = _select_endpoint(token_ids)
+            target, configured_policy, effective_policy, candidate_scores = _select_endpoint(
+                token_ids
+            )
         except Exception as e:
             configured_policy = state["policy"]
             _log(f"policy {configured_policy!r} failed ({e}); falling back to random")
@@ -2607,12 +2615,6 @@ def proxy(registry_key: str = ""):
                 await _send_json(send, 503, {"error": "no replicas registered"})
                 return
             target = random.choice(replica_urls)
-            # Include the configured policy name in the sentinel so the
-            # same exception class raised from different policies is
-            # distinguishable in the trace (e.g. ``KeyError`` from gorgo
-            # vs prefix-cache). Don't include ``str(e)`` -- exception
-            # messages can carry token ids and would explode group-by
-            # cardinality in downstream analysis.
             effective_policy = f"random-fallback:exception:{configured_policy}:{type(e).__name__}"
 
         # Resolve cached-prefix length for the chosen target. Uses the
@@ -2625,24 +2627,16 @@ def proxy(registry_key: str = ""):
         else:
             cached_for_target = 0
 
+        at = state.get("auto_tune") or {}
         request_trace_event = {
             "kind": "request",
             "trace_id": state["trace"]["trace_id"],
             "request_id": request_id,
+            "trace_row_index": trace_row_index,
+            "source_row_id": source_row_id,
+            "source_row_hash": source_row_hash,
             "wall_ts": decision_wall_ts,
             "monotonic_s": decision_monotonic,
-            # ``policy`` is the configured policy at decision time --
-            # passed back from ``_select_endpoint`` (or captured locally
-            # in the exception path) rather than re-read from
-            # ``state["policy"]`` so a concurrent ``POST /policy``
-            # mid-request can't produce a row whose ``policy`` and
-            # ``effective_policy`` disagree just from a race.
-            # ``effective_policy`` is what actually selected the target:
-            # equal to ``policy`` when the policy fn ran, or
-            # ``random-fallback:<reason>`` / ``single-replica`` when
-            # ``_select_endpoint`` short-circuited. Filter on
-            # ``effective_policy == policy`` to drop fallback rows from
-            # per-policy aggregates.
             "policy": configured_policy,
             "effective_policy": effective_policy,
             "target": target,
@@ -2651,6 +2645,10 @@ def proxy(registry_key: str = ""):
             "metrics_seq_at_decision": metrics_seq_at_decision,
             "metrics_age_seconds": metrics_age_seconds,
             "candidate_snapshot": candidate_snapshot,
+            "candidate_scores": candidate_scores,
+            "hyperparameters_at_decision": dict(state["hyperparameters"].get("defaults") or {}),
+            "tune_step_at_decision": at.get("applied_count"),
+            "scheduling_slip_ms": scheduling_slip_ms,
             "status": None,
             "ttft_ns": None,
             "total_ns": None,
