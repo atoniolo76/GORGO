@@ -1,5 +1,5 @@
 {
-  "_note": "GLM5 c=64 held-out eval window. gorgo-static deploys the hillclimb-learned parameters from the c=64 tuning window (policy_matrix_c64_tuning.json) without further adjustment. Pair with manifest_glm5_0100_0130.json (same W2 trace as c=32 for direct comparison). REPLACE hyperparameters below with learned values from the c=64 tuning run.",
+  "_note": "GLM5 c=64 held-out eval window. gorgo-static deploys the hillclimb-learned parameters from the c=64 tuning window (policy_matrix_c64_tuning.json) without further adjustment. Pair with manifest_glm5_apr2_0030_0100.json (same time-of-day as tuning, different day -- tests generalization). REPLACE hyperparameters below with learned values from the c=64 tuning run.",
   "run_id": "glm5_c64_eval",
   "trace_path": "",
   "start_delay_seconds": 30,
@@ -11,9 +11,9 @@
   "time_scale": 1.0,
   "poll_interval_seconds": 60,
   "fleet_regions": [
-    "ap-seoul-1",
-    "eu-frankfurt-1",
-    "us-ashburn-1"
+    "malaysiawest",
+    "northeurope",
+    "centralus"
   ],
   "policies": [
     {"name": "least-request"},

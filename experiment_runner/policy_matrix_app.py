@@ -170,6 +170,59 @@ def engine_us_west4(registry_key: str) -> None:
     _serve_model(registry_key)
 
 
+# ---- H100:1 engines (AZR regions for c=64 experiments) ----
+
+_H100_HF_VOLUME = {
+    "/root/.cache/huggingface": modal.Volume.from_name(
+        "Qwen3.5-35B-A3B-FP8-huggingface-cache",
+        create_if_missing=True,
+        environment_name=ENVIRONMENT_NAME,
+    )
+}
+
+
+@app.function(
+    image=sglang_image,
+    timeout=24 * 60 * 60,
+    region="centralus",
+    gpu="H100",
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    max_containers=8,
+    retries=0,
+    volumes=_H100_HF_VOLUME,
+)
+def engine_centralus(registry_key: str) -> None:
+    _serve_model(registry_key)
+
+
+@app.function(
+    image=sglang_image,
+    timeout=24 * 60 * 60,
+    region="northeurope",
+    gpu="H100",
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    max_containers=8,
+    retries=0,
+    volumes=_H100_HF_VOLUME,
+)
+def engine_northeurope(registry_key: str) -> None:
+    _serve_model(registry_key)
+
+
+@app.function(
+    image=sglang_image,
+    timeout=24 * 60 * 60,
+    region="malaysiawest",
+    gpu="H100",
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    max_containers=8,
+    retries=0,
+    volumes=_H100_HF_VOLUME,
+)
+def engine_malaysiawest(registry_key: str) -> None:
+    _serve_model(registry_key)
+
+
 # ---- L40S:2 engines (tp=2; 35B FP8 weights ~35GB so 1xL40S is too tight) ----
 
 _L40S_HF_VOLUME = {
@@ -249,6 +302,9 @@ ENGINE_BY_REGION = {
     "ap-seoul-1": engine_ap_seoul,
     "eu-frankfurt-1": engine_eu_frankfurt,
     "us-ashburn-1": engine_us_ashburn,
+    "centralus": engine_centralus,
+    "northeurope": engine_northeurope,
+    "malaysiawest": engine_malaysiawest,
 }
 
 # ---------- Fleet GPU configuration ----------
@@ -264,6 +320,9 @@ GPU_BY_REGION = {
     "ap-seoul-1": FLEET_GPU,
     "eu-frankfurt-1": FLEET_GPU,
     "us-ashburn-1": FLEET_GPU,
+    "centralus": "H100",
+    "northeurope": "H100",
+    "malaysiawest": "H100",
 }
 
 TERMINAL_WORKLOAD_STATUS = {"succeeded", "failed", "cancelled"}
@@ -1327,6 +1386,30 @@ async def _run_policy_matrix_experiment(
     )
     fleet_manifest["homogeneity_check"] = homogeneity_report
 
+    # Write run manifest once the fleet is fully provisioned and validated.
+    # Updated again after workloads complete with result paths and timing.
+    fleet_ready_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    run_manifest_path = Path(output_dir) / "run_manifest.json"
+    run_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    run_manifest = {
+        "schema_version": "2.0",
+        "status": "running",
+        "output_dir": output_dir,
+        "environment": environment,
+        "timing": {
+            "started_utc": experiment_started_utc,
+            "fleet_ready_utc": fleet_ready_utc,
+            "completed_utc": None,
+        },
+        "spec": base_spec,
+        "manifest": sweep_manifest,
+        "fleet": fleet_manifest,
+        "results": None,
+    }
+    run_manifest_path.write_text(json.dumps(run_manifest, indent=2))
+    bench_results_volume.commit()
+    print(f"[manifest] run_manifest.json written (status=running)", flush=True)
+
     matrix = await _run_sweep_matrix(
         base_spec=launched_spec,
         sweep_manifest=sweep_manifest,
@@ -1335,31 +1418,30 @@ async def _run_policy_matrix_experiment(
         output_dir=Path(output_dir),
     )
 
+    # Update the manifest with completion status and result paths.
     experiment_completed_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-    result = {
-        "schema_version": "2.0",
-        "output_dir": output_dir,
-        "environment": environment,
-        "timing": {
-            "started_utc": experiment_started_utc,
-            "completed_utc": experiment_completed_utc,
-        },
-        "spec": base_spec,
-        "manifest": sweep_manifest,
-        "fleet": fleet_manifest,
-        "matrix": matrix,
+    run_manifest["status"] = "completed"
+    run_manifest["timing"]["completed_utc"] = experiment_completed_utc
+    run_manifest["results"] = {
+        "sweep_matrix_path": matrix.get("aggregate_manifest_path"),
+        "policies": [
+            {
+                "label": r.get("label"),
+                "workload_output_path": (r.get("workload") or {})
+                .get("config", {})
+                .get("output_path"),
+                "trace_id": r.get("trace_id"),
+            }
+            for result in matrix.get("results") or []
+            for r in (result.get("manifest", {}).get("results") or [])
+            if isinstance(r, dict) and not r.get("error")
+        ],
     }
-
-    # Persist the full run manifest to the volume so it survives alongside
-    # the sweep matrix. The local_entrypoint prints it to stdout, but that
-    # can be lost if the operator doesn't capture it.
-    run_manifest_path = Path(output_dir) / "run_manifest.json"
-    run_manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    run_manifest_path.write_text(json.dumps(result, indent=2))
+    run_manifest_path.write_text(json.dumps(run_manifest, indent=2))
     bench_results_volume.commit()
+    print(f"[manifest] run_manifest.json updated (status=completed)", flush=True)
 
-    return result
+    return run_manifest
 
 
 @app.local_entrypoint()
