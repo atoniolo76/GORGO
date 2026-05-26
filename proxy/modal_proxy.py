@@ -120,8 +120,9 @@ FLUSH_UPSTREAM_TIMEOUT_SECONDS = 120.0
 
 
 HYPERPARAM_RANGES: dict[str, tuple[float, float]] = {
-    "t_prefill": (1e-5, 1.0),
-    "queued_tokens_weight": (1e-5, 1.0),
+    "prefill_weight": (1e-5, 5.0),
+    "load_weight": (1e-5, 5.0),
+    "rtt_weight": (1e-5, 10000.0),
 }
 
 
@@ -527,13 +528,13 @@ def proxy(registry_key: str = ""):
             #                  direct physical interpretation and the
             #                  uncached-token correction (Option A) is in
             #                  place.
-            #   "online-es" -- treat (t_prefill, queued_tokens_weight) as
+            #   "online-es" -- treat (prefill_weight, load_weight) as
             #                  abstract knobs and use Gaussian-(1+1)-ES to
             #                  minimize the configured ``objective_metric``
             #                  (default ``neg_p95_ttft``) over the rolling
             #                  window. Defaults-only (per-target stays
             #                  empty); the ES doesn't fan out to per-replica
-            #                  to keep the search space 2D.
+            #                  to keep the search space low-dimensional.
             "mode": "fit",
             "objective_metric": "neg_p95_ttft",
             "online_tuner": None,
@@ -1419,7 +1420,7 @@ def proxy(registry_key: str = ""):
         Two body shapes are accepted, both validated by
         ``policy.gorgo.validate_update``:
 
-        * **Flat** -- ``{"t_prefill": X, "queued_tokens_weight": Y}``
+        * **Flat** -- ``{"prefill_weight": X, "load_weight": Y}``
           updates ``defaults`` only (backward-compat: this is what
           ``proxy/tuning.py`` and ``proxy/calibrate.py`` POST).
         * **Structured** -- ``{"defaults": {...}, "per_target": {url:
@@ -1536,7 +1537,7 @@ def proxy(registry_key: str = ""):
         """Toggle / reconfigure the on-the-fly auto-tuner.
 
         The auto-tuner is *stateful*: once enabled it keeps
-        recomputing ``t_prefill`` / ``queued_tokens_weight`` every
+        recomputing ``prefill_weight`` / ``load_weight`` every
         ``hop_size`` new samples (after the first ``window_size``
         samples have buffered to fill the window) until disabled.
         Each ``POST /tune`` atomically merges the body into the live
@@ -1804,13 +1805,13 @@ def proxy(registry_key: str = ""):
         algorithm = _parse_optional_str(data, "algorithm", "gaussian-es")
         ranges = validated_ranges(
             {
-                "t_prefill": (
-                    _parse_float(data, "t_prefill_min", 1e-5),
-                    _parse_float(data, "t_prefill_max", 1.0),
+                "prefill_weight": (
+                    _parse_float(data, "prefill_weight_min", 1e-5),
+                    _parse_float(data, "prefill_weight_max", 1.0),
                 ),
-                "queued_tokens_weight": (
-                    _parse_float(data, "queued_tokens_weight_min", 1e-5),
-                    _parse_float(data, "queued_tokens_weight_max", 1.0),
+                "load_weight": (
+                    _parse_float(data, "load_weight_min", 1e-5),
+                    _parse_float(data, "load_weight_max", 1.0),
                 ),
             }
         )
@@ -2365,7 +2366,7 @@ def proxy(registry_key: str = ""):
             # of the run happens to have landed first.
             return
         if normalize_policy(state["policy"]) != "gorgo":
-            # Auto-tune only writes ``t_prefill`` / ``queued_tokens_weight``;
+            # Auto-tune only writes ``prefill_weight`` / ``load_weight``;
             # under any other policy the writes are inert. Skip the work
             # and keep the counter pinned so a switch back to gorgo
             # immediately resumes recomputing on the next sample.
@@ -2377,11 +2378,11 @@ def proxy(registry_key: str = ""):
 
         if mode == "online-es":
             # ----- Option B: empirical hyperparameter search -----
-            # Treat (t_prefill, queued_tokens_weight) as abstract knobs
+            # Treat (prefill_weight, load_weight) as abstract knobs
             # and use Gaussian (1+1)-ES to minimize the configured
             # objective metric over the rolling window. Per-target stays
             # empty in this mode -- the search space is intentionally
-            # 2D (defaults only) so convergence is fast.
+            # defaults-only so convergence is fast.
             metric = at.get("objective_metric", "neg_p95_ttft")
             score_fn = ONLINE_SCORE_FUNCTIONS.get(metric)
             tuner: GaussianESTuner | None = at.get("online_tuner")

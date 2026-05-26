@@ -33,8 +33,8 @@ def main() -> None:
 
     samples = [e.get("total_samples", i) for i, e in enumerate(events)]
 
-    best_tp = [e["best_params"]["t_prefill"] for e in events]
-    best_qw = [e["best_params"]["queued_tokens_weight"] for e in events]
+    best_tp = [e["best_params"]["prefill_weight"] for e in events]
+    best_qw = [e["best_params"]["load_weight"] for e in events]
 
     # Candidate trajectory: the value that was actually active (being evaluated)
     # at each step. This is the candidate if present, otherwise the incumbent.
@@ -42,11 +42,11 @@ def main() -> None:
     for e in events:
         c = e.get("candidate")
         if c:
-            active_tp.append(c["t_prefill"])
-            active_qw.append(c["queued_tokens_weight"])
+            active_tp.append(c["prefill_weight"])
+            active_qw.append(c["load_weight"])
         else:
-            active_tp.append(e["best_params"]["t_prefill"])
-            active_qw.append(e["best_params"]["queued_tokens_weight"])
+            active_tp.append(e["best_params"]["prefill_weight"])
+            active_qw.append(e["best_params"]["load_weight"])
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
     fig.suptitle(args.title, fontsize=13, fontweight="bold")

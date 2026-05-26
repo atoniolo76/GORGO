@@ -6,12 +6,12 @@ All experiments use 3 × L40S:2 replicas across Seoul, Frankfurt, and US-East re
 
 | Short name | Spec file | Trace | Concurrency | Initial hyperparams | Analysis CSV |
 |---|---|---|---|---|---|
-| **GLM5 W1** | `policy_matrix_abstract_night.json` | Apr 1 00:30–01:00 | 32 | `t_prefill=0.07, qw=0.06` (manual) | `analysis/glm5_w1.csv` |
-| **GLM5 W2** | `policy_matrix_abstract_night_w2.json` | Apr 1 01:00–01:30 | 32 | `t_prefill=0.983, qw=0.000442` (W1 hillclimb-learned) | `analysis/glm5_w2.csv` |
-| **GLM5 Apr2** | `policy_matrix_abstract_night_w2.json` | Apr 2 00:30–01:00 | 32 | `t_prefill=0.983, qw=0.000442` (W1 hillclimb-learned) | `analysis/glm5_apr2.csv` |
-| **GLM5 Stress (night)** | `policy_matrix_abstract_night_stress.json` | Apr 2 00:30–01:00 | 64 | `t_prefill=0.983, qw=0.000442` | `analysis/glm5_stress_night.csv` |
-| **GLM5 Stress (midday)** | `policy_matrix_abstract_night_stress.json` | Apr 1 12:30–13:00 | 64 | `t_prefill=0.983, qw=0.000442` | `analysis/glm5_stress_midday.csv` |
-| **WildChat W1** | `policy_matrix_abstract_night_wildchat.json` | WildChat rows 0–20.5k | 32 | `t_prefill=0.07, qw=0.06` (manual) | `analysis/wildchat_w1.csv` |
+| **GLM5 W1** | `policy_matrix_abstract_night.json` | Apr 1 00:30–01:00 | 32 | `prefill_weight=0.07, qw=0.06` (manual) | `analysis/glm5_w1.csv` |
+| **GLM5 W2** | `policy_matrix_abstract_night_w2.json` | Apr 1 01:00–01:30 | 32 | `prefill_weight=0.983, qw=0.000442` (W1 hillclimb-learned) | `analysis/glm5_w2.csv` |
+| **GLM5 Apr2** | `policy_matrix_abstract_night_w2.json` | Apr 2 00:30–01:00 | 32 | `prefill_weight=0.983, qw=0.000442` (W1 hillclimb-learned) | `analysis/glm5_apr2.csv` |
+| **GLM5 Stress (night)** | `policy_matrix_abstract_night_stress.json` | Apr 2 00:30–01:00 | 64 | `prefill_weight=0.983, qw=0.000442` | `analysis/glm5_stress_night.csv` |
+| **GLM5 Stress (midday)** | `policy_matrix_abstract_night_stress.json` | Apr 1 12:30–13:00 | 64 | `prefill_weight=0.983, qw=0.000442` | `analysis/glm5_stress_midday.csv` |
+| **WildChat W1** | `policy_matrix_abstract_night_wildchat.json` | WildChat rows 0–20.5k | 32 | `prefill_weight=0.07, qw=0.06` (manual) | `analysis/wildchat_w1.csv` |
 
 ## Directory Layout
 
@@ -128,7 +128,7 @@ python3 scripts/plot_tune_convergence.py \
   --out-dir results/analysis \
   --title "GLM5 W1 Hillclimb Convergence"
 
-# Autotune fit convergence (per-replica t_prefill / queued_tokens_weight)
+# Autotune fit convergence (per-replica prefill_weight / load_weight)
 python3 scripts/plot_tune_convergence.py \
   --tune-jsonl results/proxy_traces/<run_id>_gorgo-autotune/tune.jsonl \
   --out-dir results/analysis \

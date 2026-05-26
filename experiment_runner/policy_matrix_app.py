@@ -8,9 +8,11 @@ per benchmark region and select the right one in the controller.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -249,6 +251,15 @@ ENGINE_BY_REGION = {
     "us-ashburn-1": engine_us_ashburn,
 }
 
+GPU_BY_REGION = {
+    "CANADA-2": "H100",
+    "sines-2": "H100",
+    "us-west4": "H100",
+    "ap-seoul-1": "L40S:2",
+    "eu-frankfurt-1": "L40S:2",
+    "us-ashburn-1": "L40S:2",
+}
+
 TERMINAL_WORKLOAD_STATUS = {"succeeded", "failed", "cancelled"}
 
 
@@ -383,6 +394,106 @@ def _homogeneity_config(spec: dict) -> dict:
             f"got {out['prompt_size_tokens']}"
         )
     return out
+
+
+SUPPORTED_SCHEMA_VERSIONS = {"2.0"}
+
+
+def _validate_spec(spec: dict) -> None:
+    """Validate the experiment spec schema version and required fields.
+
+    Raises ``ValueError`` on an unrecognized schema version so old code
+    never silently misinterprets a newer spec format.
+    """
+    version = spec.get("schema_version")
+    if version is None:
+        return
+    if version not in SUPPORTED_SCHEMA_VERSIONS:
+        raise ValueError(
+            f"unsupported spec schema_version={version!r}; "
+            f"supported: {sorted(SUPPORTED_SCHEMA_VERSIONS)}"
+        )
+
+
+def _capture_environment(base_spec: dict, sweep_manifest: dict) -> dict:
+    """Snapshot the runtime environment for reproducibility.
+
+    Called at the start of the experiment. All fields are best-effort;
+    failures (e.g. not in a git repo) produce ``None`` rather than
+    crashing the experiment.
+    """
+
+    def _git(cmd: list[str]) -> str | None:
+        try:
+            return (
+                subprocess.check_output(["git"] + cmd, stderr=subprocess.DEVNULL, timeout=10)
+                .decode()
+                .strip()
+            )
+        except Exception:
+            return None
+
+    fleet_regions = base_spec.get("fleet_regions") or []
+    fleet_gpu_config = {region: GPU_BY_REGION.get(region, "unknown") for region in fleet_regions}
+
+    return {
+        "gorgo_commit": _git(["rev-parse", "HEAD"]),
+        "gorgo_dirty": bool(_git(["status", "--porcelain"])),
+        "gorgo_branch": _git(["rev-parse", "--abbrev-ref", "HEAD"]),
+        "python_version": sys.version,
+        "modal_version": modal.__version__,
+        "sglang_image_tag": sglang_image.tag if hasattr(sglang_image, "tag") else None,
+        "model_repo_id": HF_REPO_ID,
+        "model_revision": MODEL_REVISION,
+        "context_length": CONTEXT_LENGTH,
+        "tensor_parallel_size": N_GPUS,
+        "environment_name": ENVIRONMENT_NAME,
+        "fleet": {
+            "regions": fleet_regions,
+            "gpu_by_region": fleet_gpu_config,
+            "replicas_per_policy": len(fleet_regions),
+            "scaledown_window_seconds": SCALEDOWN_WINDOW_SECONDS,
+        },
+        "spec_hash": hashlib.sha256(json.dumps(base_spec, sort_keys=True).encode()).hexdigest(),
+        "manifest_hash": hashlib.sha256(
+            json.dumps(sweep_manifest, sort_keys=True).encode()
+        ).hexdigest(),
+        "captured_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
+
+def _validate_trace_integrity(sweep_manifest: dict) -> list[str]:
+    """Check SHA-256 checksums declared in the manifest against actual trace files.
+
+    The manifest points at trace JSONL files on a Modal volume (mounted at
+    /data). Each entry can optionally include a ``"sha256"`` field. When
+    present, this function reads the file and verifies the hash matches.
+
+    Returns a list of violation strings. Empty list means all checks passed
+    (or no checksums were declared — fully backwards compatible).
+    """
+    violations: list[str] = []
+    for item in sweep_manifest.get("top") or []:
+        result = item.get("result") or {}
+        path = result.get("output_path")
+        expected_sha = result.get("sha256")
+        if not path or not expected_sha:
+            continue
+        try:
+            h = hashlib.sha256()
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            actual = h.hexdigest()
+            if actual != expected_sha:
+                violations.append(
+                    f"trace {path}: expected sha256={expected_sha[:16]}..., got {actual[:16]}..."
+                )
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            violations.append(f"trace {path}: integrity check error: {e}")
+    return violations
 
 
 # Approximate token count of one repetition of ``_PROBE_FILLER_BASE``
@@ -872,7 +983,7 @@ async def _wait_for_workload(
         await asyncio.sleep(poll_interval)
 
 
-def _auto_tune_payload(policy_spec: dict) -> dict | None:
+def _auto_tune_payload(policy_spec: dict, *, global_seed: int | None = None) -> dict | None:
     auto = policy_spec.get("auto_tune")
     if not auto:
         return None
@@ -890,6 +1001,11 @@ def _auto_tune_payload(policy_spec: dict) -> dict | None:
         payload["mode"] = str(auto["mode"])
     if "objective_metric" in auto:
         payload["objective_metric"] = str(auto["objective_metric"])
+    # Propagate seed for reproducible online-ES perturbations.
+    # Per-policy auto_tune.seed overrides the global spec seed.
+    seed = auto.get("seed", global_seed)
+    if seed is not None:
+        payload["seed"] = int(seed)
     return payload
 
 
@@ -909,7 +1025,8 @@ async def _run_one_policy(global_spec: dict, policy_spec: dict) -> dict:
     if policy_spec.get("hyperparameters"):
         await _post_json(url, "/hyperparameters", policy_spec["hyperparameters"])
     await _post_json(url, "/flush", {})
-    auto_tune_config = _auto_tune_payload(policy_spec)
+    global_seed = global_spec.get("seed")
+    auto_tune_config = _auto_tune_payload(policy_spec, global_seed=global_seed)
     if auto_tune_config:
         await _post_json(url, "/tune", auto_tune_config)
     metrics_ready = await _wait_for_proxy_metrics(
@@ -1097,6 +1214,7 @@ def run_policy_matrix_experiment(
     output_dir: str = "/results/policy_matrix_sweep/moon_neurips_one_trace",
     engine_timeout_s: float = 45 * 60,
     proxy_timeout_s: float = 10 * 60,
+    environment: dict | None = None,
 ) -> dict:
     return asyncio.run(
         _run_policy_matrix_experiment(
@@ -1108,6 +1226,7 @@ def run_policy_matrix_experiment(
             output_dir=output_dir,
             engine_timeout_s=engine_timeout_s,
             proxy_timeout_s=proxy_timeout_s,
+            environment=environment,
         )
     )
 
@@ -1122,7 +1241,19 @@ async def _run_policy_matrix_experiment(
     output_dir: str,
     engine_timeout_s: float,
     proxy_timeout_s: float,
+    environment: dict | None = None,
 ) -> dict:
+    # Validate trace integrity if SHA-256 checksums are declared in the manifest.
+    # Runs inside the Modal container where the volume is mounted, so trace
+    # files at /data/... are accessible.
+    integrity_violations = _validate_trace_integrity(sweep_manifest)
+    if integrity_violations:
+        for v in integrity_violations:
+            print(f"[integrity][ERROR] {v}", flush=True)
+        raise RuntimeError("trace integrity check failed: " + "; ".join(integrity_violations))
+
+    experiment_started_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
     policies = base_spec["policies"]
     regions = base_spec.get("fleet_regions") or ["CANADA-2", "sines-2", "us-west4"]
     output_dir = _unique_output_dir(output_dir, experiment_id)
@@ -1197,7 +1328,32 @@ async def _run_policy_matrix_experiment(
         top_k=top_k,
         output_dir=Path(output_dir),
     )
-    return {"output_dir": output_dir, "fleet": fleet_manifest, "matrix": matrix}
+
+    experiment_completed_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    result = {
+        "schema_version": "2.0",
+        "output_dir": output_dir,
+        "environment": environment,
+        "timing": {
+            "started_utc": experiment_started_utc,
+            "completed_utc": experiment_completed_utc,
+        },
+        "spec": base_spec,
+        "manifest": sweep_manifest,
+        "fleet": fleet_manifest,
+        "matrix": matrix,
+    }
+
+    # Persist the full run manifest to the volume so it survives alongside
+    # the sweep matrix. The local_entrypoint prints it to stdout, but that
+    # can be lost if the operator doesn't capture it.
+    run_manifest_path = Path(output_dir) / "run_manifest.json"
+    run_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    run_manifest_path.write_text(json.dumps(result, indent=2))
+    bench_results_volume.commit()
+
+    return result
 
 
 @app.local_entrypoint()
@@ -1211,6 +1367,14 @@ def main(
 ):
     base_spec = json.loads(Path(base_spec_path).read_text())
     sweep_manifest = json.loads(Path(sweep_manifest_path).read_text())
+
+    _validate_spec(base_spec)
+
+    environment = _capture_environment(base_spec, sweep_manifest)
+    print(f"[env] commit={environment['gorgo_commit']}", flush=True)
+    if environment.get("gorgo_dirty"):
+        print("[env][warn] working tree has uncommitted changes", flush=True)
+
     result = run_policy_matrix_experiment.remote(
         base_spec,
         sweep_manifest,
@@ -1218,5 +1382,6 @@ def main(
         start_index=start_index,
         top_k=top_k,
         output_dir=output_dir,
+        environment=environment,
     )
     print(json.dumps(result, indent=2))

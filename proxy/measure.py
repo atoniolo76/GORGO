@@ -7,10 +7,10 @@ specific plumbing. Collectively they implement the GORGO calibration
 contract::
 
     score(replica) = latency
-                   + t_prefill            * effective_prefill_tokens
-                   + queued_tokens_weight * (queued + used_tokens)
+                   + prefill_weight            * effective_prefill_tokens
+                   + load_weight * (queued + used_tokens)
 
-where ``t_prefill`` and ``queued_tokens_weight`` both have units of
+where ``prefill_weight`` and ``load_weight`` both have units of
 seconds-per-token, measured directly from a single replica.
 
 Building blocks::
@@ -39,7 +39,7 @@ Building blocks::
 
     compute_stats / percentile / ols_fit / recommend_hyperparameters
         Reduce a list of samples to summary stats and recommended
-        ``t_prefill`` / ``queued_tokens_weight`` values.
+        ``prefill_weight`` / ``load_weight`` values.
 """
 
 from __future__ import annotations
@@ -238,7 +238,7 @@ async def flush_replica_cache(
     Returns whether the upstream responded with a 2xx. Used between
     calibration samples so each probe starts from a clean RadixAttention
     cache (otherwise consecutive prompts that share a prefix would let the
-    second one skip prefill, biasing ``t_prefill`` downward).
+    second one skip prefill, biasing ``prefill_weight`` downward).
     """
     try:
         r = await client.post("/flush_cache", timeout=timeout)
@@ -318,10 +318,10 @@ def recommend_hyperparameters(samples: list[dict]) -> dict:
     """Median-of-rates recommendation for the GORGO scoring weights,
     pooled across whatever replicas produced ``samples``.
 
-    Both ``t_prefill`` and ``queued_tokens_weight`` have units of
+    Both ``prefill_weight`` and ``load_weight`` have units of
     seconds-per-token in the scoring function, so we report the median
-    per-sample rate (robust to outliers) for each. ``t_prefill`` is the
-    median prefill rate; ``queued_tokens_weight`` is the median decode
+    per-sample rate (robust to outliers) for each. ``prefill_weight`` is the
+    median prefill rate; ``load_weight`` is the median decode
     rate, since queued / used tokens drain at the decode rate.
 
     Pooled output is the right answer for *defaults* (offline
@@ -330,12 +330,12 @@ def recommend_hyperparameters(samples: list[dict]) -> dict:
     traffic, see :func:`recommend_hyperparameters_per_target`.
     """
     if not samples:
-        return {"t_prefill": 0.0, "queued_tokens_weight": 0.0}
+        return {"prefill_weight": 0.0, "load_weight": 0.0}
     prefill_sorted = sorted(s["prefill_rate_seconds_per_token"] for s in samples)
     decode_sorted = sorted(s["decode_rate_seconds_per_token"] for s in samples)
     return {
-        "t_prefill": prefill_sorted[len(prefill_sorted) // 2],
-        "queued_tokens_weight": decode_sorted[len(decode_sorted) // 2],
+        "prefill_weight": prefill_sorted[len(prefill_sorted) // 2],
+        "load_weight": decode_sorted[len(decode_sorted) // 2],
     }
 
 
@@ -351,8 +351,8 @@ def recommend_hyperparameters_per_target(
     :mod:`policy.gorgo`'s hyperparameter store::
 
         {
-            "defaults":   {"t_prefill": ..., "queued_tokens_weight": ...},
-            "per_target": {<url>: {"t_prefill": ..., "queued_tokens_weight": ...}, ...}
+            "defaults":   {"prefill_weight": ..., "load_weight": ...},
+            "per_target": {<url>: {"prefill_weight": ..., "load_weight": ...}, ...}
         }
 
     Targets with fewer than ``min_samples_per_target`` observations

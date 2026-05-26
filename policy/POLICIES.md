@@ -64,18 +64,18 @@ Optimizes for fair resource distribution across replicas rather than minimizing 
 All GORGO variants use the same additive cost model and pick the replica with the minimum score:
 
 ```
-score(replica) = network_rtt
-               + t_prefill × (input_tokens − cached_prefix_tokens)
-               + queued_tokens_weight × (queued_tokens + used_kv_tokens)
+score(replica) = rtt_weight × network_rtt
+               + prefill_weight × (input_tokens − cached_prefix_tokens)
+               + load_weight × (queued_tokens + used_kv_tokens)
 ```
 
 | Term | What it captures | Source |
 | --- | --- | --- |
-| `network_rtt` | Irreducible round-trip to the replica | EWMA of a dedicated `GET /` probe, isolated from `/metrics` handler load |
-| `t_prefill × uncached_tokens` | Estimated prefill time for the tokens NOT already in the replica's KV cache | Radix trie lookup at routing time; `t_prefill` is a per-token rate |
-| `queued_tokens_weight × load` | Cost of waiting behind other requests | Proxy-side in-flight token counter + SGLang's `num_used_tokens` |
+| `rtt_weight × network_rtt` | Weighted round-trip to the replica | EWMA of a dedicated `GET /` probe, isolated from `/metrics` handler load |
+| `prefill_weight × uncached_tokens` | Estimated prefill time for the tokens NOT already in the replica's KV cache | Radix trie lookup at routing time; `prefill_weight` is a per-token rate |
+| `load_weight × load` | Cost of waiting behind other requests | Proxy-side in-flight token counter + SGLang's `num_used_tokens` |
 
-The three variants differ only in how `t_prefill` and `queued_tokens_weight` are set:
+The three variants differ only in how `rtt_weight`, `prefill_weight`, and `load_weight` are set:
 
 ### `gorgo-static`
 
@@ -83,11 +83,11 @@ Fixed hyperparameters (set in the spec, never changed during the run). Tests the
 
 ### `gorgo-autotune`
 
-**Fit mode.** Every 16 new request samples, recomputes `t_prefill` and `queued_tokens_weight` per replica by taking the median of observed `(TTFT − RTT) / uncached_tokens` rates over the last 64 samples. Adapts to per-replica hardware/RTT differences automatically.
+**Fit mode.** Every 16 new request samples, recomputes `prefill_weight` and `load_weight` per replica by taking the median of observed `(TTFT − RTT) / uncached_tokens` rates over the last 64 samples. Adapts to per-replica hardware/RTT differences automatically.
 
 ### `gorgo-hillclimb`
 
-**Online-ES mode.** Gaussian (1+1)-Evolution Strategy with Rechenberg's 1/5 success rule. Directly minimizes `neg_p95_ttft` over the rolling 64-sample window by perturbing `t_prefill` and `queued_tokens_weight` in log-space. Doesn't try to estimate physical rates — just finds whatever values produce the best p95 TTFT.
+**Online-ES mode.** Gaussian (1+1)-Evolution Strategy with Rechenberg's 1/5 success rule. Directly minimizes `neg_p95_ttft` over the rolling 64-sample window by perturbing `rtt_weight`, `prefill_weight`, and `load_weight` in log-space. Doesn't try to estimate physical rates — just finds whatever values produce the best p95 TTFT.
 
 The ES cycle:
 1. Score the current window (p95 TTFT of last 64 requests)

@@ -3,19 +3,19 @@
 The GORGO policy scores each replica by a closed-form cost model and
 picks the minimum::
 
-    score(u) = network_rtt(u)
-             + t_prefill(u)            * effective_prefill_tokens(u)
-             + queued_tokens_weight(u) * (queued_tokens(u) + used_tokens(u))
+    score(u) = rtt_weight(u)             * network_rtt(u)
+             + prefill_weight(u)            * effective_prefill_tokens(u)
+             + load_weight(u) * (queued_tokens(u) + used_tokens(u))
 
 ``network_rtt`` is the EWMA-smoothed RTT of a dedicated lightweight
 probe (``snap.network_rtt`` populated by ``proxy/modal_proxy.py``); when
 the probe hasn't completed yet it falls back to ``snap.latency`` (the
 ``/metrics`` scrape RTT, which is a noisy upper bound on RTT).
 Critically, the same value is subtracted from observed TTFT before
-fitting ``t_prefill`` in ``_record_request_sample``, so the network leg
+fitting ``prefill_weight`` in ``_record_request_sample``, so the network leg
 is accounted for once -- not double-counted, not ignored.
 
-``t_prefill`` and ``queued_tokens_weight`` have units of seconds-per-
+``prefill_weight`` and ``load_weight`` have units of seconds-per-
 token in this scoring function and can be calibrated either offline
 (``proxy/calibrate.py``) or online (``proxy/modal_proxy.py``'s auto-
 tuner via ``POST /tune``).
@@ -24,8 +24,8 @@ This module also owns the *hyperparameter store* shape, since GORGO
 is currently the only policy that reads it::
 
     {
-        "defaults":   {"t_prefill": <float>, "queued_tokens_weight": <float>},
-        "per_target": {<replica_url>: {"t_prefill": ..., "queued_tokens_weight": ...}, ...}
+        "defaults":   {"prefill_weight": <float>, "load_weight": <float>},
+        "per_target": {<replica_url>: {"prefill_weight": ..., "load_weight": ...}, ...}
     }
 
 ``defaults`` applies to every replica; ``per_target`` overrides
@@ -55,8 +55,9 @@ from policy.base import PolicyDef, RouteContext, RouteDecision, route_random
 # overestimate -- the calibrator and the auto-tuner both bias the
 # numbers downward as they collect signal.
 DEFAULT_GORGO_HYPERPARAMETERS: dict[str, float] = {
-    "t_prefill": 1.0,
-    "queued_tokens_weight": 1.0,
+    "prefill_weight": 1.0,
+    "load_weight": 1.0,
+    "rtt_weight": 1.0,
 }
 
 # Allowed keys inside any ``defaults`` / ``per_target.<url>`` map.
@@ -102,7 +103,7 @@ def validate_update(
 
     Two body shapes are accepted:
 
-    1. **Flat** -- ``{"t_prefill": X, "queued_tokens_weight": Y}``.
+    1. **Flat** -- ``{"prefill_weight": X, "load_weight": Y}``.
        Keys are written to ``defaults`` only. This is the original
        shape and remains the path that ``proxy/tuning.py`` /
        ``proxy/calibrate.py`` POST.
@@ -257,17 +258,17 @@ def route_gorgo(ctx: RouteContext) -> RouteDecision:
         eff = effective_hyperparameters(ctx.hyperparameters, u)
         cached = endpoints_cached_tokens.get(u, 0)
         effective_prefill = max(0, ctx.request_tokens - cached)
-        prefill_cost = effective_prefill * eff["t_prefill"]
+        prefill_cost = effective_prefill * eff["prefill_weight"]
         queue_cost = (ctx.endpoints_queued_tokens.get(u, 0) + snap.num_used_tokens) * eff[
-            "queued_tokens_weight"
+            "load_weight"
         ]
         # Use the dedicated lightweight RTT probe when available; fall back
         # to scrape latency for cold-start (no probe completed yet). Same
         # source as ``_record_request_sample``'s subtraction so the network
         # leg is accounted for symmetrically: subtract once when fitting
-        # ``t_prefill``, add back once when scoring routes.
+        # ``prefill_weight``, add back once when scoring routes.
         rtt = snap.network_rtt if snap.network_rtt > 0.0 else snap.latency
-        scores[u] = rtt + prefill_cost + queue_cost
+        scores[u] = eff["rtt_weight"] * rtt + prefill_cost + queue_cost
     if not scores:
         return RouteDecision(route_random(ctx.replica_urls).target, "empty-candidates")
     return RouteDecision(min(scores, key=scores.get))

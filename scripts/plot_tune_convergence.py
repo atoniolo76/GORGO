@@ -2,7 +2,7 @@
 
 Shows how gorgo-hillclimb (online-ES) and gorgo-autotune (fit) evolve
 their hyperparameters over time:
-  1. t_prefill and queued_tokens_weight trajectories
+  1. prefill_weight and load_weight trajectories
   2. Sigma decay (hillclimb only)
   3. Score / best_score evolution (hillclimb only)
   4. Acceptance rate (hillclimb only)
@@ -50,10 +50,10 @@ def _plot_hillclimb(events: list[dict], title: str, out_dir: Path) -> None:
     fig.suptitle(title, fontsize=14, fontweight="bold")
 
     ax = axes[0, 0]
-    t_prefill_best = [e["best_params"]["t_prefill"] for e in events]
-    qw_best = [e["best_params"]["queued_tokens_weight"] for e in events]
-    ax.plot(samples, t_prefill_best, label="t_prefill (best)", color="tab:blue")
-    ax.plot(samples, qw_best, label="queued_tokens_weight (best)", color="tab:orange")
+    prefill_weight_best = [e["best_params"]["prefill_weight"] for e in events]
+    qw_best = [e["best_params"]["load_weight"] for e in events]
+    ax.plot(samples, prefill_weight_best, label="prefill_weight (best)", color="tab:blue")
+    ax.plot(samples, qw_best, label="load_weight (best)", color="tab:orange")
     proposals = [
         (e.get("total_samples", i), e["proposal"])
         for i, e in enumerate(events)
@@ -61,8 +61,8 @@ def _plot_hillclimb(events: list[dict], title: str, out_dir: Path) -> None:
     ]
     if proposals:
         prop_x = [p[0] for p in proposals]
-        prop_tp = [p[1]["t_prefill"] for p in proposals]
-        prop_qw = [p[1]["queued_tokens_weight"] for p in proposals]
+        prop_tp = [p[1]["prefill_weight"] for p in proposals]
+        prop_qw = [p[1]["load_weight"] for p in proposals]
         ax.scatter(prop_x, prop_tp, s=8, alpha=0.3, color="tab:blue", zorder=1)
         ax.scatter(prop_x, prop_qw, s=8, alpha=0.3, color="tab:orange", zorder=1)
     ax.set_yscale("log")
@@ -118,10 +118,10 @@ def _plot_fit(events: list[dict], title: str, out_dir: Path) -> None:
     fig.suptitle(title, fontsize=14, fontweight="bold")
 
     ax = axes[0]
-    tp_defaults = [e["defaults"]["t_prefill"] for e in events]
-    qw_defaults = [e["defaults"]["queued_tokens_weight"] for e in events]
-    ax.plot(samples, tp_defaults, label="t_prefill (defaults)", color="tab:blue")
-    ax.plot(samples, qw_defaults, label="queued_tokens_weight (defaults)", color="tab:orange")
+    tp_defaults = [e["defaults"]["prefill_weight"] for e in events]
+    qw_defaults = [e["defaults"]["load_weight"] for e in events]
+    ax.plot(samples, tp_defaults, label="prefill_weight (defaults)", color="tab:blue")
+    ax.plot(samples, qw_defaults, label="load_weight (defaults)", color="tab:orange")
     ax.set_yscale("log")
     ax.set_xlabel("Total samples")
     ax.set_ylabel("Hyperparameter value")
@@ -135,12 +135,12 @@ def _plot_fit(events: list[dict], title: str, out_dir: Path) -> None:
         targets.update(e.get("per_target", {}).keys())
     for i, target in enumerate(sorted(targets)):
         short = target.split("-")[-1][:12] if "-" in target else target[:20]
-        tp = [e.get("per_target", {}).get(target, {}).get("t_prefill", np.nan) for e in events]
-        ax.plot(samples, tp, label=f"t_prefill ({short})", alpha=0.8)
+        tp = [e.get("per_target", {}).get(target, {}).get("prefill_weight", np.nan) for e in events]
+        ax.plot(samples, tp, label=f"prefill_weight ({short})", alpha=0.8)
     ax.set_yscale("log")
     ax.set_xlabel("Total samples")
-    ax.set_ylabel("t_prefill")
-    ax.set_title("Per-Replica t_prefill")
+    ax.set_ylabel("prefill_weight")
+    ax.set_title("Per-Replica prefill_weight")
     if targets:
         ax.legend(fontsize=7)
     ax.grid(True, alpha=0.3)

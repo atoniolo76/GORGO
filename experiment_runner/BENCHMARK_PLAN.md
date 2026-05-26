@@ -37,20 +37,20 @@ All three variants use the same additive cost model:
 
 ```
 score(replica) = network_rtt
-               + t_prefill × (input_tokens − cached_prefix_tokens)
-               + queued_tokens_weight × (queued_tokens + used_tokens)
+               + prefill_weight × (input_tokens − cached_prefix_tokens)
+               + load_weight × (queued_tokens + used_tokens)
 ```
 
 Where:
 - **`network_rtt`** — EWMA-smoothed round-trip time from a dedicated lightweight probe (`GET /` to each replica), isolating pure network latency from SGLang's `/metrics` handler load.
-- **`t_prefill`** — per-uncached-token prefill cost. Fitted against `(TTFT − network_rtt) / uncached_tokens` so the rate represents actual prefill work, not an amortized rate diluted by cache hits.
+- **`prefill_weight`** — per-uncached-token prefill cost. Fitted against `(TTFT − network_rtt) / uncached_tokens` so the rate represents actual prefill work, not an amortized rate diluted by cache hits.
 - **`cached_prefix_tokens`** — looked up from the proxy's local radix trie at routing time.
 - **`queued_tokens`** — proxy-side in-flight token counter, updated on every dispatch/completion.
 
 | Label | Auto-tune | Description |
 | --- | --- | --- |
-| `gorgo-static` | Off | Fixed hyperparameters. On W1 runs, starts from manual values (`t_prefill=0.07`, `queued_tokens_weight=0.06`). On W2 runs, starts from the W1 hillclimb-learned values. Tests the cost model's value independent of online tuning. |
-| `gorgo-autotune` | `fit` mode | Median-of-rates per-target fit. Every 16 new samples, recomputes `t_prefill` and `queued_tokens_weight` per replica from the last 64 observations. Adapts to per-replica RTT and hardware differences. |
+| `gorgo-static` | Off | Fixed hyperparameters. On W1 runs, starts from manual values (`prefill_weight=0.07`, `load_weight=0.06`). On W2 runs, starts from the W1 hillclimb-learned values. Tests the cost model's value independent of online tuning. |
+| `gorgo-autotune` | `fit` mode | Median-of-rates per-target fit. Every 16 new samples, recomputes `prefill_weight` and `load_weight` per replica from the last 64 observations. Adapts to per-replica RTT and hardware differences. |
 | `gorgo-hillclimb` | `online-es` mode | Gaussian (1+1)-Evolution Strategy with Rechenberg's 1/5 success rule. Directly minimizes `neg_p95_ttft` over the rolling 64-sample window by perturbing hyperparameters in log-space. Treats the cost model weights as abstract knobs — no physical interpretation needed. |
 
 ## Datasets

@@ -1,6 +1,8 @@
 {
-  "_note": "Stress test with W1 manual starter hyperparameters (t_prefill=0.07, qw=0.06). Concurrency=64. Tests hillclimb convergence from scratch under high load.",
+  "schema_version": "2.0",
+  "_note": "Stress test with W1 manual starter hyperparameters (prefill_weight=0.07, load_weight=0.06). Concurrency=64. Tests hillclimb convergence from scratch under high load.",
   "run_id": "abstract_night_stress_w1params",
+  "seed": null,
   "trace_path": "",
   "start_delay_seconds": 30,
   "concurrency": 64,
@@ -23,16 +25,16 @@
     {"name": "simple-session-affinity"},
     {
       "name": "gorgo", "label": "gorgo-static",
-      "hyperparameters": {"t_prefill": 0.07, "queued_tokens_weight": 0.06}
+      "hyperparameters": {"prefill_weight": 0.07, "load_weight": 0.06}
     },
     {
       "name": "gorgo", "label": "gorgo-autotune",
-      "hyperparameters": {"t_prefill": 0.07, "queued_tokens_weight": 0.06},
+      "hyperparameters": {"prefill_weight": 0.07, "load_weight": 0.06},
       "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "fit"}
     },
     {
       "name": "gorgo", "label": "gorgo-hillclimb",
-      "hyperparameters": {"t_prefill": 0.07, "queued_tokens_weight": 0.06},
+      "hyperparameters": {"prefill_weight": 0.07, "load_weight": 0.06},
       "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "online-es", "objective_metric": "neg_p95_ttft"}
     }
   ],

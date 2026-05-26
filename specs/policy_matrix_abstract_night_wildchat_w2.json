@@ -1,6 +1,9 @@
 {
+  "schema_version": "2.0",
   "_note": "WildChat W2 (eval window). GORGO variants seeded with W1 hillclimb-learned hyperparameters. Non-contiguous window (rows 100k+) to test generalization.",
   "run_id": "abstract_night_wildchat_w2",
+  "seed": null,
+  "parent_run_id": "abstract_night_wildchat_w1_v2",
   "trace_path": "",
   "start_delay_seconds": 30,
   "concurrency": 32,
@@ -23,16 +26,16 @@
     {"name": "simple-session-affinity"},
     {
       "name": "gorgo", "label": "gorgo-static",
-      "hyperparameters": {"t_prefill": 0.1948386, "queued_tokens_weight": 0.042848}
+      "hyperparameters": {"prefill_weight": 0.1948386, "load_weight": 0.042848}
     },
     {
       "name": "gorgo", "label": "gorgo-autotune",
-      "hyperparameters": {"t_prefill": 0.1948386, "queued_tokens_weight": 0.042848},
+      "hyperparameters": {"prefill_weight": 0.1948386, "load_weight": 0.042848},
       "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "fit"}
     },
     {
       "name": "gorgo", "label": "gorgo-hillclimb",
-      "hyperparameters": {"t_prefill": 0.1948386, "queued_tokens_weight": 0.042848},
+      "hyperparameters": {"prefill_weight": 0.1948386, "load_weight": 0.042848},
       "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "online-es", "objective_metric": "neg_p95_ttft"}
     }
   ],

@@ -16,8 +16,9 @@ from app import app
 
 DEFAULT_MODEL = "Qwen/Qwen3.5-35B-A3B-FP8"
 HYPERPARAM_RANGES: dict[str, tuple[float, float]] = {
-    "t_prefill": (1e-5, 1.0),
-    "queued_tokens_weight": (1e-5, 1.0),
+    "prefill_weight": (1e-5, 5.0),
+    "load_weight": (1e-5, 5.0),
+    "rtt_weight": (1e-5, 10000.0),
 }
 METRIC_CHOICES = [
     "neg_avg_itl",
@@ -64,10 +65,10 @@ def _dispatch_tune(
     seed: int,
     relative_tolerance: float,
     output_dir: str,
-    t_prefill_min: float,
-    t_prefill_max: float,
-    queued_tokens_weight_min: float,
-    queued_tokens_weight_max: float,
+    prefill_weight_min: float,
+    prefill_weight_max: float,
+    load_weight_min: float,
+    load_weight_max: float,
     wait: bool = True,
     poll_interval_seconds: float = 5.0,
 ):
@@ -95,10 +96,10 @@ def _dispatch_tune(
         "seed": seed,
         "relative_tolerance": relative_tolerance,
         "output_dir": output_dir or None,
-        "t_prefill_min": t_prefill_min,
-        "t_prefill_max": t_prefill_max,
-        "queued_tokens_weight_min": queued_tokens_weight_min,
-        "queued_tokens_weight_max": queued_tokens_weight_max,
+        "prefill_weight_min": prefill_weight_min,
+        "prefill_weight_max": prefill_weight_max,
+        "load_weight_min": load_weight_min,
+        "load_weight_max": load_weight_max,
     }
     payload = {k: v for k, v in payload.items() if v is not None}
     with httpx.Client(base_url=base_url, timeout=httpx.Timeout(30.0)) as client:
@@ -248,28 +249,28 @@ _TUNE_TUI_SPEC: list[tuple[str, list[dict]]] = [
         "Hyperparameter search ranges (log-space; lower bound > 0)",
         [
             {
-                "name": "t_prefill_min",
+                "name": "prefill_weight_min",
                 "kind": "float",
-                "default": HYPERPARAM_RANGES["t_prefill"][0],
-                "help": "Lower bound for t_prefill",
+                "default": HYPERPARAM_RANGES["prefill_weight"][0],
+                "help": "Lower bound for prefill_weight",
             },
             {
-                "name": "t_prefill_max",
+                "name": "prefill_weight_max",
                 "kind": "float",
-                "default": HYPERPARAM_RANGES["t_prefill"][1],
-                "help": "Upper bound for t_prefill",
+                "default": HYPERPARAM_RANGES["prefill_weight"][1],
+                "help": "Upper bound for prefill_weight",
             },
             {
-                "name": "queued_tokens_weight_min",
+                "name": "load_weight_min",
                 "kind": "float",
-                "default": HYPERPARAM_RANGES["queued_tokens_weight"][0],
-                "help": "Lower bound for queued_tokens_weight",
+                "default": HYPERPARAM_RANGES["load_weight"][0],
+                "help": "Lower bound for load_weight",
             },
             {
-                "name": "queued_tokens_weight_max",
+                "name": "load_weight_max",
                 "kind": "float",
-                "default": HYPERPARAM_RANGES["queued_tokens_weight"][1],
-                "help": "Upper bound for queued_tokens_weight",
+                "default": HYPERPARAM_RANGES["load_weight"][1],
+                "help": "Upper bound for load_weight",
             },
         ],
     ),
@@ -422,10 +423,10 @@ def tune_cli(
     seed: int = -1,
     relative_tolerance: float = 0.005,
     output_dir: str = "",
-    t_prefill_min: float = HYPERPARAM_RANGES["t_prefill"][0],
-    t_prefill_max: float = HYPERPARAM_RANGES["t_prefill"][1],
-    queued_tokens_weight_min: float = HYPERPARAM_RANGES["queued_tokens_weight"][0],
-    queued_tokens_weight_max: float = HYPERPARAM_RANGES["queued_tokens_weight"][1],
+    prefill_weight_min: float = HYPERPARAM_RANGES["prefill_weight"][0],
+    prefill_weight_max: float = HYPERPARAM_RANGES["prefill_weight"][1],
+    load_weight_min: float = HYPERPARAM_RANGES["load_weight"][0],
+    load_weight_max: float = HYPERPARAM_RANGES["load_weight"][1],
     no_wait: bool = False,
     poll_interval_seconds: float = 5.0,
 ):
@@ -452,10 +453,10 @@ def tune_cli(
         seed=seed,
         relative_tolerance=relative_tolerance,
         output_dir=output_dir,
-        t_prefill_min=t_prefill_min,
-        t_prefill_max=t_prefill_max,
-        queued_tokens_weight_min=queued_tokens_weight_min,
-        queued_tokens_weight_max=queued_tokens_weight_max,
+        prefill_weight_min=prefill_weight_min,
+        prefill_weight_max=prefill_weight_max,
+        load_weight_min=load_weight_min,
+        load_weight_max=load_weight_max,
         wait=not no_wait,
         poll_interval_seconds=poll_interval_seconds,
     )

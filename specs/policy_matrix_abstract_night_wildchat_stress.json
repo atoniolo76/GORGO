@@ -1,6 +1,8 @@
 {
+  "schema_version": "2.0",
   "_note": "WildChat stress test: concurrency=64. Uses W1 hillclimb-learned hyperparameters from WildChat W1.",
   "run_id": "abstract_night_wildchat_stress",
+  "seed": null,
   "trace_path": "",
   "start_delay_seconds": 30,
   "concurrency": 64,
@@ -23,16 +25,16 @@
     {"name": "simple-session-affinity"},
     {
       "name": "gorgo", "label": "gorgo-static",
-      "hyperparameters": {"t_prefill": 0.1948386, "queued_tokens_weight": 0.042848}
+      "hyperparameters": {"prefill_weight": 0.1948386, "load_weight": 0.042848}
     },
     {
       "name": "gorgo", "label": "gorgo-autotune",
-      "hyperparameters": {"t_prefill": 0.1948386, "queued_tokens_weight": 0.042848},
+      "hyperparameters": {"prefill_weight": 0.1948386, "load_weight": 0.042848},
       "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "fit"}
     },
     {
       "name": "gorgo", "label": "gorgo-hillclimb",
-      "hyperparameters": {"t_prefill": 0.1948386, "queued_tokens_weight": 0.042848},
+      "hyperparameters": {"prefill_weight": 0.1948386, "load_weight": 0.042848},
       "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "online-es", "objective_metric": "neg_p95_ttft"}
     }
   ],

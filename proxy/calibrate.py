@@ -1,12 +1,12 @@
 """Calibrate the GORGO policy hyperparameters from a single idle replica.
 
-Produces an *initial estimate* for ``t_prefill`` and
-``queued_tokens_weight`` -- the two knobs in
+Produces an *initial estimate* for ``prefill_weight`` and
+``load_weight`` -- the two knobs in
 ``policy/gorgo.py::route_gorgo``::
 
     score(u) = latency(u)
-             + t_prefill            * effective_prefill_tokens
-             + queued_tokens_weight * (queued + used_tokens)
+             + prefill_weight            * effective_prefill_tokens
+             + load_weight * (queued + used_tokens)
 
 Both knobs have units of *seconds per token*, so we measure them
 directly.
@@ -17,7 +17,7 @@ Per-sample procedure
 1. (Optional) ``POST /flush_cache`` so the next probe starts from a clean
    RadixAttention KV cache. Without this, consecutive prompts that share a
    user-level prefix would let the second one skip prefill, biasing
-   ``t_prefill`` downward.
+   ``prefill_weight`` downward.
 2. Ping the replica ``K`` times back-to-back; take the median RTT
    (filters single-ping jitter without being too costly).
 3. Send one *streaming* chat completion with ``max_tokens=N`` (large),
@@ -37,13 +37,13 @@ Per-sample procedure
 
    so
 
-       t_prefill  ~= (TTFT - ping_rtt)       / prompt_tokens
-       t_decode   ~= (total - TTFT)           / completion_tokens
+       prefill_rate  ~= (TTFT - ping_rtt)       / prompt_tokens
+       decode_rate   ~= (total - TTFT)           / completion_tokens
 
 The script reports per-sample rates plus aggregate statistics (median,
 mean, min, max, p50/p95/p99). The recommended initial values are the
 *medians* (robust to outliers); a linear-regression fit ``y = a + b*x``
-is also reported so you can sanity-check that the slope (= t_prefill) is
+is also reported so you can sanity-check that the slope (= prefill_rate) is
 consistent with the median-of-rates and that the intercept (= fixed
 per-request overhead) is small.
 
@@ -203,7 +203,7 @@ def calibrate(
     model: str | None = DEFAULT_MODEL,
     output_path: str | None = None,
 ) -> dict:
-    """Estimate ``t_prefill`` and ``queued_tokens_weight`` from a single replica.
+    """Estimate ``prefill_weight`` and ``load_weight`` from a single replica.
 
     Args:
         replica_url: Direct URL of the SGLang replica to probe (bypasses
@@ -230,7 +230,7 @@ def calibrate(
             taken. 3 is enough to filter outliers without being slow.
         flush_between_samples: ``POST /flush_cache`` before each probe so
             consecutive prompts that share a prefix can't bias
-            ``t_prefill`` downward via cached KV. Disable only when
+            ``prefill_weight`` downward via cached KV. Disable only when
             measuring intentional prefix-cache speedups.
         model: Override the request body's ``model`` field. ``None``
             leaves the source-row value in place.
@@ -320,8 +320,8 @@ def calibrate(
                     f"ping={sample['ping_seconds'] * 1000:.1f}ms "
                     f"prefill={sample['prefill_seconds']:.3f}s "
                     f"decode={sample['decode_seconds']:.3f}s "
-                    f"t_prefill={sample['prefill_rate_seconds_per_token'] * 1000:.3f}ms/tok "
-                    f"t_decode={sample['decode_rate_seconds_per_token'] * 1000:.3f}ms/tok",
+                    f"prefill_rate={sample['prefill_rate_seconds_per_token'] * 1000:.3f}ms/tok "
+                    f"decode_rate={sample['decode_rate_seconds_per_token'] * 1000:.3f}ms/tok",
                     flush=True,
                 )
 
@@ -365,7 +365,7 @@ def calibrate(
         f"p95={ping['p95']:.4f} (n={ping['n']})"
     )
     print(
-        f"[calibrate] t_prefill (s/tok)   median={pre['median']:.6f} "
+        f"[calibrate] prefill_weight (s/tok)   median={pre['median']:.6f} "
         f"mean={pre['mean']:.6f} p95={pre['p95']:.6f} "
         f"(slope={pre_fit['b']:.6f} intercept={pre_fit['a']:.4f}s "
         f"r2={pre_fit['r2']:.3f})"

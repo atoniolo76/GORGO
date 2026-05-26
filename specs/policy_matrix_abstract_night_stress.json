@@ -1,6 +1,8 @@
 {
+  "schema_version": "2.0",
   "_note": "Stress test: concurrency=64 (2x normal). Same GLM5 trace, same fleet, higher load. Tests whether GORGO's queue-weight term matters under pressure.",
   "run_id": "abstract_night_stress",
+  "seed": null,
   "trace_path": "",
   "start_delay_seconds": 30,
   "concurrency": 64,
@@ -23,16 +25,16 @@
     {"name": "simple-session-affinity"},
     {
       "name": "gorgo", "label": "gorgo-static",
-      "hyperparameters": {"t_prefill": 0.9828605, "queued_tokens_weight": 0.000442}
+      "hyperparameters": {"prefill_weight": 0.9828605, "load_weight": 0.000442}
     },
     {
       "name": "gorgo", "label": "gorgo-autotune",
-      "hyperparameters": {"t_prefill": 0.9828605, "queued_tokens_weight": 0.000442},
+      "hyperparameters": {"prefill_weight": 0.9828605, "load_weight": 0.000442},
       "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "fit"}
     },
     {
       "name": "gorgo", "label": "gorgo-hillclimb",
-      "hyperparameters": {"t_prefill": 0.9828605, "queued_tokens_weight": 0.000442},
+      "hyperparameters": {"prefill_weight": 0.9828605, "load_weight": 0.000442},
       "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "online-es", "objective_metric": "neg_p95_ttft"}
     }
   ],

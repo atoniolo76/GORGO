@@ -1,14 +1,11 @@
 {
-  "schema_version": "2.0",
-  "_note": "Decode length experiment: max_tokens=512 (4x baseline). Same W1 trace, c=64, manual starter params. Tests whether the cost model adapts when decode dominates.",
-  "run_id": "glm5_decode_512",
-  "seed": null,
+  "_note": "GLM5 c=64 tuning window. 3-parameter model (rtt_weight, prefill_weight, load_weight). Starters chosen so cache:queue:RTT score contributions are ~2:1:1 at typical c=64 inter-replica diffs (9k uncached tokens, 100k queue tokens, 440ms RTT). gorgo-autotune uses rtt_weight=1.0 because fit mode produces physical s/token rates (~1e-4) and higher rtt_weight would drown out cache/queue. Pair with manifest_glm5_apr2_0030_0100.json. Freeze learned params into gorgo-static in the c=64 eval spec.",
+  "run_id": "glm5_c64_tuning",
   "trace_path": "",
   "start_delay_seconds": 30,
   "concurrency": 64,
   "stream": true,
-  "max_tokens": 512,
-  "max_experiment_minutes": 30,
+  "max_tokens": 128,
   "max_input_tokens": 24000,
   "arrival_mode": "open-loop",
   "time_scale": 1.0,
@@ -26,16 +23,16 @@
     {"name": "simple-session-affinity"},
     {
       "name": "gorgo", "label": "gorgo-static",
-      "hyperparameters": {"prefill_weight": 0.07, "load_weight": 0.06}
+      "hyperparameters": {"prefill_weight": 0.20, "load_weight": 0.01, "rtt_weight": 2000.0}
     },
     {
       "name": "gorgo", "label": "gorgo-autotune",
-      "hyperparameters": {"prefill_weight": 0.07, "load_weight": 0.06},
+      "hyperparameters": {"prefill_weight": 0.20, "load_weight": 0.01, "rtt_weight": 1.0},
       "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "fit"}
     },
     {
       "name": "gorgo", "label": "gorgo-hillclimb",
-      "hyperparameters": {"prefill_weight": 0.07, "load_weight": 0.06},
+      "hyperparameters": {"prefill_weight": 0.20, "load_weight": 0.01, "rtt_weight": 2000.0},
       "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "online-es", "objective_metric": "neg_p95_ttft"}
     }
   ],

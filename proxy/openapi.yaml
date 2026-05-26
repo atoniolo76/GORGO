@@ -94,7 +94,7 @@ paths:
         Partial update of the structured hyperparameter store. Two body
         shapes are accepted:
 
-        * **Flat** -- `{"t_prefill": X, "queued_tokens_weight": Y}`. Keys
+        * **Flat** -- `{"prefill_weight": X, "load_weight": Y}`. Keys
           are written to the global `defaults` slot. This is the shape
           `proxy/calibrate.py` and `proxy/tuning.py` use.
         * **Structured** -- `{"defaults": {...}, "per_target": {url:
@@ -112,26 +112,26 @@ paths:
             examples:
               tune_prefill:
                 summary: Update one default
-                value: { t_prefill: 0.8 }
+                value: { prefill_weight: 0.8 }
               both_defaults:
                 summary: Update both defaults
-                value: { t_prefill: 0.8, queued_tokens_weight: 1.5 }
+                value: { prefill_weight: 0.8, load_weight: 1.5 }
               defaults_only_explicit:
                 summary: Same as flat, but using the structured slot
-                value: { defaults: { t_prefill: 0.8 } }
+                value: { defaults: { prefill_weight: 0.8 } }
               per_target_only:
                 summary: Override one replica without touching defaults
                 value:
                   per_target:
                     https://r1.modal.run:
-                      t_prefill: 0.0005
+                      prefill_weight: 0.0005
               defaults_and_per_target:
                 summary: Update defaults and add one per-target override
                 value:
-                  defaults: { t_prefill: 0.8, queued_tokens_weight: 1.5 }
+                  defaults: { prefill_weight: 0.8, load_weight: 1.5 }
                   per_target:
                     https://r1.modal.run:
-                      queued_tokens_weight: 0.001
+                      load_weight: 0.001
       responses:
         '200': { $ref: '#/components/responses/HyperparametersUpdated' }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -345,7 +345,7 @@ paths:
         `state["hyperparameters"]`.
 
         Enabling requires `policy: gorgo` (the only policy that
-        consumes `t_prefill` / `queued_tokens_weight`). Disabling works
+        consumes `prefill_weight` / `load_weight`). Disabling works
         regardless of policy so a misconfigured tuner can always be
         turned off.
       requestBody:
@@ -632,7 +632,7 @@ components:
         - `power-of-two`: sample two replicas, route to the one with fewer
           used + queued tokens.
         - `gorgo`: multi-objective score
-          `latency + t_prefill * request_tokens + queued_tokens_weight * (queue + used)`,
+          `latency + prefill_weight * request_tokens + load_weight * (queue + used)`,
           minimized across all replicas.
         - `least-request`, `least-load`, `least-kv-cache`,
           `least-gpu-cache`, `least-latency`, `least-utilization`,
@@ -724,10 +724,10 @@ components:
         missing keys fall through to defaults. Unknown keys are
         rejected with a 400.
       properties:
-        t_prefill:
+        prefill_weight:
           type: number
           description: Coefficient applied to the request's effective prefill token count.
-        queued_tokens_weight:
+        load_weight:
           type: number
           description: Coefficient applied to `(in_flight_queue + num_used_tokens)`.
       additionalProperties: false
@@ -1016,7 +1016,7 @@ components:
               prefill/decode samples. Best when the cost-model parameters
               have a direct physical interpretation. Pairs well with the
               uncached-token correction in `_record_request_sample`.
-            * `online-es`: treat `(t_prefill, queued_tokens_weight)` as
+            * `online-es`: treat `(prefill_weight, load_weight)` as
               abstract knobs and use a Gaussian (1+1)-Evolution Strategy
               to minimize `objective_metric` over the rolling window.
               Updates `defaults` only (per-target stays empty) so the
@@ -1523,10 +1523,10 @@ components:
             seed: { type: integer }
             relative_tolerance: { type: number }
             output_dir: { type: string }
-            t_prefill_min: { type: number }
-            t_prefill_max: { type: number }
-            queued_tokens_weight_min: { type: number }
-            queued_tokens_weight_max: { type: number }
+            prefill_weight_min: { type: number }
+            prefill_weight_max: { type: number }
+            load_weight_min: { type: number }
+            load_weight_max: { type: number }
 
     BatchTuningStatusResponse:
       type: object
