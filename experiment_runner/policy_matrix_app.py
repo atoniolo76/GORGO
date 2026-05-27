@@ -49,7 +49,7 @@ from engine.modal_sglang import (
 
 PROXY_IMAGE = (
     modal.Image.debian_slim()
-    .pip_install("httpx[http2]", "uvicorn", "tiktoken", "pyarrow", "datasets>=3.0")
+    .pip_install("httpx[http2]", "uvicorn", "transformers", "pyarrow", "datasets>=3.0")
     .add_local_python_source("app", "engine", "proxy", "policy", "utils")
 )
 

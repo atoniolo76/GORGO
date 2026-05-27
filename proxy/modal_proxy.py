@@ -72,7 +72,7 @@ _UVICORN_LOG_CONFIG: dict = {
 
 import httpx
 import modal
-import tiktoken
+from transformers import AutoTokenizer
 
 from app import (
     app,
@@ -368,14 +368,18 @@ _HOP_BY_HOP_HEADERS = frozenset(
     }
 )
 
-_ENCODER = None
+_TOKENIZER = None
 
 
-def _get_encoder():
-    global _ENCODER
-    if _ENCODER is None:
-        _ENCODER = tiktoken.encoding_for_model("gpt-4o")
-    return _ENCODER
+def _get_tokenizer():
+    global _TOKENIZER
+    if _TOKENIZER is None:
+        _TOKENIZER = AutoTokenizer.from_pretrained(
+            "Qwen/Qwen3.5-35B-A3B-FP8",
+            revision="0b2752837483aa34b3db6e83e151b150c0e00e49",
+            trust_remote_code=False,
+        )
+    return _TOKENIZER
 
 
 def _message_text(content) -> str:
@@ -404,34 +408,35 @@ def _message_text(content) -> str:
 
 def tokenize_input(messages: list[dict]) -> list[int]:
     """Tokenize an OpenAI chat-completions ``messages`` payload into a flat
-    list of token ids.
+    list of token ids using the model's own tokenizer.
 
-    Each message's text content is encoded individually via tiktoken's
-    batched encoder and the per-message ids are concatenated in order. This
-    isn't an exact match for the server-side count (we ignore per-message
-    formatting tokens and tool-call arguments) but it's directionally
-    correct and cheap enough to run on every request for both routing
-    decisions (``len(ids)``) and prefix-sharing tracking (the ids
-    themselves).
+    Uses ``apply_chat_template`` so the token count matches SGLang's
+    server-side count exactly, including chat-template framing tokens
+    (``<|im_start|>role\\n...``) that a naive per-text encode would miss.
+    Falls back to concatenated per-text encoding if the template raises
+    (e.g. unsupported role), which is still closer than the old tiktoken
+    approximation.
     """
     if not isinstance(messages, list) or not messages:
         return []
-    enc = _get_encoder()
-    texts: list[str] = []
-    for msg in messages:
-        if isinstance(msg, dict):
-            text = _message_text(msg.get("content"))
-            if text:
-                texts.append(text)
-        elif isinstance(msg, str):
-            texts.append(msg)
-    if not texts:
-        return []
-    encoded = enc.encode_batch(texts, num_threads=4, disallowed_special=())
-    out: list[int] = []
-    for ids in encoded:
-        out.extend(ids)
-    return out
+    tok = _get_tokenizer()
+    try:
+        return tok.apply_chat_template(messages, add_generation_prompt=False)
+    except Exception:
+        texts: list[str] = []
+        for msg in messages:
+            if isinstance(msg, dict):
+                text = _message_text(msg.get("content"))
+                if text:
+                    texts.append(text)
+            elif isinstance(msg, str):
+                texts.append(msg)
+        if not texts:
+            return []
+        out: list[int] = []
+        for text in texts:
+            out.extend(tok.encode(text))
+        return out
 
 
 def _parse_metrics_text(text: str) -> dict[str, float]:
@@ -459,7 +464,7 @@ def _parse_metrics_text(text: str) -> dict[str, float]:
 
 @app.function(
     image=modal.Image.debian_slim()
-    .pip_install("httpx[http2]", "uvicorn", "tiktoken", "pyarrow", "datasets>=3.0")
+    .pip_install("httpx[http2]", "uvicorn", "transformers", "pyarrow", "datasets>=3.0")
     .add_local_python_source("app", "proxy", "policy", "utils"),
     region=REGION,
     timeout=(24 * 60 * 60),

@@ -46,12 +46,12 @@ def _log(message: str) -> None:
 # can also contain a zone like 1.
 REGION = os.getenv("REGION", "us-east-1")
 
-# Auto-detected context_length, plus a constant safety margin for chat
-# template tokens / role markers that the gpt-4o tokenizer doesn't see
-# but the model's actual tokenizer does. Empirically ~256 covers
-# ``<|im_start|>role\n`` boundaries on Qwen-style chat templates with
-# room to spare.
-CONTEXT_LENGTH_SAFETY_MARGIN_TOKENS = 256
+# Safety margin between the pre-filter token count and the model's
+# context window. With the model's own tokenizer the count is exact,
+# but apply_chat_template adds framing tokens (~4 per message) that
+# the per-text fallback path doesn't see. 64 tokens covers the worst
+# case for a 20-message conversation.
+CONTEXT_LENGTH_SAFETY_MARGIN_TOKENS = 64
 
 DEFAULT_MODEL = "Qwen/Qwen3.5-35B-A3B-FP8"
 
@@ -61,9 +61,30 @@ DEFAULT_MODEL = "Qwen/Qwen3.5-35B-A3B-FP8"
 # ``conversations`` are fallbacks for other shapes.
 HF_MESSAGE_COLUMNS = ("conversation", "messages", "conversations")
 
-# Roles SGLang's chat-completions endpoint accepts. Anything else is mapped
-# to ``user`` so the request still validates.
+# Roles SGLang's chat-completions endpoint accepts for Qwen chat templates.
 _VALID_ROLES = frozenset({"system", "user", "assistant", "tool", "function"})
+
+
+def _validate_messages(messages: list) -> bool:
+    """Return True if ``messages`` will pass SGLang's chat-template
+    validation. Catches the three failure modes observed in production
+    traces: unsupported roles, misplaced system messages, and missing
+    user content."""
+    if not messages:
+        return False
+    has_user = False
+    for i, msg in enumerate(messages):
+        if not isinstance(msg, dict):
+            return False
+        role = msg.get("role", "")
+        if role not in _VALID_ROLES:
+            return False
+        if role == "system" and i > 0:
+            return False
+        if role == "user":
+            has_user = True
+    return has_user
+
 
 # ``--source`` choices.
 SOURCE_GLM5 = "glm5"
@@ -80,49 +101,52 @@ HF_PRESETS = {
 }
 
 
-_TIKTOKEN_ENCODER = None
+_TOKENIZER = None
 
 
-def _get_encoder():
-    """Cached cl100k tiktoken encoder. Module-level cache so the encoder
-    isn't reinitialized per row during ``_iter_bodies`` filtering."""
-    global _TIKTOKEN_ENCODER
-    if _TIKTOKEN_ENCODER is None:
-        import tiktoken
+def _get_tokenizer():
+    """Cached Qwen tokenizer. Uses the model's own tokenizer so token
+    counts match SGLang's server-side counts exactly."""
+    global _TOKENIZER
+    if _TOKENIZER is None:
+        from transformers import AutoTokenizer
 
-        _TIKTOKEN_ENCODER = tiktoken.encoding_for_model("gpt-4o")
-    return _TIKTOKEN_ENCODER
+        _TOKENIZER = AutoTokenizer.from_pretrained(
+            DEFAULT_MODEL,
+            revision="0b2752837483aa34b3db6e83e151b150c0e00e49",
+            trust_remote_code=False,
+        )
+    return _TOKENIZER
 
 
-def _approx_input_tokens(messages) -> int:
-    """Quick, directional token count for a chat-completions ``messages``
-    payload. Mirrors :func:`proxy.modal_proxy.tokenize_input` so the
-    workload's pre-filter sees the same numbers the proxy uses for
-    routing decisions.
+def _count_input_tokens(messages) -> int:
+    """Exact input token count for a chat-completions ``messages``
+    payload using the model's own tokenizer.
 
-    Tiktoken's BPE diverges from Qwen's vocab (typically within ±20% on
-    English-heavy chat data, more divergent on code / non-English), so
-    callers feeding this into a context-length filter should leave a
-    safety margin -- :data:`CONTEXT_LENGTH_SAFETY_MARGIN_TOKENS` is
-    applied automatically by :func:`_resolve_input_token_cap`."""
+    Tries ``apply_chat_template`` first (exact match with SGLang's
+    count including framing tokens). Falls back to concatenated
+    per-text encoding if the template raises (e.g. unsupported role)."""
     if not isinstance(messages, list) or not messages:
         return 0
-    enc = _get_encoder()
-    total = 0
-    for msg in messages:
-        if isinstance(msg, dict):
-            content = msg.get("content")
-            if isinstance(content, str):
-                total += len(enc.encode(content, disallowed_special=()))
-            elif isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text = block.get("text") or ""
-                        if text:
-                            total += len(enc.encode(text, disallowed_special=()))
-        elif isinstance(msg, str):
-            total += len(enc.encode(msg, disallowed_special=()))
-    return total
+    tok = _get_tokenizer()
+    try:
+        return len(tok.apply_chat_template(messages, add_generation_prompt=False))
+    except Exception:
+        total = 0
+        for msg in messages:
+            if isinstance(msg, dict):
+                content = msg.get("content")
+                if isinstance(content, str):
+                    total += len(tok.encode(content))
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text = block.get("text") or ""
+                            if text:
+                                total += len(tok.encode(text))
+            elif isinstance(msg, str):
+                total += len(tok.encode(msg))
+        return total
 
 
 def _parse_iso(s: str | None) -> datetime | None:
@@ -433,9 +457,9 @@ def _iter_bodies(
     and HF readers stay simple generators -- all CLI knobs are honored
     uniformly here.
 
-    ``max_input_tokens`` (when truthy) caps the approximate input token
-    count per row using the same tiktoken-cl100k encoder as
-    ``proxy/modal_proxy.py``. Rows whose count exceeds the cap are
+    ``max_input_tokens`` (when truthy) caps the input token count per
+    row using the model's own tokenizer (exact match with SGLang's
+    server-side count). Rows whose count exceeds the cap are
     silently skipped *before* counting toward the offset/limit, so
     ``num_requests=N`` still yields ``N`` valid rows when the cap
     filters out the long tail. ``filter_stats`` (when provided) is
@@ -450,13 +474,33 @@ def _iter_bodies(
         msgs = body.get("messages")
         if not isinstance(msgs, list) or not msgs:
             continue
-        # Apply the input-token cap *before* the offset accounting so a
-        # filtered row doesn't burn one of the offset slots; users
-        # specifying ``--offset N`` typically mean "skip N usable rows",
-        # not "skip N rows including overlong ones".
+        # Validate message structure: SGLang rejects requests with
+        # unsupported roles, misplaced system messages, or missing user
+        # content. Filter these out so they don't inflate the failure
+        # rate with data-quality noise unrelated to the routing policy.
+        if not _validate_messages(msgs):
+            if filter_stats is not None:
+                filter_stats["invalid_messages"] = filter_stats.get("invalid_messages", 0) + 1
+            continue
+        # Sanitize completion-token fields first so the context-length
+        # check below uses the same budget SGLang will see.
+        if model_override is not None:
+            body["model"] = model_override
+        if stream_override is not None:
+            body["stream"] = stream_override
+        if max_tokens_override is not None:
+            body["max_tokens"] = max_tokens_override
+            body.pop("max_completion_tokens", None)
+        # Hard context-length gate: reject any request where
+        # input_tokens + max_tokens > context_length, using the exact
+        # same arithmetic SGLang's admission check does. This replaces
+        # the old approximate input-only cap.
+        effective_max_tokens = (
+            body.get("max_completion_tokens") or body.get("max_tokens") or max_tokens_override or 0
+        )
         if max_input_tokens and max_input_tokens > 0:
-            n_tokens = _approx_input_tokens(msgs)
-            if n_tokens > max_input_tokens:
+            n_tokens = _count_input_tokens(msgs)
+            if n_tokens + effective_max_tokens > max_input_tokens:
                 if filter_stats is not None:
                     filter_stats["filtered"] = filter_stats.get("filtered", 0) + 1
                     if n_tokens > filter_stats.get("max_filtered_tokens", 0):
@@ -465,19 +509,6 @@ def _iter_bodies(
         if skipped < offset:
             skipped += 1
             continue
-        # OpenAI chat-completions request fields the caller can override on
-        # every replayed row:
-        #   model: served model name (must match the SGLang replica; the
-        #     GLM dataset's original ``model`` value is rejected by SGLang,
-        #     hence the override). HF rows usually have no ``model`` set.
-        #   stream: SSE vs. single JSON response.
-        #   max_tokens: cap on generated tokens per request.
-        if model_override is not None:
-            body["model"] = model_override
-        if stream_override is not None:
-            body["stream"] = stream_override
-        if max_tokens_override is not None:
-            body["max_tokens"] = max_tokens_override
         # On SSE requests, ask the upstream SGLang replica to emit a final
         # ``data: {... "usage": {...}}`` event by setting
         # ``stream_options.include_usage = True``. That gives us exact
@@ -882,9 +913,7 @@ async def run_replay_async(
             from the SGLang replica's ``/get_server_info`` (using
             ``context_length - max_tokens - safety_margin``); negative
             disables the filter. Counts are computed via the same
-            tiktoken-cl100k encoder the proxy uses, so they're
-            directional rather than exact (apply your own headroom if
-            tuning against multilingual corpora).
+            model's own tokenizer (exact match with SGLang's count).
         output_path: Where to write the JSON results doc inside the
             ``GORGO-bench-results`` volume. Relative paths are resolved
             under ``/results``. ``None`` (default) -> auto-generated

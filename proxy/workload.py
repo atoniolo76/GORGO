@@ -84,7 +84,7 @@ REGION = os.getenv("REGION", "us-east-1")
 
 image = (
     modal.Image.debian_slim()
-    .pip_install("httpx[http2]", "pyarrow", "datasets>=3.0", "tiktoken")
+    .pip_install("httpx[http2]", "pyarrow", "datasets>=3.0", "transformers")
     .add_local_python_source("app", "proxy")
 )
 
@@ -492,13 +492,19 @@ def _iter_bodies(
         msgs = body.get("messages")
         if not isinstance(msgs, list) or not msgs:
             continue
-        # Apply the input-token cap *before* the offset accounting so a
-        # filtered row doesn't burn one of the offset slots; users
-        # specifying ``--offset N`` typically mean "skip N usable rows",
-        # not "skip N rows including overlong ones".
+        if model_override is not None:
+            body["model"] = model_override
+        if stream_override is not None:
+            body["stream"] = stream_override
+        if max_tokens_override is not None:
+            body["max_tokens"] = max_tokens_override
+            body.pop("max_completion_tokens", None)
+        effective_max_tokens = (
+            body.get("max_completion_tokens") or body.get("max_tokens") or max_tokens_override or 0
+        )
         if max_input_tokens and max_input_tokens > 0:
             n_tokens = _approx_input_tokens(msgs)
-            if n_tokens > max_input_tokens:
+            if n_tokens + effective_max_tokens > max_input_tokens:
                 if filter_stats is not None:
                     filter_stats["filtered"] = filter_stats.get("filtered", 0) + 1
                     if n_tokens > filter_stats.get("max_filtered_tokens", 0):
@@ -507,19 +513,6 @@ def _iter_bodies(
         if skipped < offset:
             skipped += 1
             continue
-        # OpenAI chat-completions request fields the caller can override on
-        # every replayed row:
-        #   model: served model name (must match the SGLang replica; the
-        #     GLM dataset's original ``model`` value is rejected by SGLang,
-        #     hence the override). HF rows usually have no ``model`` set.
-        #   stream: SSE vs. single JSON response.
-        #   max_tokens: cap on generated tokens per request.
-        if model_override is not None:
-            body["model"] = model_override
-        if stream_override is not None:
-            body["stream"] = stream_override
-        if max_tokens_override is not None:
-            body["max_tokens"] = max_tokens_override
         # On SSE requests, ask the upstream SGLang replica to emit a final
         # ``data: {... "usage": {...}}`` event by setting
         # ``stream_options.include_usage = True``. That gives us exact
