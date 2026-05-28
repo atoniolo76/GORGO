@@ -6,7 +6,7 @@
   "concurrency": 64,
   "stream": true,
   "max_tokens": 128,
-  "max_input_tokens": 32768,
+  "max_input_tokens": 24000,
   "arrival_mode": "open-loop",
   "time_scale": 1.0,
   "poll_interval_seconds": 60,
@@ -16,7 +16,9 @@
     "us-ashburn-1"
   ],
   "policies": [
+    {"name": "random"},
     {"name": "least-request"},
+    {"name": "least-load"},
     {"name": "prefix-cache"},
     {"name": "simple-session-affinity"},
     {

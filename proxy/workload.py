@@ -84,7 +84,7 @@ REGION = os.getenv("REGION", "us-east-1")
 
 image = (
     modal.Image.debian_slim()
-    .pip_install("httpx[http2]", "pyarrow", "datasets>=3.0", "transformers")
+    .pip_install("httpx[http2]", "pyarrow", "datasets>=3.0", "transformers", "jinja2")
     .add_local_python_source("app", "proxy")
 )
 

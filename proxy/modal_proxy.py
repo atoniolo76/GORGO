@@ -419,8 +419,12 @@ def tokenize_input(messages: list[dict]) -> list[int]:
         return []
     tok = _get_tokenizer()
     try:
-        result = tok.apply_chat_template(messages, add_generation_prompt=True)
-        return result["input_ids"] if hasattr(result, "keys") else result
+        rendered = tok.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=False,
+        )
+        return tok.encode(rendered)
     except Exception:
         return []
 
@@ -450,7 +454,7 @@ def _parse_metrics_text(text: str) -> dict[str, float]:
 
 @app.function(
     image=modal.Image.debian_slim()
-    .pip_install("httpx[http2]", "uvicorn", "transformers", "pyarrow", "datasets>=3.0")
+    .pip_install("httpx[http2]", "uvicorn", "transformers", "jinja2", "pyarrow", "datasets>=3.0")
     .add_local_python_source("app", "proxy", "policy", "utils"),
     region=REGION,
     timeout=(24 * 60 * 60),

@@ -119,22 +119,32 @@ def _get_tokenizer():
     return _TOKENIZER
 
 
+_TEMPLATE_FAIL_LOGGED = False
+
+
 def _count_input_tokens(messages) -> int | None:
     """Exact input token count for a chat-completions ``messages``
     payload using the model's own tokenizer with
     ``add_generation_prompt=True`` to match SGLang's internal count.
 
-    Returns ``None`` if ``apply_chat_template`` raises -- the caller
-    should treat this as "too long" since SGLang would reject the
-    same messages for the same reason."""
+    Returns ``None`` if both the template render and the fallback
+    tokenization fail -- the caller should treat this as "skip"."""
+    global _TEMPLATE_FAIL_LOGGED
     if not isinstance(messages, list) or not messages:
         return 0
     tok = _get_tokenizer()
     try:
-        result = tok.apply_chat_template(messages, add_generation_prompt=True)
-        ids = result["input_ids"] if hasattr(result, "keys") else result
-        return len(ids)
-    except Exception:
+        rendered = tok.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=False,
+        )
+        return len(tok.encode(rendered))
+    except Exception as e:
+        if not _TEMPLATE_FAIL_LOGGED:
+            _TEMPLATE_FAIL_LOGGED = True
+            _log(f"apply_chat_template failed (first occurrence): {type(e).__name__}: {e}")
+            _log(f"  messages[0]: {str(messages[0])[:200] if messages else 'empty'}")
         return None
 
 

@@ -1,12 +1,12 @@
 {
-  "_note": "GLM5 c=64 held-out eval window. gorgo-static deploys hillclimb-learned params from c=64 tuning (prefill_weight=0.038, load_weight=0.009, rtt_weight=1084). Pair with manifest_glm5_apr2_0030_0100.json (same time-of-day as tuning, different day -- tests generalization).",
+  "_note": "GLM5 c=64 held-out eval window. gorgo-static deploys hillclimb-learned params from c=64 tuning v8 (prefill_weight=0.0601, load_weight=0.00402, rtt_weight=4132). Pair with manifest_glm5_apr2_0030_0100.json (same time-of-day as tuning, different day -- tests generalization).",
   "run_id": "glm5_c64_eval",
   "trace_path": "",
   "start_delay_seconds": 30,
   "concurrency": 64,
   "stream": true,
   "max_tokens": 128,
-  "max_input_tokens": 32768,
+  "max_input_tokens": 24000,
   "arrival_mode": "open-loop",
   "time_scale": 1.0,
   "poll_interval_seconds": 60,
@@ -16,13 +16,15 @@
     "us-ashburn-1"
   ],
   "policies": [
+    {"name": "random"},
     {"name": "least-request"},
+    {"name": "least-load"},
     {"name": "prefix-cache"},
     {"name": "simple-session-affinity"},
     {
-      "_note": "Learned params from c=64 tuning hillclimb (glm5_c64_tuning_v1).",
+      "_note": "Learned params from c=64 tuning hillclimb (glm5_c64_tuning_v8).",
       "name": "gorgo", "label": "gorgo-static",
-      "hyperparameters": {"prefill_weight": 0.038, "load_weight": 0.009, "rtt_weight": 1084.0}
+      "hyperparameters": {"prefill_weight": 0.060073, "load_weight": 0.004024, "rtt_weight": 4131.94}
     }
   ],
   "replica_homogeneity_check": {
