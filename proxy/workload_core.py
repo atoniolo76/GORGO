@@ -119,34 +119,23 @@ def _get_tokenizer():
     return _TOKENIZER
 
 
-def _count_input_tokens(messages) -> int:
+def _count_input_tokens(messages) -> int | None:
     """Exact input token count for a chat-completions ``messages``
-    payload using the model's own tokenizer.
+    payload using the model's own tokenizer with
+    ``add_generation_prompt=True`` to match SGLang's internal count.
 
-    Tries ``apply_chat_template`` first (exact match with SGLang's
-    count including framing tokens). Falls back to concatenated
-    per-text encoding if the template raises (e.g. unsupported role)."""
+    Returns ``None`` if ``apply_chat_template`` raises -- the caller
+    should treat this as "too long" since SGLang would reject the
+    same messages for the same reason."""
     if not isinstance(messages, list) or not messages:
         return 0
     tok = _get_tokenizer()
     try:
-        return len(tok.apply_chat_template(messages, add_generation_prompt=False))
+        result = tok.apply_chat_template(messages, add_generation_prompt=True)
+        ids = result["input_ids"] if hasattr(result, "keys") else result
+        return len(ids)
     except Exception:
-        total = 0
-        for msg in messages:
-            if isinstance(msg, dict):
-                content = msg.get("content")
-                if isinstance(content, str):
-                    total += len(tok.encode(content))
-                elif isinstance(content, list):
-                    for block in content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            text = block.get("text") or ""
-                            if text:
-                                total += len(tok.encode(text))
-            elif isinstance(msg, str):
-                total += len(tok.encode(msg))
-        return total
+        return None
 
 
 def _parse_iso(s: str | None) -> datetime | None:
@@ -500,10 +489,12 @@ def _iter_bodies(
         )
         if max_input_tokens and max_input_tokens > 0:
             n_tokens = _count_input_tokens(msgs)
-            if n_tokens + effective_max_tokens > max_input_tokens:
+            if n_tokens is None or n_tokens + effective_max_tokens > max_input_tokens:
                 if filter_stats is not None:
                     filter_stats["filtered"] = filter_stats.get("filtered", 0) + 1
-                    if n_tokens > filter_stats.get("max_filtered_tokens", 0):
+                    if n_tokens is not None and n_tokens > filter_stats.get(
+                        "max_filtered_tokens", 0
+                    ):
                         filter_stats["max_filtered_tokens"] = n_tokens
                 continue
         if skipped < offset:
@@ -1097,6 +1088,20 @@ async def run_replay_async(
                     source_row_id=source_row_id,
                     source_row_hash=source_row_hash,
                 )
+                retries_left = 3
+                while retries_left > 0 and res.get("status") in (0, 502):
+                    retries_left -= 1
+                    await asyncio.sleep(0.5)
+                    res = await _send_one(
+                        client,
+                        body,
+                        request_id=request_id,
+                        scheduled_delay_ms=scheduled_delay_ms,
+                        sent_delay_ms=sent_delay_ms,
+                        trace_row_index=trace_row_index,
+                        source_row_id=source_row_id,
+                        source_row_hash=source_row_hash,
+                    )
                 results.append(res)
                 done += 1
                 # Emit a single-line failure record as soon as it

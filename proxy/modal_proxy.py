@@ -410,33 +410,19 @@ def tokenize_input(messages: list[dict]) -> list[int]:
     """Tokenize an OpenAI chat-completions ``messages`` payload into a flat
     list of token ids using the model's own tokenizer.
 
-    Uses ``apply_chat_template`` so the token count matches SGLang's
-    server-side count exactly, including chat-template framing tokens
-    (``<|im_start|>role\\n...``) that a naive per-text encode would miss.
-    Falls back to concatenated per-text encoding if the template raises
-    (e.g. unsupported role), which is still closer than the old tiktoken
-    approximation.
+    Uses ``apply_chat_template`` with ``add_generation_prompt=True``
+    so the token count and IDs match SGLang's server-side tokenization
+    exactly. Returns an empty list if the template fails (the request
+    would be rejected by SGLang for the same reason).
     """
     if not isinstance(messages, list) or not messages:
         return []
     tok = _get_tokenizer()
     try:
-        return tok.apply_chat_template(messages, add_generation_prompt=False)
+        result = tok.apply_chat_template(messages, add_generation_prompt=True)
+        return result["input_ids"] if hasattr(result, "keys") else result
     except Exception:
-        texts: list[str] = []
-        for msg in messages:
-            if isinstance(msg, dict):
-                text = _message_text(msg.get("content"))
-                if text:
-                    texts.append(text)
-            elif isinstance(msg, str):
-                texts.append(msg)
-        if not texts:
-            return []
-        out: list[int] = []
-        for text in texts:
-            out.extend(tok.encode(text))
-        return out
+        return []
 
 
 def _parse_metrics_text(text: str) -> dict[str, float]:
