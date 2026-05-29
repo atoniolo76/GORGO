@@ -1,0 +1,10 @@
+{
+  "_note": "GLM5 April 1 midday (12:30-13:00). Different time-of-day from night traces — tests generalization across diurnal patterns.",
+  "top": [
+    {
+      "result": {
+        "output_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr1_1230_to_1300.jsonl"
+      }
+    }
+  ]
+}

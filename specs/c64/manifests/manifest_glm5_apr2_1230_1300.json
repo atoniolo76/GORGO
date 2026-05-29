@@ -1,0 +1,10 @@
+{
+  "_note": "GLM5 April 2 12:30-13:00 (midday). Different time-of-day from the night tuning window -- tests generalization across diurnal traffic patterns.",
+  "top": [
+    {
+      "result": {
+        "output_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_1230_to_1300.jsonl"
+      }
+    }
+  ]
+}

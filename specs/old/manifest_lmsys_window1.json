@@ -1,0 +1,10 @@
+{
+  "_note": "LMSYS window 1: first 108k rows (rows 0-107999). 30 min at 60 req/s synthetic Poisson.",
+  "top": [
+    {
+      "result": {
+        "output_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/lmsys_window1.jsonl"
+      }
+    }
+  ]
+}

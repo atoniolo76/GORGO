@@ -1,0 +1,155 @@
+{
+  "output_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/lmsys_window1.jsonl",
+  "source": "lmsys",
+  "data_dir": "/lmsys/lmsys-chat-1m",
+  "lmsys_group_by": "model",
+  "wildchat_group_by": null,
+  "arrival_rate_per_second": 60.0,
+  "arrival_seed": 0,
+  "synthetic_arrivals_used": true,
+  "force_synthetic_arrivals": false,
+  "skip_rows": null,
+  "target_input_tokens": null,
+  "target_unique_input_tokens": null,
+  "rows": 108000,
+  "candidate_rows": 108000,
+  "skipped_rows": 0,
+  "skipped_over_max_input": 13,
+  "skipped_over_max_total": 0,
+  "skipped_under_min_input": 0,
+  "selection_mode": "chronological",
+  "candidate_multiplier": 1,
+  "top_token_hashes_requested": 0,
+  "selected_token_hashes": [],
+  "preserves_source_order": true,
+  "curation_note": "token-hash-filter preserves chronological order for top active users. Future shared-prefix-filter mode could select cross-user repeated system/harness prefixes by block-id frequency while still emitting selected rows in source timestamp order.",
+  "start_time": null,
+  "end_time": null,
+  "base_timestamp": "2026-01-01T00:00:00",
+  "original_duration_ms": 1797218,
+  "scaled_duration_ms": 1797218,
+  "time_scale": 1.0,
+  "block_size": 512,
+  "unique_blocks": 126333,
+  "total_blocks": 137195,
+  "block_reuse_pct": 7.917198148620576,
+  "total_input_tokens": 27936591,
+  "total_output_tokens": 19640231,
+  "total_unique_input_tokens": 27330681,
+  "unique_token_share_pct": 97.83112406234532,
+  "include_bodies": true,
+  "include_raw_bodies": false,
+  "context_filters": {
+    "min_input_tokens": 0,
+    "max_input_tokens": 24000,
+    "max_total_tokens": 0
+  },
+  "token_hash_count": 25,
+  "top_token_hashes": [
+    {
+      "token_hash": "vicuna-13b",
+      "rows": 52876,
+      "input_tokens": 16227918
+    },
+    {
+      "token_hash": "koala-13b",
+      "rows": 8802,
+      "input_tokens": 1761197
+    },
+    {
+      "token_hash": "alpaca-13b",
+      "rows": 6610,
+      "input_tokens": 1059649
+    },
+    {
+      "token_hash": "chatglm-6b",
+      "rows": 3920,
+      "input_tokens": 589089
+    },
+    {
+      "token_hash": "llama-13b",
+      "rows": 3468,
+      "input_tokens": 460132
+    },
+    {
+      "token_hash": "llama-2-13b-chat",
+      "rows": 3335,
+      "input_tokens": 826689
+    },
+    {
+      "token_hash": "vicuna-33b",
+      "rows": 3326,
+      "input_tokens": 1255678
+    },
+    {
+      "token_hash": "fastchat-t5-3b",
+      "rows": 2863,
+      "input_tokens": 395447
+    },
+    {
+      "token_hash": "oasst-pythia-12b",
+      "rows": 2823,
+      "input_tokens": 394904
+    },
+    {
+      "token_hash": "dolly-v2-12b",
+      "rows": 2515,
+      "input_tokens": 460209
+    },
+    {
+      "token_hash": "claude-1",
+      "rows": 2502,
+      "input_tokens": 1071591
+    },
+    {
+      "token_hash": "wizardlm-13b",
+      "rows": 1859,
+      "input_tokens": 448802
+    },
+    {
+      "token_hash": "vicuna-7b",
+      "rows": 1772,
+      "input_tokens": 433093
+    },
+    {
+      "token_hash": "RWKV-4-Raven-14B",
+      "rows": 1734,
+      "input_tokens": 340301
+    },
+    {
+      "token_hash": "mpt-7b-chat",
+      "rows": 1608,
+      "input_tokens": 361746
+    },
+    {
+      "token_hash": "guanaco-33b",
+      "rows": 1480,
+      "input_tokens": 405570
+    },
+    {
+      "token_hash": "stablelm-tuned-alpha-7b",
+      "rows": 1258,
+      "input_tokens": 191697
+    },
+    {
+      "token_hash": "mpt-30b-chat",
+      "rows": 952,
+      "input_tokens": 328691
+    },
+    {
+      "token_hash": "gpt-3.5-turbo",
+      "rows": 854,
+      "input_tokens": 149522
+    },
+    {
+      "token_hash": "gpt4all-13b-snoozy",
+      "rows": 826,
+      "input_tokens": 133984
+    }
+  ],
+  "selection_score": {
+    "avg": 0.0,
+    "max": 0.0
+  },
+  "elapsed_seconds": 85.926428726
+}

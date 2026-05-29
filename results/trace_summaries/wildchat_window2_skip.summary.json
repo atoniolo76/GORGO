@@ -1,0 +1,65 @@
+{
+  "output_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/wildchat_window2_skip.jsonl",
+  "source": "wildchat",
+  "data_dir": "/datasets/datasets/allenai__WildChat-4.8M",
+  "lmsys_group_by": null,
+  "wildchat_group_by": "model",
+  "arrival_rate_per_second": 11.4,
+  "arrival_seed": 0,
+  "synthetic_arrivals_used": true,
+  "force_synthetic_arrivals": true,
+  "skip_rows": 100000,
+  "target_input_tokens": null,
+  "target_unique_input_tokens": null,
+  "rows": 20520,
+  "candidate_rows": 20520,
+  "skipped_rows": 0,
+  "skipped_over_max_input": 0,
+  "skipped_over_max_total": 0,
+  "skipped_under_min_input": 0,
+  "selection_mode": "chronological",
+  "candidate_multiplier": 1,
+  "top_token_hashes_requested": 0,
+  "selected_token_hashes": [],
+  "preserves_source_order": true,
+  "curation_note": "token-hash-filter preserves chronological order for top active users. Future shared-prefix-filter mode could select cross-user repeated system/harness prefixes by block-id frequency while still emitting selected rows in source timestamp order.",
+  "start_time": null,
+  "end_time": null,
+  "base_timestamp": "2026-01-01T00:00:00",
+  "original_duration_ms": 1799590,
+  "scaled_duration_ms": 1799590,
+  "time_scale": 1.0,
+  "block_size": 512,
+  "unique_blocks": 36451,
+  "total_blocks": 38924,
+  "block_reuse_pct": 6.3534066385777415,
+  "total_input_tokens": 12547515,
+  "total_output_tokens": 6078641,
+  "total_unique_input_tokens": 11802131,
+  "unique_token_share_pct": 94.05950899441045,
+  "include_bodies": true,
+  "include_raw_bodies": false,
+  "context_filters": {
+    "min_input_tokens": 0,
+    "max_input_tokens": 24000,
+    "max_total_tokens": 0
+  },
+  "token_hash_count": 2,
+  "top_token_hashes": [
+    {
+      "token_hash": "gpt-3.5-turbo-0301",
+      "rows": 16495,
+      "input_tokens": 9186042
+    },
+    {
+      "token_hash": "gpt-4-0314",
+      "rows": 4025,
+      "input_tokens": 3361473
+    }
+  ],
+  "selection_score": {
+    "avg": 0.0,
+    "max": 0.0
+  },
+  "elapsed_seconds": 185.32123907899998
+}

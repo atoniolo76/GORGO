@@ -1,0 +1,10 @@
+{
+  "_note": "WildChat W2: rows 100,000–120,520. Non-contiguous from W1 (rows 0–20,520) to test generalization across different user populations.",
+  "top": [
+    {
+      "result": {
+        "output_path": "/data/mooncake_traces/abstract_night_traces/with_bodies/wildchat_window2_skip.jsonl"
+      }
+    }
+  ]
+}
