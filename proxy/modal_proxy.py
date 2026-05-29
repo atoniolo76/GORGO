@@ -2271,6 +2271,7 @@ def proxy(registry_key: str = ""):
         prompt_tokens: int | None,
         completion_tokens: int | None,
         cached_tokens_at_dispatch: int = 0,
+        queued_tokens_at_dispatch: int = 0,
     ) -> None:
         """Append a per-request sample shaped like
         :func:`proxy.measure.measure_chat_completion`'s output. Skipped
@@ -2341,6 +2342,7 @@ def proxy(registry_key: str = ""):
                 "decode_seconds": decode_s,
                 "prompt_tokens": prompt_tokens,
                 "cached_tokens_at_dispatch": cached_tokens_at_dispatch,
+                "queued_tokens_at_dispatch": queued_tokens_at_dispatch,
                 "uncached_tokens": uncached_tokens,
                 "completion_tokens": completion_tokens,
                 "prefill_rate_seconds_per_token": prefill_s / uncached_tokens,
@@ -2382,8 +2384,18 @@ def proxy(registry_key: str = ""):
             # Treat (rtt_weight, prefill_weight) as dimensionless knobs
             # and use Gaussian (1+1)-ES to minimize the configured
             # objective metric over the rolling window.
-            # Per-target stays empty in this mode -- the search space is
-            # intentionally defaults-only so convergence is fast.
+            #
+            # Physical rates (prefill_rate, queue_rate) are fitted from
+            # the same window on every hop so the ES operates on a
+            # stable cost surface.  Rate updates go to per_target;
+            # weight proposals go to defaults.
+            rate_update = recommend_rates_per_target(window)
+            if at["apply"] and rate_update.get("per_target"):
+                state["hyperparameters"] = merge_update(
+                    state["hyperparameters"],
+                    {"defaults": {}, "per_target": rate_update["per_target"]},
+                    replace=False,
+                )
             metric = at.get("objective_metric", "neg_p95_ttft")
             score_fn = ONLINE_SCORE_FUNCTIONS.get(metric)
             tuner: GaussianESTuner | None = at.get("online_tuner")
@@ -2406,7 +2418,7 @@ def proxy(registry_key: str = ""):
                 if at["apply"]:
                     state["hyperparameters"] = merge_update(
                         state["hyperparameters"],
-                        {"defaults": dict(tuner.best_params), "per_target": {}},
+                        {"defaults": dict(tuner.best_params)},
                         replace=False,
                     )
                 at["enabled"] = False
@@ -2454,7 +2466,7 @@ def proxy(registry_key: str = ""):
             if at["apply"]:
                 state["hyperparameters"] = merge_update(
                     state["hyperparameters"],
-                    {"defaults": dict(proposal), "per_target": {}},
+                    {"defaults": dict(proposal)},
                     replace=False,
                 )
             at["pending_candidate"] = dict(proposal)
@@ -2705,7 +2717,8 @@ def proxy(registry_key: str = ""):
         # are read by routing policies on the next request, so an
         # unmatched increment would persistently bias future decisions
         # against this target.
-        endpoints_queued_tokens[target] = endpoints_queued_tokens.get(target, 0) + request_tokens
+        queued_tokens_at_dispatch = endpoints_queued_tokens.get(target, 0)
+        endpoints_queued_tokens[target] = queued_tokens_at_dispatch + request_tokens
         endpoints_inflight_requests[target] = endpoints_inflight_requests.get(target, 0) + 1
         # Captured before client.stream(...) so TTFT measured by the SSE
         # tee includes request-send + response-headers latency, matching
@@ -2787,6 +2800,7 @@ def proxy(registry_key: str = ""):
                             completion_tokens if completion_tokens is not None else output_tokens
                         ),
                         cached_tokens_at_dispatch=cached_for_target,
+                        queued_tokens_at_dispatch=queued_tokens_at_dispatch,
                     )
                 else:
                     # Plain passthrough for non-SSE bodies (e.g. error

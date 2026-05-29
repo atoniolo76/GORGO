@@ -724,12 +724,15 @@ components:
         missing keys fall through to defaults. Unknown keys are
         rejected with a 400.
       properties:
+        prefill_rate:
+          type: number
+          description: Physical prefill time per token (ms/token); calibrated per-replica.
         prefill_weight:
           type: number
-          description: Coefficient applied to the request's effective prefill token count.
-        load_weight:
+          description: Dimensionless coefficient on the prefill term (uncached + queued tokens).
+        rtt_weight:
           type: number
-          description: Coefficient applied to `(in_flight_queue + num_used_tokens)`.
+          description: Dimensionless coefficient on the network RTT term (ms).
       additionalProperties: false
 
     HyperparameterStore:
@@ -1016,7 +1019,7 @@ components:
               prefill/decode samples. Best when the cost-model parameters
               have a direct physical interpretation. Pairs well with the
               uncached-token correction in `_record_request_sample`.
-            * `online-es`: treat `(prefill_weight, load_weight)` as
+            * `online-es`: treat `(prefill_weight, rtt_weight)` as
               abstract knobs and use a Gaussian (1+1)-Evolution Strategy
               to minimize `objective_metric` over the rolling window.
               Updates `defaults` only (per-target stays empty) so the
@@ -1525,8 +1528,8 @@ components:
             output_dir: { type: string }
             prefill_weight_min: { type: number }
             prefill_weight_max: { type: number }
-            load_weight_min: { type: number }
-            load_weight_max: { type: number }
+            rtt_weight_min: { type: number }
+            rtt_weight_max: { type: number }
 
     BatchTuningStatusResponse:
       type: object

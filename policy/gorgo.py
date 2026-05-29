@@ -5,34 +5,39 @@ picks the minimum.  Every term resolves to **milliseconds** so the
 score is an estimated delay::
 
     score(u) = rtt_weight     * rtt_ms(u)
-             + prefill_weight * prefill_rate(u) * (uncached_tokens(u) + queued_tokens(u))
+             + prefill_weight * (prefill_rate(u) * uncached_tokens(u)
+                                + queue_rate(u) * queued_tokens(u))
 
-The model has exactly two cost sources, both physically grounded:
+The model has two cost sources, both physically grounded:
 
 * **Network** — ``rtt_ms``, a directly measured round-trip time.
-* **Prefill work ahead of the request** — your own uncached prompt
-  tokens *plus* the prompt tokens already queued on the replica.
-  Both are prefill work that drains at the same per-token
-  ``prefill_rate``, so they share it.
+* **Prefill work** — split into two components with distinct rates:
 
-There is deliberately **no load/contention term**.  ``num_used_tokens``
-(KV-cache occupancy) was dropped: empirically it is a 30s-stale stock
-that is uncorrelated with the real-time queued backlog and adds noise
-rather than signal.  Load balancing instead falls out of
-``queued_tokens`` — a real-time proxy-side counter that rises as work
-is dispatched and falls as it completes, providing self-limiting
-feedback without an explicit occupancy term.  (A nonlinear
-*utilization* barrier can be reintroduced later if a high-load regime
-ever approaches KV saturation, but only once that metric is actually
-populated.)
+  - *Own prefill*: your uncached prompt tokens, draining at
+    ``prefill_rate`` (ms/tok) — a hardware constant measured on an
+    idle replica by ``proxy/calibrate.py``.
+  - *Queue delay*: prompt tokens already queued ahead of you,
+    draining at ``queue_rate`` (ms/tok) — the effective rate at
+    which the replica processes queued prefill under load.  This is
+    slower than the idle ``prefill_rate`` because batched/concurrent
+    requests share GPU prefill bandwidth.  Fitted from live traffic
+    by regressing the residual TTFT after subtracting RTT and
+    own-prefill cost.
+
+Both components are scaled by the same ``prefill_weight`` so the
+tuner adjusts the overall importance of prefill vs network without
+conflating the two physical rates.
 
 The parameters split into two families:
 
-**Physical rate** (units: ms / token) — a hardware constant measured by
-``proxy/calibrate.py`` or the ``fit`` auto-tuner.  Naturally per-replica
-because different GPUs prefill at different speeds:
+**Physical rates** (units: ms / token) — hardware constants, naturally
+per-replica because different GPUs prefill at different speeds:
 
-* ``prefill_rate`` — time to prefill one token.
+* ``prefill_rate`` — idle prefill rate. Calibrated by
+  ``proxy/calibrate.py`` on an idle replica with cache flushed.
+* ``queue_rate`` — effective drain rate of queued tokens under load.
+  Fitted by the ``fit`` auto-tuner from live traffic residuals.
+  Cannot be calibrated idle (no queue on an idle replica).
 
 **Tuning weights** (dimensionless, default 1.0) — policy knobs that
 scale each term relative to the other.  At ``1.0`` the score is a
@@ -40,36 +45,39 @@ physically grounded time estimate; values above 1 amplify a term,
 below 1 dampen it:
 
 * ``rtt_weight``     — how aggressively to favor low-RTT replicas.
-* ``prefill_weight`` — amplification of the prefill-cost term.
+* ``prefill_weight`` — amplification of the prefill-cost term
+  (covers both own-prefill and queue delay).
 
 ``rtt_ms`` is the probe RTT converted from seconds to milliseconds
 (``rtt * 1000``).  The raw probe value comes from
 ``snap.network_rtt`` (EWMA-smoothed lightweight probe populated by
 ``proxy/modal_proxy.py``), falling back to ``snap.latency`` (the
 ``/metrics`` scrape RTT) when no probe has completed yet.  The same
-value is subtracted from observed TTFT before fitting
-``prefill_rate`` in ``_record_request_sample``, so the network leg
-is accounted for once — not double-counted, not ignored.
+value is subtracted from observed TTFT before fitting rates in
+``_record_request_sample``, so the network leg is accounted for
+once — not double-counted, not ignored.
 
 This module also owns the *hyperparameter store* shape::
 
     {
-        "defaults":   {"prefill_rate": ...,
+        "defaults":   {"prefill_rate": ..., "queue_rate": ...,
                        "rtt_weight": ..., "prefill_weight": ...},
-        "per_target": {<replica_url>: {"prefill_rate": ...}, ...}
+        "per_target": {<replica_url>: {"prefill_rate": ...,
+                                       "queue_rate": ...}, ...}
     }
 
 ``defaults`` applies to every replica; ``per_target`` overrides
 specific keys for a specific replica URL.  In practice:
 
-* **The rate** lives in ``per_target`` (hardware-specific) and is
-  populated by the calibrator or the ``fit`` auto-tuner.
+* **Rates** live in ``per_target`` (hardware-specific) and are
+  populated by the calibrator (``prefill_rate``) or the ``fit``
+  auto-tuner (``queue_rate``).
 * **Weights** live in ``defaults`` (policy-level) and are populated
   by the ``online-es`` tuner or manually via spec files.
 
 If your replicas are deliberately heterogeneous (mixed GPU classes /
 batch sizes / model variants under one proxy) the per-target rate
-slot is where that heterogeneity lives in the routing math.
+slots are where that heterogeneity lives in the routing math.
 """
 
 from __future__ import annotations
@@ -86,11 +94,14 @@ from policy.base import PolicyDef, RouteContext, RouteDecision, route_random
 # (intentionally a heavy overestimate — typical L40S prefill ≈
 # 0.06 ms/tok — so the cold-start cost model is conservative; the
 # calibrator and ``fit`` auto-tuner replace it once they collect
-# signal).  Weights default to 1.0 (physical magnitude, no
-# amplification).
+# signal).  ``queue_rate`` defaults to 0.01 ms/tok — a rough
+# initial guess for the batched prefill drain rate under load;
+# the ``fit`` auto-tuner replaces it from live traffic residuals.
+# Weights default to 1.0 (physical magnitude, no amplification).
 DEFAULT_GORGO_HYPERPARAMETERS: dict[str, float] = {
-    # Physical rate (ms / token).
+    # Physical rates (ms / token).
     "prefill_rate": 1.0,
+    "queue_rate": 0.01,
     # Dimensionless tuning weights.
     "rtt_weight": 1.0,
     "prefill_weight": 1.0,
@@ -294,12 +305,10 @@ def route_gorgo(ctx: RouteContext) -> RouteDecision:
         eff = effective_hyperparameters(ctx.hyperparameters, u)
         cached = endpoints_cached_tokens.get(u, 0)
         effective_prefill = max(0, ctx.request_tokens - cached)
-        # Prefill work ahead of this request: its own uncached prompt
-        # tokens plus the prompt tokens already queued on the replica.
-        # Both drain at ``prefill_rate``; ``queued_tokens`` is the
-        # real-time, self-limiting load-balancing signal.
-        prefill_tokens = effective_prefill + ctx.endpoints_queued_tokens.get(u, 0)
-        prefill_cost = eff["prefill_weight"] * eff["prefill_rate"] * prefill_tokens
+        queued = ctx.endpoints_queued_tokens.get(u, 0)
+        own_prefill = eff["prefill_rate"] * effective_prefill
+        queue_delay = eff["queue_rate"] * queued
+        prefill_cost = eff["prefill_weight"] * (own_prefill + queue_delay)
         # RTT probe (seconds -> ms).  Same source as
         # ``_record_request_sample``'s subtraction so the network leg is
         # accounted for symmetrically.

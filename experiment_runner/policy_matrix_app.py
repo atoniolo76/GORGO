@@ -909,6 +909,149 @@ async def _check_replica_homogeneity(
     return report
 
 
+async def _calibrate_gorgo_fleet(
+    fleet_manifest: dict,
+    *,
+    num_samples: int = 16,
+    warmup_samples: int = 4,
+    max_tokens: int = 256,
+    prompt_size_tokens: int = 4000,
+    pings_per_sample: int = 3,
+    request_timeout_seconds: float = 60.0,
+) -> dict:
+    """Calibrate ``prefill_rate`` for every gorgo policy pool's replicas.
+
+    Runs between the homogeneity check and the workload start.  Each
+    replica is probed sequentially while idle with cache flushed between
+    samples — identical to ``proxy/calibrate.py`` but integrated into
+    the experiment controller so no separate run is needed.
+
+    For each gorgo pool:
+      1. Probe each replica directly (bypass proxy) with long prompts.
+      2. Decompose TTFT = RTT + prefill_rate × prompt_tokens.
+      3. POST per-replica ``prefill_rate`` to the pool's proxy via
+         ``/hyperparameters`` (structured ``per_target`` shape).
+
+    Returns a report dict keyed by pool label.
+    """
+    from proxy.measure import (
+        flush_replica_cache,
+        measure_chat_completion,
+        ping_once,
+        recommend_rates,
+    )
+
+    gorgo_pools = [p for p in fleet_manifest["fleets"] if p.get("policy") == "gorgo"]
+    if not gorgo_pools:
+        print("[calibrate] no gorgo pools in fleet, skipping", flush=True)
+        return {}
+
+    report: dict[str, dict] = {}
+    started = time.time()
+    timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+
+    for pool in gorgo_pools:
+        label = pool["label"]
+        proxy_url = pool["proxy_url"]
+        replica_urls = pool["replica_urls"]
+        print(
+            f"[calibrate] pool={label!r} replicas={len(replica_urls)} "
+            f"samples={num_samples} warmup={warmup_samples}",
+            flush=True,
+        )
+
+        per_target: dict[str, dict[str, float]] = {}
+        pool_report: dict[str, list[dict]] = {}
+
+        for replica_url in replica_urls:
+            replica_base = replica_url.rstrip("/")
+            samples: list[dict] = []
+            warmup_seen = 0
+
+            async with httpx.AsyncClient(
+                base_url=replica_base, http2=True, timeout=timeout
+            ) as client:
+                for i in range(num_samples + warmup_samples + 4):
+                    if not await flush_replica_cache(client):
+                        pass
+                    try:
+                        ping_rtt = await ping_once(client, n=pings_per_sample)
+                    except httpx.HTTPError:
+                        continue
+
+                    body = {
+                        "model": HF_REPO_ID,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": _build_probe_prompt(prompt_size_tokens, i),
+                            }
+                        ],
+                        "max_tokens": max_tokens,
+                        "stream": True,
+                        "stream_options": {"include_usage": True},
+                    }
+                    sample = await measure_chat_completion(client, body, ping_rtt=ping_rtt)
+                    if sample is None:
+                        continue
+
+                    if warmup_seen < warmup_samples:
+                        warmup_seen += 1
+                        continue
+
+                    samples.append(sample)
+                    if len(samples) >= num_samples:
+                        break
+
+            if not samples:
+                print(
+                    f"[calibrate]   {replica_base}: no samples collected, skipping",
+                    flush=True,
+                )
+                continue
+
+            rates = recommend_rates(samples)
+            prefill_rate = rates.get("prefill_rate", 1.0)
+            per_target[replica_base] = {"prefill_rate": prefill_rate}
+            pool_report[replica_base] = {
+                "samples": len(samples),
+                "prefill_rate_ms_per_tok": round(prefill_rate, 6),
+            }
+
+            rates_sorted = sorted(s["prefill_rate_seconds_per_token"] for s in samples)
+            median_s = rates_sorted[len(rates_sorted) // 2]
+            print(
+                f"[calibrate]   {replica_base}: "
+                f"prefill_rate={prefill_rate:.4f} ms/tok "
+                f"(median of {len(samples)} samples, "
+                f"raw median={median_s * 1000:.4f} ms/tok)",
+                flush=True,
+            )
+
+        if per_target:
+            await _post_json(
+                proxy_url,
+                "/hyperparameters",
+                {"per_target": per_target},
+            )
+            print(
+                f"[calibrate]   posted per_target rates to {proxy_url}",
+                flush=True,
+            )
+
+        report[label] = {
+            "proxy_url": proxy_url,
+            "per_target": pool_report,
+        }
+
+    elapsed = time.time() - started
+    print(
+        f"[calibrate] done in {elapsed:.1f}s, calibrated {len(report)} gorgo pool(s)",
+        flush=True,
+    )
+    return report
+
+
 async def _cancel_spawns(calls: list, kind: str = "spawn") -> None:
     """Best-effort cancel a list of Modal ``FunctionCall`` futures.
 
@@ -1382,6 +1525,13 @@ async def _run_policy_matrix_experiment(
         cleanup_callback=_abort_cleanup,
     )
     fleet_manifest["homogeneity_check"] = homogeneity_report
+
+    calibration_report = await _calibrate_gorgo_fleet(
+        fleet_manifest,
+        prompt_size_tokens=homogeneity_cfg.get("prompt_size_tokens", 4000),
+    )
+    if calibration_report:
+        fleet_manifest["calibration"] = calibration_report
 
     # Write run manifest once the fleet is fully provisioned and validated.
     # Updated again after workloads complete with result paths and timing.
