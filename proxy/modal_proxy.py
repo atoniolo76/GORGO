@@ -86,8 +86,8 @@ from app import (
 from proxy.measure import (
     NS_PER_S,
     consume_sse_stream,
-    recommend_hyperparameters,
-    recommend_hyperparameters_per_target,
+    recommend_rates,
+    recommend_rates_per_target,
     summarize_samples,
 )
 from policy import (
@@ -121,8 +121,7 @@ FLUSH_UPSTREAM_TIMEOUT_SECONDS = 120.0
 
 HYPERPARAM_RANGES: dict[str, tuple[float, float]] = {
     "prefill_weight": (1e-5, 5.0),
-    "load_weight": (1e-5, 5.0),
-    "rtt_weight": (1e-5, 10000.0),
+    "rtt_weight": (1e-5, 5.0),
 }
 
 
@@ -334,7 +333,7 @@ def build_summary(
 # samples (TTFT / total / token counts / per-token rates); when the
 # auto-tuner is enabled (``POST /tune``) it sliding-window-recomputes
 # ``gorgo`` hyperparameters from this buffer via
-# ``proxy.measure.recommend_hyperparameters`` -- the same primitive
+# ``proxy.measure.recommend_rates`` -- the same primitive
 # ``proxy/calibrate.py`` uses for one-shot calibration.
 #
 # The auto-tuner is a stateful toggle, *not* a one-shot endpoint: once
@@ -523,10 +522,10 @@ def proxy(registry_key: str = ""):
             #                  direct physical interpretation and the
             #                  uncached-token correction (Option A) is in
             #                  place.
-            #   "online-es" -- treat (prefill_weight, load_weight) as
-            #                  abstract knobs and use Gaussian-(1+1)-ES to
-            #                  minimize the configured ``objective_metric``
-            #                  (default ``neg_p95_ttft``) over the rolling
+            #   "online-es" -- treat (rtt_weight, prefill_weight) as
+            #                  dimensionless knobs and use
+            #                  Gaussian-(1+1)-ES to minimize the configured
+            #                  ``objective_metric`` over the rolling
             #                  window. Defaults-only (per-target stays
             #                  empty); the ES doesn't fan out to per-replica
             #                  to keep the search space low-dimensional.
@@ -1414,9 +1413,10 @@ def proxy(registry_key: str = ""):
         Two body shapes are accepted, both validated by
         ``policy.gorgo.validate_update``:
 
-        * **Flat** -- ``{"prefill_weight": X, "load_weight": Y}``
-          updates ``defaults`` only (backward-compat: this is what
-          ``proxy/tuning.py`` and ``proxy/calibrate.py`` POST).
+        * **Flat** -- ``{"prefill_rate": X, "rtt_weight": Y}`` (or any
+          subset of allowed keys) updates ``defaults`` only. This is
+          what ``proxy/calibrate.py`` POSTs for the rate and the tuner
+          POSTs for weights.
         * **Structured** -- ``{"defaults": {...}, "per_target": {url:
           {...}}}`` lets callers write per-replica overrides.
 
@@ -1531,9 +1531,10 @@ def proxy(registry_key: str = ""):
         """Toggle / reconfigure the on-the-fly auto-tuner.
 
         The auto-tuner is *stateful*: once enabled it keeps
-        recomputing ``prefill_weight`` / ``load_weight`` every
-        ``hop_size`` new samples (after the first ``window_size``
-        samples have buffered to fill the window) until disabled.
+        recomputing rates (``fit`` mode) or tuning weights
+        (``online-es`` mode) every ``hop_size`` new samples (after
+        the first ``window_size`` samples have buffered to fill the
+        window) until disabled.
         Each ``POST /tune`` atomically merges the body into the live
         config; only the keys present in the body are touched.
 
@@ -1542,7 +1543,7 @@ def proxy(registry_key: str = ""):
             so a bare ``POST /tune {}`` turns the tuner on with the
             current config. Pass ``{"enabled": false}`` to disable.
           * ``window_size``: int. Trailing-sample window fed to
-            ``recommend_hyperparameters``.
+            ``recommend_rates``.
           * ``hop_size``:    int (>0). Recompute every N new samples.
             A small ``hop_size`` reacts faster to load shifts; a
             larger one is more stable.
@@ -1683,7 +1684,7 @@ def proxy(registry_key: str = ""):
             window = list(samples)[-new_window:]
             preview = {
                 "window_size_used": len(window),
-                "recommendation": recommend_hyperparameters_per_target(window),
+                "recommendation": recommend_rates_per_target(window),
                 "stats": summarize_samples(window),
             }
 
@@ -1803,9 +1804,9 @@ def proxy(registry_key: str = ""):
                     _parse_float(data, "prefill_weight_min", 1e-5),
                     _parse_float(data, "prefill_weight_max", 1.0),
                 ),
-                "load_weight": (
-                    _parse_float(data, "load_weight_min", 1e-5),
-                    _parse_float(data, "load_weight_max", 1.0),
+                "rtt_weight": (
+                    _parse_float(data, "rtt_weight_min", 1e-5),
+                    _parse_float(data, "rtt_weight_max", 5.0),
                 ),
             }
         )
@@ -2276,6 +2277,12 @@ def proxy(registry_key: str = ""):
         silently when token counts are missing (calibrate-style safeguard
         against corrupted per-token rates).
 
+        Raw per-token rates are stored in **seconds per token** (the
+        natural measurement unit).  Conversion to ms/tok happens inside
+        :func:`proxy.measure.recommend_rates` so the scoring
+        function's RTT-in-ms convention is matched without baking unit
+        choices into the sample buffer.
+
         ``ping_seconds`` is the irreducible RTT subtracted from TTFT
         before fitting the prefill rate. Source order:
           1. ``snap.network_rtt`` (EWMA-smoothed dedicated probe of the
@@ -2360,8 +2367,8 @@ def proxy(registry_key: str = ""):
             # of the run happens to have landed first.
             return
         if normalize_policy(state["policy"]) != "gorgo":
-            # Auto-tune only writes ``prefill_weight`` / ``load_weight``;
-            # under any other policy the writes are inert. Skip the work
+            # Auto-tune only writes gorgo hyperparameters (rates or
+            # weights); under any other policy the writes are inert. Skip
             # and keep the counter pinned so a switch back to gorgo
             # immediately resumes recomputing on the next sample.
             at["samples_since_last_apply"] = at["hop_size"]
@@ -2372,11 +2379,11 @@ def proxy(registry_key: str = ""):
 
         if mode == "online-es":
             # ----- Option B: empirical hyperparameter search -----
-            # Treat (prefill_weight, load_weight) as abstract knobs
+            # Treat (rtt_weight, prefill_weight) as dimensionless knobs
             # and use Gaussian (1+1)-ES to minimize the configured
-            # objective metric over the rolling window. Per-target stays
-            # empty in this mode -- the search space is intentionally
-            # defaults-only so convergence is fast.
+            # objective metric over the rolling window.
+            # Per-target stays empty in this mode -- the search space is
+            # intentionally defaults-only so convergence is fast.
             metric = at.get("objective_metric", "neg_p95_ttft")
             score_fn = ONLINE_SCORE_FUNCTIONS.get(metric)
             tuner: GaussianESTuner | None = at.get("online_tuner")
@@ -2509,7 +2516,7 @@ def proxy(registry_key: str = ""):
         # window. Replicas that fall below the threshold simply
         # inherit ``defaults`` instead of getting a noisy single-
         # sample median.
-        recommendation = recommend_hyperparameters_per_target(window)
+        recommendation = recommend_rates_per_target(window)
         if at["apply"]:
             state["hyperparameters"] = merge_update(
                 state["hyperparameters"], recommendation, replace=False

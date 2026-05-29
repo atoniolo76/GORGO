@@ -6,12 +6,15 @@ Each helper is a plain function / coroutine with no Modal- or SGLang-
 specific plumbing. Collectively they implement the GORGO calibration
 contract::
 
-    score(replica) = latency
-                   + prefill_weight            * effective_prefill_tokens
-                   + load_weight * (queued + used_tokens)
+    score(u) = rtt_weight     * rtt_ms(u)
+             + prefill_weight * prefill_rate(u) * (uncached + queued_tokens(u))
 
-where ``prefill_weight`` and ``load_weight`` both have units of
-seconds-per-token, measured directly from a single replica.
+Both terms resolve to **milliseconds**.  ``prefill_rate`` has units of
+**ms / token**; the calibrator measures the raw prefill rate in
+seconds-per-token and multiplies by 1000 when emitting the
+recommendation.  The dimensionless ``*_weight`` knobs default to 1.0
+(physical magnitude) and are tuned separately.  (The decode rate is
+still measured as a diagnostic but is no longer a routing parameter.)
 
 Building blocks::
 
@@ -37,9 +40,9 @@ Building blocks::
         Best-effort ``POST /flush_cache`` (SGLang RadixAttention) so each
         calibration sample starts from a clean KV cache.
 
-    compute_stats / percentile / ols_fit / recommend_hyperparameters
-        Reduce a list of samples to summary stats and recommended
-        ``prefill_weight`` / ``load_weight`` values.
+    compute_stats / percentile / ols_fit / recommend_rates
+        Reduce a list of samples to summary stats and the recommended
+        ``prefill_rate`` value.
 """
 
 from __future__ import annotations
@@ -238,7 +241,7 @@ async def flush_replica_cache(
     Returns whether the upstream responded with a 2xx. Used between
     calibration samples so each probe starts from a clean RadixAttention
     cache (otherwise consecutive prompts that share a prefix would let the
-    second one skip prefill, biasing ``prefill_weight`` downward).
+    second one skip prefill, biasing ``prefill_rate`` downward).
     """
     try:
         r = await client.post("/flush_cache", timeout=timeout)
@@ -314,45 +317,50 @@ async def measure_chat_completion(
     }
 
 
-def recommend_hyperparameters(samples: list[dict]) -> dict:
-    """Median-of-rates recommendation for the GORGO scoring weights,
-    pooled across whatever replicas produced ``samples``.
+def recommend_rates(samples: list[dict]) -> dict:
+    """Median-of-rates recommendation for the GORGO physical rate
+    parameter, pooled across whatever replicas produced ``samples``.
 
-    Both ``prefill_weight`` and ``load_weight`` have units of
-    seconds-per-token in the scoring function, so we report the median
-    per-sample rate (robust to outliers) for each. ``prefill_weight`` is the
-    median prefill rate; ``load_weight`` is the median decode
-    rate, since queued / used tokens drain at the decode rate.
+    ``prefill_rate`` has units of **milliseconds per token** in the
+    scoring function (matching the ms-scale RTT term), so we take the
+    median per-sample prefill rate in seconds-per-token and multiply by
+    1000.  The decode rate is no longer a routing parameter (the GORGO
+    cost model dropped the occupancy/load term), so it isn't emitted
+    here -- though :func:`summarize_samples` still reports it as a
+    diagnostic.
 
     Pooled output is the right answer for *defaults* (offline
     calibrate, fleet-wide tuning) and for replicas the auto-tuner has
     not yet observed. For per-replica recommendations off live
-    traffic, see :func:`recommend_hyperparameters_per_target`.
+    traffic, see :func:`recommend_rates_per_target`.
     """
     if not samples:
-        return {"prefill_weight": 0.0, "load_weight": 0.0}
+        return {"prefill_rate": 0.0}
     prefill_sorted = sorted(s["prefill_rate_seconds_per_token"] for s in samples)
-    decode_sorted = sorted(s["decode_rate_seconds_per_token"] for s in samples)
     return {
-        "prefill_weight": prefill_sorted[len(prefill_sorted) // 2],
-        "load_weight": decode_sorted[len(decode_sorted) // 2],
+        "prefill_rate": prefill_sorted[len(prefill_sorted) // 2] * 1000.0,
     }
 
 
-def recommend_hyperparameters_per_target(
+# Backward-compatible alias used by callers that haven't migrated yet.
+recommend_hyperparameters = recommend_rates
+
+
+def recommend_rates_per_target(
     samples: list[dict],
     *,
     min_samples_per_target: int = 5,
 ) -> dict:
     """Bucket ``samples`` by ``target`` and produce per-replica
-    GORGO recommendations alongside a pooled ``defaults`` fallback.
+    GORGO rate recommendations alongside a pooled ``defaults`` fallback.
+    ``prefill_rate`` is in **ms/tok** (see :func:`recommend_rates`).
 
     Returns the structured shape consumed by
     :mod:`policy.gorgo`'s hyperparameter store::
 
         {
-            "defaults":   {"prefill_weight": ..., "load_weight": ...},
-            "per_target": {<url>: {"prefill_weight": ..., "load_weight": ...}, ...}
+            "defaults":   {"prefill_rate": ...},
+            "per_target": {<url>: {"prefill_rate": ...}, ...}
         }
 
     Targets with fewer than ``min_samples_per_target`` observations
@@ -362,7 +370,7 @@ def recommend_hyperparameters_per_target(
     with no ``target`` field (e.g. legacy samples) contribute only
     to ``defaults``.
     """
-    defaults = recommend_hyperparameters(samples)
+    defaults = recommend_rates(samples)
 
     by_target: dict[str, list[dict]] = {}
     for s in samples:
@@ -375,9 +383,13 @@ def recommend_hyperparameters_per_target(
     for url, group in by_target.items():
         if len(group) < min_samples_per_target:
             continue
-        per_target[url] = recommend_hyperparameters(group)
+        per_target[url] = recommend_rates(group)
 
     return {"defaults": defaults, "per_target": per_target}
+
+
+# Backward-compatible alias.
+recommend_hyperparameters_per_target = recommend_rates_per_target
 
 
 def summarize_samples(samples: list[dict]) -> dict:

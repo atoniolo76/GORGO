@@ -94,7 +94,7 @@ paths:
         Partial update of the structured hyperparameter store. Two body
         shapes are accepted:
 
-        * **Flat** -- `{"prefill_weight": X, "load_weight": Y}`. Keys
+        * **Flat** -- `{"prefill_rate": X, "rtt_weight": Y}`. Keys
           are written to the global `defaults` slot. This is the shape
           `proxy/calibrate.py` and `proxy/tuning.py` use.
         * **Structured** -- `{"defaults": {...}, "per_target": {url:
@@ -114,24 +114,24 @@ paths:
                 summary: Update one default
                 value: { prefill_weight: 0.8 }
               both_defaults:
-                summary: Update both defaults
-                value: { prefill_weight: 0.8, load_weight: 1.5 }
+                summary: Update two defaults
+                value: { prefill_weight: 0.8, rtt_weight: 1.5 }
               defaults_only_explicit:
                 summary: Same as flat, but using the structured slot
                 value: { defaults: { prefill_weight: 0.8 } }
               per_target_only:
-                summary: Override one replica without touching defaults
+                summary: Override one replica's rate without touching defaults
                 value:
                   per_target:
                     https://r1.modal.run:
-                      prefill_weight: 0.0005
+                      prefill_rate: 0.0005
               defaults_and_per_target:
                 summary: Update defaults and add one per-target override
                 value:
-                  defaults: { prefill_weight: 0.8, load_weight: 1.5 }
+                  defaults: { prefill_weight: 0.8, rtt_weight: 1.5 }
                   per_target:
                     https://r1.modal.run:
-                      load_weight: 0.001
+                      prefill_rate: 0.001
       responses:
         '200': { $ref: '#/components/responses/HyperparametersUpdated' }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -345,7 +345,7 @@ paths:
         `state["hyperparameters"]`.
 
         Enabling requires `policy: gorgo` (the only policy that
-        consumes `prefill_weight` / `load_weight`). Disabling works
+        consumes `prefill_weight` / `rtt_weight`). Disabling works
         regardless of policy so a misconfigured tuner can always be
         turned off.
       requestBody:
@@ -632,7 +632,7 @@ components:
         - `power-of-two`: sample two replicas, route to the one with fewer
           used + queued tokens.
         - `gorgo`: multi-objective score
-          `latency + prefill_weight * request_tokens + load_weight * (queue + used)`,
+          `rtt_weight * rtt_ms + prefill_weight * prefill_rate * (uncached + queued)`,
           minimized across all replicas.
         - `least-request`, `least-load`, `least-kv-cache`,
           `least-gpu-cache`, `least-latency`, `least-utilization`,

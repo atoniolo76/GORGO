@@ -1,15 +1,17 @@
-"""Calibrate the GORGO policy hyperparameters from a single idle replica.
+"""Calibrate the GORGO policy physical rate from a single idle replica.
 
-Produces an *initial estimate* for ``prefill_weight`` and
-``load_weight`` -- the two knobs in
-``policy/gorgo.py::route_gorgo``::
+Produces an *initial estimate* for ``prefill_rate`` -- the sole
+hardware-rate parameter in ``policy/gorgo.py::route_gorgo``::
 
-    score(u) = latency(u)
-             + prefill_weight            * effective_prefill_tokens
-             + load_weight * (queued + used_tokens)
+    score(u) = rtt_weight     * rtt_ms(u)
+             + prefill_weight * prefill_rate(u) * (uncached + queued_tokens)
 
-Both knobs have units of *seconds per token*, so we measure them
-directly.
+``prefill_rate`` has units of **ms / token** in the scoring function
+(matching the ms-scale RTT term).  The calibrator measures the raw
+prefill rate in seconds-per-token and
+:func:`proxy.measure.recommend_rates` converts to ms/tok.  (The decode
+rate is still measured and reported as a diagnostic, but it is no
+longer a routing parameter -- the load/contention term was removed.)
 
 Per-sample procedure
 --------------------
@@ -17,7 +19,7 @@ Per-sample procedure
 1. (Optional) ``POST /flush_cache`` so the next probe starts from a clean
    RadixAttention KV cache. Without this, consecutive prompts that share a
    user-level prefix would let the second one skip prefill, biasing
-   ``prefill_weight`` downward.
+   ``prefill_rate`` downward.
 2. Ping the replica ``K`` times back-to-back; take the median RTT
    (filters single-ping jitter without being too costly).
 3. Send one *streaming* chat completion with ``max_tokens=N`` (large),
@@ -82,7 +84,7 @@ from proxy.measure import (
     flush_replica_cache,
     measure_chat_completion,
     ping_once,
-    recommend_hyperparameters,
+    recommend_rates,
     summarize_samples,
 )
 from proxy.workload import (
@@ -203,7 +205,8 @@ def calibrate(
     model: str | None = DEFAULT_MODEL,
     output_path: str | None = None,
 ) -> dict:
-    """Estimate ``prefill_weight`` and ``load_weight`` from a single replica.
+    """Estimate ``prefill_rate`` from a single replica (the decode rate
+    is also measured as a diagnostic but is not a routing parameter).
 
     Args:
         replica_url: Direct URL of the SGLang replica to probe (bypasses
@@ -230,7 +233,7 @@ def calibrate(
             taken. 3 is enough to filter outliers without being slow.
         flush_between_samples: ``POST /flush_cache`` before each probe so
             consecutive prompts that share a prefix can't bias
-            ``prefill_weight`` downward via cached KV. Disable only when
+            ``prefill_rate`` downward via cached KV. Disable only when
             measuring intentional prefix-cache speedups.
         model: Override the request body's ``model`` field. ``None``
             leaves the source-row value in place.
@@ -352,7 +355,7 @@ def calibrate(
     stats["attempted"] = inner["attempted"]
     stats["flush_failures"] = inner["flush_failures"]
 
-    recommended = recommend_hyperparameters(samples)
+    recommended = recommend_rates(samples)
 
     print()
     ping = stats["ping_seconds"]
@@ -365,18 +368,18 @@ def calibrate(
         f"p95={ping['p95']:.4f} (n={ping['n']})"
     )
     print(
-        f"[calibrate] prefill_weight (s/tok)   median={pre['median']:.6f} "
+        f"[calibrate] prefill rate (s/tok)  median={pre['median']:.6f} "
         f"mean={pre['mean']:.6f} p95={pre['p95']:.6f} "
         f"(slope={pre_fit['b']:.6f} intercept={pre_fit['a']:.4f}s "
         f"r2={pre_fit['r2']:.3f})"
     )
     print(
-        f"[calibrate] t_decode  (s/tok)   median={dec['median']:.6f} "
+        f"[calibrate] decode rate  (s/tok)  median={dec['median']:.6f} "
         f"mean={dec['mean']:.6f} p95={dec['p95']:.6f} "
         f"(slope={dec_fit['b']:.6f} intercept={dec_fit['a']:.4f}s "
         f"r2={dec_fit['r2']:.3f})"
     )
-    print(f"[calibrate] recommended initial hyperparameters: {recommended}")
+    print(f"[calibrate] recommended initial rates (ms/tok): {recommended}")
 
     if output_path is None:
         ts = run_started_at.strftime("%Y%m%d_%H%M%S")
@@ -411,7 +414,7 @@ def calibrate(
         },
         "samples": samples,
         "stats": stats,
-        "recommended_hyperparameters": recommended,
+        "recommended_rates": recommended,
         "output_path": resolved_output_path,
     }
     with open(resolved_output_path, "w") as f:

@@ -1298,3 +1298,126 @@ def main(
         force_synthetic_arrivals=force_synthetic_arrivals,
         skip_rows=skip_rows,
     )
+
+
+analyze_image = modal.Image.debian_slim().add_local_python_source("app")
+
+
+@app.function(
+    image=analyze_image,
+    volumes={"/data": completions_volume},
+    timeout=30 * 60,
+    memory=1024 * 8,
+)
+def analyze_trace_reuse(trace_paths_csv: str, max_input_tokens: int = 24000, max_tokens: int = 128):
+    """Analyze KV cache reuse (global, intra-user, cross-user) for traces on the volume.
+
+    Prints a JSON summary per trace with block reuse decomposed by user session.
+    """
+    import json
+    from collections import defaultdict
+
+    completions_volume.reload()
+    results = []
+    trace_paths = [p.strip() for p in trace_paths_csv.split(",") if p.strip()]
+
+    for path in trace_paths:
+        rows = []
+        with open(path) as f:
+            for line in f:
+                rows.append(json.loads(line))
+
+        effective_cap = max_input_tokens - max_tokens
+        kept = [r for r in rows if r.get("input_length", 0) <= effective_cap]
+        filtered = len(rows) - len(kept)
+
+        global_blocks: set[int] = set()
+        global_total = 0
+
+        user_blocks: dict[str, set[int]] = defaultdict(set)
+        user_total: dict[str, int] = defaultdict(int)
+        user_rows: dict[str, int] = defaultdict(int)
+
+        input_lengths = []
+        output_lengths = []
+
+        for r in kept:
+            bids = r.get("hash_ids", [])
+            user = r.get("token_hash", "unknown")
+            input_lengths.append(r.get("input_length", 0))
+            output_lengths.append(r.get("output_length", 0))
+
+            global_total += len(bids)
+            global_blocks.update(bids)
+
+            user_total[user] += len(bids)
+            user_blocks[user].update(bids)
+            user_rows[user] += 1
+
+        global_unique = len(global_blocks)
+        global_reuse_pct = (
+            100.0 * (global_total - global_unique) / global_total if global_total else 0.0
+        )
+
+        intra_user_reused = 0
+        intra_user_total = 0
+        for user in user_total:
+            ut = user_total[user]
+            uu = len(user_blocks[user])
+            intra_user_total += ut
+            intra_user_reused += ut - uu
+
+        intra_user_reuse_pct = (
+            100.0 * intra_user_reused / intra_user_total if intra_user_total else 0.0
+        )
+
+        all_user_unique = sum(len(bs) for bs in user_blocks.values())
+        cross_user_reused = all_user_unique - global_unique
+        cross_user_reuse_pct = 100.0 * cross_user_reused / global_total if global_total else 0.0
+
+        sorted_input = sorted(input_lengths)
+        n = len(sorted_input)
+        p50_input = sorted_input[n // 2] if n else 0
+        p95_input = sorted_input[int(n * 0.95)] if n else 0
+        p99_input = sorted_input[int(n * 0.99)] if n else 0
+        avg_input = sum(input_lengths) / n if n else 0
+        avg_output = sum(output_lengths) / n if n else 0
+
+        num_users = len(user_total)
+        top_users = sorted(user_rows.items(), key=lambda x: -x[1])[:5]
+
+        result = {
+            "path": path,
+            "name": path.split("/")[-1].replace(".jsonl", ""),
+            "total_rows": len(rows),
+            "kept_after_filter": len(kept),
+            "filtered_out": filtered,
+            "filter_cap": effective_cap,
+            "num_users": num_users,
+            "input_tokens": {
+                "avg": round(avg_input),
+                "p50": p50_input,
+                "p95": p95_input,
+                "p99": p99_input,
+                "total": sum(input_lengths),
+            },
+            "output_tokens": {
+                "avg": round(avg_output),
+                "total": sum(output_lengths),
+            },
+            "blocks": {
+                "total": global_total,
+                "global_unique": global_unique,
+                "global_reuse_pct": round(global_reuse_pct, 1),
+                "intra_user_reuse_pct": round(intra_user_reuse_pct, 1),
+                "cross_user_reuse_pct": round(cross_user_reuse_pct, 1),
+            },
+            "top_users_by_rows": [
+                {"token_hash": th[:12] + "...", "rows": cnt} for th, cnt in top_users
+            ],
+        }
+        results.append(result)
+        print(json.dumps(result, indent=2))
+        print(flush=True)
+
+    return results

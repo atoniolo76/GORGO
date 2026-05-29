@@ -61,21 +61,31 @@ Optimizes for fair resource distribution across replicas rather than minimizing 
 
 ## GORGO
 
-All GORGO variants use the same additive cost model and pick the replica with the minimum score:
+All GORGO variants use the same additive cost model and pick the replica with the minimum score. Every term resolves to milliseconds so the score is an estimated delay:
 
 ```
-score(replica) = rtt_weight × network_rtt
-               + prefill_weight × (input_tokens − cached_prefix_tokens)
-               + load_weight × (queued_tokens + used_kv_tokens)
+score(replica) = rtt_weight     × rtt_ms
+               + prefill_weight × prefill_rate × (uncached_tokens + queued_tokens)
 ```
+
+where `uncached_tokens = input_tokens − cached_prefix_tokens`. The model has two cost sources: network round-trip, and prefill work ahead of the request (its own uncached prompt plus the prompt tokens already queued on the replica — both drain at `prefill_rate`). There is deliberately **no load/contention term**: `num_used_tokens` (KV occupancy) was dropped after it proved to be a stale, uncorrelated, non-predictive signal. Load balancing instead falls out of `queued_tokens`, a real-time proxy-side counter that provides self-limiting feedback.
+
+Parameters split into two families:
+
+| Parameter | Kind | Units | Source |
+| --- | --- | --- | --- |
+| `prefill_rate` | Physical rate | ms / token | Calibrator or fit auto-tuner; per-replica |
+| `rtt_weight` | Tuning weight | dimensionless (default 1.0) | Spec or online-ES tuner; global |
+| `prefill_weight` | Tuning weight | dimensionless (default 1.0) | Spec or online-ES tuner; global |
 
 | Term | What it captures | Source |
 | --- | --- | --- |
-| `rtt_weight × network_rtt` | Weighted round-trip to the replica | EWMA of a dedicated `GET /` probe, isolated from `/metrics` handler load |
-| `prefill_weight × uncached_tokens` | Estimated prefill time for the tokens NOT already in the replica's KV cache | Radix trie lookup at routing time; `prefill_weight` is a per-token rate |
-| `load_weight × load` | Cost of waiting behind other requests | Proxy-side in-flight token counter + SGLang's `num_used_tokens` |
+| `rtt_weight × rtt_ms` | Weighted network round-trip (ms) | EWMA of a dedicated `GET /` probe, converted from seconds to ms |
+| `prefill_weight × prefill_rate × (uncached + queued)` | Estimated prefill time, including backlog ahead | Radix trie for cached tokens; proxy-side queued-token counter; `prefill_rate` from calibration |
 
-The three variants differ only in how `rtt_weight`, `prefill_weight`, and `load_weight` are set:
+With all weights at 1.0, the score is a physically grounded time estimate. Weights above 1 amplify a term; below 1 dampen it.
+
+The three variants differ only in how rates and weights are set:
 
 ### `gorgo-static`
 
@@ -83,11 +93,11 @@ Fixed hyperparameters (set in the spec, never changed during the run). Tests the
 
 ### `gorgo-autotune`
 
-**Fit mode.** Every 16 new request samples, recomputes `prefill_weight` and `load_weight` per replica by taking the median of observed `(TTFT − RTT) / uncached_tokens` rates over the last 64 samples. Adapts to per-replica hardware/RTT differences automatically.
+**Fit mode.** Every 16 new request samples, recomputes `prefill_rate` per replica by taking the median of observed `(TTFT − RTT) / uncached_tokens` rates over the last 64 samples. Adapts to per-replica hardware/RTT differences automatically. Tuning weights stay at their spec values.
 
 ### `gorgo-hillclimb`
 
-**Online-ES mode.** Gaussian (1+1)-Evolution Strategy with Rechenberg's 1/5 success rule. Directly minimizes `neg_p95_ttft` over the rolling 64-sample window by perturbing `rtt_weight`, `prefill_weight`, and `load_weight` in log-space. Doesn't try to estimate physical rates — just finds whatever values produce the best p95 TTFT.
+**Online-ES mode.** Gaussian (1+1)-Evolution Strategy with Rechenberg's 1/5 success rule. Searches over the dimensionless weights (`rtt_weight`, `prefill_weight`) in log-space to minimize the configured objective metric over the rolling 64-sample window. `prefill_rate` stays at its calibrated value; the ES only adjusts relative weighting.
 
 The ES cycle:
 1. Score the current window (p95 TTFT of last 64 requests)

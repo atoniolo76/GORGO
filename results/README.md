@@ -128,7 +128,7 @@ python3 scripts/plot_tune_convergence.py \
   --out-dir results/analysis \
   --title "GLM5 W1 Hillclimb Convergence"
 
-# Autotune fit convergence (per-replica prefill_weight / load_weight)
+# Autotune fit convergence (per-replica prefill_rate / load_rate)
 python3 scripts/plot_tune_convergence.py \
   --tune-jsonl results/proxy_traces/<run_id>_gorgo-autotune/tune.jsonl \
   --out-dir results/analysis \

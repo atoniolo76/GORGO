@@ -42,6 +42,14 @@ def _load_tune_events(path: Path) -> list[dict]:
     return events
 
 
+def _get(d: dict, *keys, default=None):
+    """Look up the first matching key, falling back across old/new naming."""
+    for k in keys:
+        if k in d:
+            return d[k]
+    return default
+
+
 def _plot_hillclimb(events: list[dict], title: str, out_dir: Path) -> None:
     steps = [e["step"] for e in events]
     samples = [e.get("total_samples", i) for i, e in enumerate(events)]
@@ -50,10 +58,12 @@ def _plot_hillclimb(events: list[dict], title: str, out_dir: Path) -> None:
     fig.suptitle(title, fontsize=14, fontweight="bold")
 
     ax = axes[0, 0]
-    prefill_weight_best = [e["best_params"]["prefill_weight"] for e in events]
-    qw_best = [e["best_params"]["load_weight"] for e in events]
-    ax.plot(samples, prefill_weight_best, label="prefill_weight (best)", color="tab:blue")
-    ax.plot(samples, qw_best, label="load_weight (best)", color="tab:orange")
+    prefill_best = [
+        _get(e["best_params"], "prefill_weight", "prefill_rate", default=0) for e in events
+    ]
+    load_best = [_get(e["best_params"], "load_weight", "load_rate", default=0) for e in events]
+    ax.plot(samples, prefill_best, label="prefill (best)", color="tab:blue")
+    ax.plot(samples, load_best, label="load (best)", color="tab:orange")
     proposals = [
         (e.get("total_samples", i), e["proposal"])
         for i, e in enumerate(events)
@@ -61,8 +71,8 @@ def _plot_hillclimb(events: list[dict], title: str, out_dir: Path) -> None:
     ]
     if proposals:
         prop_x = [p[0] for p in proposals]
-        prop_tp = [p[1]["prefill_weight"] for p in proposals]
-        prop_qw = [p[1]["load_weight"] for p in proposals]
+        prop_tp = [_get(p[1], "prefill_weight", "prefill_rate", default=0) for p in proposals]
+        prop_qw = [_get(p[1], "load_weight", "load_rate", default=0) for p in proposals]
         ax.scatter(prop_x, prop_tp, s=8, alpha=0.3, color="tab:blue", zorder=1)
         ax.scatter(prop_x, prop_qw, s=8, alpha=0.3, color="tab:orange", zorder=1)
     ax.set_yscale("log")
@@ -118,13 +128,13 @@ def _plot_fit(events: list[dict], title: str, out_dir: Path) -> None:
     fig.suptitle(title, fontsize=14, fontweight="bold")
 
     ax = axes[0]
-    tp_defaults = [e["defaults"]["prefill_weight"] for e in events]
-    qw_defaults = [e["defaults"]["load_weight"] for e in events]
-    ax.plot(samples, tp_defaults, label="prefill_weight (defaults)", color="tab:blue")
-    ax.plot(samples, qw_defaults, label="load_weight (defaults)", color="tab:orange")
+    tp_defaults = [_get(e["defaults"], "prefill_rate", "prefill_weight", default=0) for e in events]
+    qw_defaults = [_get(e["defaults"], "load_rate", "load_weight", default=0) for e in events]
+    ax.plot(samples, tp_defaults, label="prefill_rate (defaults)", color="tab:blue")
+    ax.plot(samples, qw_defaults, label="load_rate (defaults)", color="tab:orange")
     ax.set_yscale("log")
     ax.set_xlabel("Total samples")
-    ax.set_ylabel("Hyperparameter value")
+    ax.set_ylabel("Rate (ms/tok)")
     ax.set_title("Pooled Defaults")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
@@ -135,12 +145,21 @@ def _plot_fit(events: list[dict], title: str, out_dir: Path) -> None:
         targets.update(e.get("per_target", {}).keys())
     for i, target in enumerate(sorted(targets)):
         short = target.split("-")[-1][:12] if "-" in target else target[:20]
-        tp = [e.get("per_target", {}).get(target, {}).get("prefill_weight", np.nan) for e in events]
-        ax.plot(samples, tp, label=f"prefill_weight ({short})", alpha=0.8)
+        pt = e.get("per_target", {}).get(target, {})
+        tp = [
+            _get(
+                e.get("per_target", {}).get(target, {}),
+                "prefill_rate",
+                "prefill_weight",
+                default=np.nan,
+            )
+            for e in events
+        ]
+        ax.plot(samples, tp, label=f"prefill_rate ({short})", alpha=0.8)
     ax.set_yscale("log")
     ax.set_xlabel("Total samples")
-    ax.set_ylabel("prefill_weight")
-    ax.set_title("Per-Replica prefill_weight")
+    ax.set_ylabel("prefill_rate (ms/tok)")
+    ax.set_title("Per-Replica prefill_rate")
     if targets:
         ax.legend(fontsize=7)
     ax.grid(True, alpha=0.3)

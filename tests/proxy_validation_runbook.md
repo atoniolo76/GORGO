@@ -271,6 +271,9 @@ Observed passing result:
     "current_policy": "random",
     "current_hyperparameters": {
       "defaults": {
+        "prefill_rate": 1.0,
+        "load_rate": 1.0,
+        "rtt_weight": 1.0,
         "prefill_weight": 1.0,
         "load_weight": 1.0
       },
@@ -339,6 +342,9 @@ Observed passing result:
     "current_policy": "random",
     "current_hyperparameters": {
       "defaults": {
+        "prefill_rate": 1.0,
+        "load_rate": 1.0,
+        "rtt_weight": 1.0,
         "prefill_weight": 1.0,
         "load_weight": 1.0
       },
@@ -580,7 +586,7 @@ Apply a small manual hyperparameter update:
 ```bash
 curl -s -X POST "$PROXY_URL/hyperparameters" \
   -H "Content-Type: application/json" \
-  -d '{"prefill_weight":0.8,"load_weight":1.5}' | jq
+  -d '{"prefill_rate":0.8,"load_rate":1.5}' | jq
 ```
 
 Expected result:
@@ -604,7 +610,7 @@ Observed passing result after flush and tiny workload:
 [workload] source=hf path=/datasets/datasets/lmsys__lmsys-chat-1m (preset=lmsys)
 [workload] dispatching: proxy=https://ta-01kqbxdbv7g6tjcsqgv7wfphc4-8000-b0g7nbfag0qrbd5mapcbsgf3s.w.modal.host concurrency=16 offset=0 limit=5
 [workload]   proxy: policy='gorgo' model='Qwen/Qwen3.5-35B-A3B-FP8' replicas=1
-[workload]   proxy hyperparameters: {'defaults': {'prefill_weight': 0.8, 'load_weight': 1.5}, 'per_target': {}}
+[workload]   proxy hyperparameters: {'defaults': {'prefill_rate': 0.8, 'load_rate': 1.5, ...}, 'per_target': {}}
 [workload] hf dataset at '/datasets/datasets/lmsys__lmsys-chat-1m': 1000000 rows, using column 'conversation'
 {"event": "progress", "elapsed_seconds": 13.42, "sent": 5, "done": 1, "ok": 1, "fail": 0, "rate_rps": 0.07}
 {"event": "progress", "elapsed_seconds": 19.199, "sent": 5, "done": 2, "ok": 2, "fail": 0, "rate_rps": 0.1}
@@ -630,7 +636,7 @@ Observed passing two-replica `gorgo` result:
 [workload] source=hf path=/datasets/datasets/lmsys__lmsys-chat-1m (preset=lmsys)
 [workload] dispatching: proxy=https://ta-01kqc02kanwqhc5x3nzz4kgfq1-8000-997ytmjgkkqlx4mun8se0f90d.w.modal.host concurrency=16 offset=0 limit=5
 [workload]   proxy: policy='gorgo' model='Qwen/Qwen3.5-35B-A3B-FP8' replicas=2
-[workload]   proxy hyperparameters: {'defaults': {'prefill_weight': 1.0, 'load_weight': 1.0}, 'per_target': {}}
+[workload]   proxy hyperparameters: {'defaults': {'prefill_rate': 1.0, 'load_rate': 1.0, 'rtt_weight': 1.0, ...}, 'per_target': {}}
 [workload] hf dataset at '/datasets/datasets/lmsys__lmsys-chat-1m': 1000000 rows, using column 'conversation'
 {"event": "progress", "elapsed_seconds": 11.152, "sent": 5, "done": 1, "ok": 1, "fail": 0, "rate_rps": 0.09}
 {"event": "progress", "elapsed_seconds": 25.442, "sent": 5, "done": 3, "ok": 3, "fail": 0, "rate_rps": 0.12}
@@ -702,6 +708,9 @@ Observed passing result:
     "current_policy": "gorgo",
     "current_hyperparameters": {
       "defaults": {
+        "prefill_rate": 1.0,
+        "load_rate": 1.0,
+        "rtt_weight": 1.0,
         "prefill_weight": 1.0,
         "load_weight": 1.0
       },
@@ -712,8 +721,8 @@ Observed passing result:
     "window_size_used": 5,
     "recommendation": {
       "defaults": {
-        "prefill_weight": 0.0038264109391304576,
-        "load_weight": 0.006223890801575723
+        "prefill_rate": 0.0038264109391304576,
+        "load_rate": 0.006223890801575723
       },
       "per_target": {}
     }
@@ -745,9 +754,9 @@ Expected result:
 Observed passing proxy logs during the tiny workload:
 
 ```text
-[proxy] auto-tune #1 window=5 defaults={'prefill_weight': 0.000839044623188541, 'load_weight': 0.008014929686309102} per_target=[] (apply=False)
-[proxy] auto-tune #2 window=5 defaults={'prefill_weight': 0.002569623382429061, 'load_weight': 0.007499608868239356} per_target=[] (apply=False)
-[proxy] auto-tune #3 window=5 defaults={'prefill_weight': 0.002976764047619033, 'load_weight': 0.007236269025833169} per_target=[] (apply=False)
+[proxy] auto-tune #1 window=5 defaults={'prefill_rate': 0.000839044623188541, 'load_rate': 0.008014929686309102} per_target=[] (apply=False)
+[proxy] auto-tune #2 window=5 defaults={'prefill_rate': 0.002569623382429061, 'load_rate': 0.007499608868239356} per_target=[] (apply=False)
+[proxy] auto-tune #3 window=5 defaults={'prefill_rate': 0.002976764047619033, 'load_rate': 0.007236269025833169} per_target=[] (apply=False)
 ```
 
 This confirms the tuner recomputed recommendations from live traffic while
@@ -759,7 +768,7 @@ Observed passing shadow-tuning workload result:
 [workload] source=hf path=/datasets/datasets/lmsys__lmsys-chat-1m (preset=lmsys)
 [workload] dispatching: proxy=https://ta-01kqc02kanwqhc5x3nzz4kgfq1-8000-997ytmjgkkqlx4mun8se0f90d.w.modal.host concurrency=16 offset=0 limit=10
 [workload]   proxy: policy='gorgo' model='Qwen/Qwen3.5-35B-A3B-FP8' replicas=2
-[workload]   proxy hyperparameters: {'defaults': {'prefill_weight': 1.0, 'load_weight': 1.0}, 'per_target': {}}
+[workload]   proxy hyperparameters: {'defaults': {'prefill_rate': 1.0, 'load_rate': 1.0, 'rtt_weight': 1.0, ...}, 'per_target': {}}
 [workload] hf dataset at '/datasets/datasets/lmsys__lmsys-chat-1m': 1000000 rows, using column 'conversation'
 {"event": "progress", "elapsed_seconds": 12.035, "sent": 10, "done": 1, "ok": 1, "fail": 0, "rate_rps": 0.08}
 {"event": "progress", "elapsed_seconds": 22.148, "sent": 10, "done": 2, "ok": 2, "fail": 0, "rate_rps": 0.09}
