@@ -22,9 +22,9 @@
     {"name": "prefix-cache"},
     {"name": "simple-session-affinity"},
     {
-      "_note": "TODO: Replace prefill_weight and rtt_weight with learned values from glm5_c64_tuning_p95ttft. prefill_rate comes from Phase 0 calibration. queue_rate is fitted by the fit auto-tuner at runtime.",
+      "_note": "Learned from glm5_c64_tuning_p95ttft_v1 (ES converged step 21, best_score=-0.3993). prefill_rate calibrated at startup; queue_rate fitted live.",
       "name": "gorgo", "label": "gorgo-static-p95",
-      "hyperparameters": {"prefill_weight": 0.0, "rtt_weight": 0.0}
+      "hyperparameters": {"prefill_weight": 1.650500264780837, "rtt_weight": 5.0}
     }
   ],
   "replica_homogeneity_check": {
