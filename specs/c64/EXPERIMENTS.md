@@ -13,44 +13,43 @@ learned weights generalize to held-out traffic?
 
 ```
 score(u) = rtt_weight     × rtt_ms(u)
-         + prefill_weight × (prefill_rate(u) × uncached_tokens(u)
-                           + queue_rate(u)   × queued_tokens(u))
+         + prefill_weight × uncached_tokens(u)
+         + load_weight    × queued_tokens(u)
 ```
 
-Four parameters, two families:
+Three weights, all learned by ES:
 
-| Parameter | Type | Units | How it's set |
-|-----------|------|-------|-------------|
-| `prefill_rate` | physical rate | ms/tok | Calibrated idle at startup (per-replica) |
-| `queue_rate` | physical rate | ms/tok | Fitted continuously from live traffic residuals (per-replica) |
-| `prefill_weight` | tuning weight | dimensionless | Searched by online-ES during tuning; frozen for eval |
-| `rtt_weight` | tuning weight | dimensionless | Searched by online-ES during tuning; frozen for eval |
+| Parameter | What it controls | Range |
+|-----------|-----------------|-------|
+| `rtt_weight` | ms of score per ms of network RTT | (1e-5, 50.0) |
+| `prefill_weight` | ms of score per uncached prompt token (absorbs hardware speed) | (1e-5, 5.0) |
+| `load_weight` | ms of score per queued token on the replica (absorbs queue drain rate) | (1e-5, 5.0) |
 
-The rates are measured, the weights are learned. The ES tuner sees a
-stable cost surface because the underlying rates are pinned/fitted
-independently.
+No physical rates (`prefill_rate`, `queue_rate`). No calibration phase.
+The ES absorbs hardware speed and queue dynamics into the weights.
+`prefill_weight` and `load_weight` are decoupled so the tuner can
+independently balance "prefer cached replicas" vs "avoid loaded replicas."
 
 ## Experiment flow
 
-### What happens inside every run (~43 min)
+### What happens inside every run (~42 min)
 
 ```
  0:00  Fleet startup        18 engines (2×L40S) + 6 proxies spin up
 10:00  Homogeneity check    Probe each replica for TTFT variance
-10:20  Calibration          Gorgo pools only: 16 probes/replica, cache flushed,
-                            idle → pin prefill_rate per-replica (ms/tok)
-12:00  Workload starts      Trace replayed at c=64 open-loop
-       ├─ rate fitter       Continuously fits queue_rate from live residuals
-       └─ ES tuner          Searches (prefill_weight, rtt_weight) [tuning only]
-42:00  Teardown             Flush traces, commit volume, stop fleet
+10:20  Workload starts      Trace replayed at c=64 open-loop
+       └─ ES tuner          Searches (prefill_weight, load_weight, rtt_weight)
+                            [tuning only; eval runs use frozen weights]
+40:00  Teardown             Flush traces, commit volume, stop fleet
 ```
 
 ### 9-run matrix
 
-**Phase 1 — Tuning** (3 runs, sequential, ~2.2 hrs)
+**Phase 1 — Tuning** (3 runs, sequential, ~2.1 hrs)
 
 Replay T1 (Apr 2 night 00:30–01:00, ~2,753 requests). The ES tuner
-learns `prefill_weight` and `rtt_weight` that minimize each metric.
+learns `prefill_weight`, `load_weight`, and `rtt_weight` that minimize
+each metric.
 
 | Run | Spec | Metric | Experiment ID |
 |-----|------|--------|---------------|
@@ -61,10 +60,8 @@ learns `prefill_weight` and `rtt_weight` that minimize each metric.
 All use manifest `manifests/manifest_glm5_apr2_0030_0100.json`.
 
 After each: extract `best_params` → fill into the corresponding eval spec.
-Only `prefill_weight` and `rtt_weight` transfer. Rates are re-measured
-on the eval fleet.
 
-**Phase 2 — Evaluation** (6 runs, parallelizable, ~43 min)
+**Phase 2 — Evaluation** (6 runs, parallelizable, ~42 min)
 
 Freeze the learned weights and replay on two held-out traces:
 
@@ -77,17 +74,7 @@ Freeze the learned weights and replay on two held-out traces:
 | EVAL-p99-temporal | `eval/policy_matrix_c64_eval_p99ttft.json` | `manifests/manifest_glm5_apr2_0100_0130.json` | Temporal generalization |
 | EVAL-p99-diurnal | `eval/policy_matrix_c64_eval_p99ttft.json` | `manifests/manifest_glm5_apr2_1230_1300.json` | Diurnal generalization |
 
-Each eval runs all 6 policies in parallel (random, least-request,
-least-load, prefix-cache, session-affinity, gorgo-static) for
-head-to-head comparison on the same trace.
-
-### Timing
-
-| Schedule | Wall time | Peak GPUs |
-|----------|-----------|-----------|
-| All sequential | ~6.5 hrs | 36 |
-| Tuning sequential → evals parallel | **~2.9 hrs** | 216 |
-| Everything parallel | ~86 min | 216 |
+Each eval runs all 6 policies in parallel for head-to-head comparison.
 
 ## Traces
 
@@ -95,17 +82,11 @@ All on `GORGO-glm5-completions` volume under
 `/data/mooncake_traces/abstract_night_traces/with_bodies/`.
 Manifests in `specs/c64/manifests/`.
 
-| ID | File | Window | Role | Rows | Users | Avg input | KV reuse (global / intra-user / cross-user) |
-|----|------|--------|------|------|-------|-----------|---------------------------------------------|
+| ID | File | Window | Role | Rows | Users | Avg input | KV reuse (global / intra / cross) |
+|----|------|--------|------|------|-------|-----------|-----------------------------------|
 | T1 | `glm5_apr2_0030_to_0100.jsonl` | Apr 2 00:30–01:00 | Tuning | 2,754 | 180 | 3,393 | 72.7% / 71.1% / 1.6% |
 | T2 | `glm5_apr2_0100_to_0130.jsonl` | Apr 2 01:00–01:30 | Eval (temporal) | 3,262 | 194 | 4,482 | 76.3% / 75.2% / 1.0% |
 | T3 | `glm5_apr2_1230_to_1300.jsonl` | Apr 2 12:30–13:00 | Eval (diurnal) | 4,323 | 237 | 4,046 | 74.0% / 71.8% / 2.2% |
-
-Reuse is >97% intra-user (multi-turn conversation prefix sharing).
-Cross-user shared prefixes are negligible (0.4–2.2%).
-
-Token distribution: p50 input is 8 tokens (most requests are tiny),
-p95 is ~17–19k tokens (the heavy tail that drives prefill cost).
 
 ## Commands
 
@@ -191,14 +172,14 @@ modal run --detach --env=alessio-dev experiment_runner/policy_matrix_app.py::mai
 specs/c64/
   EXPERIMENTS.md                              ← this file
   tuning/
-    policy_matrix_c64_tuning_p50ttft.json     ES searches prefill_weight + rtt_weight, metric=neg_p50_ttft
+    policy_matrix_c64_tuning_p50ttft.json     ES searches 3 weights, metric=neg_p50_ttft
     policy_matrix_c64_tuning_p95ttft.json     same, metric=neg_p95_ttft
     policy_matrix_c64_tuning_p99ttft.json     same, metric=neg_p99_ttft
     policy_matrix_c64_tuning.json             original v8 spec (reference)
   eval/
-    policy_matrix_c64_eval_p50ttft.json       frozen weights from p50 tuning (TODO: fill after tuning)
-    policy_matrix_c64_eval_p95ttft.json       frozen weights from p95 tuning (TODO: fill after tuning)
-    policy_matrix_c64_eval_p99ttft.json       frozen weights from p99 tuning (TODO: fill after tuning)
+    policy_matrix_c64_eval_p50ttft.json       frozen weights from p50 tuning (TODO)
+    policy_matrix_c64_eval_p95ttft.json       frozen weights from p95 tuning (TODO)
+    policy_matrix_c64_eval_p99ttft.json       frozen weights from p99 tuning (TODO)
     policy_matrix_c64_eval.json               original v8 eval (reference)
   manifests/
     manifest_glm5_apr2_0030_0100.json         T1: tuning trace
@@ -209,26 +190,30 @@ specs/c64/
     manifest_glm5_apr1_midday.json            Apr 1 reference (not used)
 ```
 
-## Code changes (this session)
+## Code changes (3-weight model)
 
 | File | What changed |
 |------|-------------|
-| `policy/gorgo.py` | Added `queue_rate` to schema; split scoring into `own_prefill + queue_delay` |
-| `proxy/measure.py` | Added `_fit_queue_rate()` residual regression; extended `recommend_rates()` |
-| `proxy/modal_proxy.py` | Plumbed `queued_tokens_at_dispatch`; rate fitting inside ES path; ES no longer clobbers `per_target` |
-| `experiment_runner/policy_matrix_app.py` | Added `_calibrate_gorgo_fleet()` integrated into startup |
-| `data_processing/build_mooncake_trace.py` | Added `analyze_trace_reuse()` utility |
-
-## Prior runs (reference)
-
-| Experiment ID | Trace | Metric | Learned |
-|---------------|-------|--------|---------|
-| `glm5_c64_tuning_v8` | Apr 1 00:30–01:00 | `neg_p95_ttft` | `prefill_weight=0.060, rtt_weight=4.132` |
-| `glm5_c64_eval_v8` | Apr 2 00:30–01:00 | static eval | gorgo-static best TTFT, worst E2E |
+| `policy/gorgo.py` | 3-weight model: `rtt_weight × rtt_ms + prefill_weight × uncached + load_weight × queued`. No rates. |
+| `proxy/modal_proxy.py` | Removed rate fitting from online-es path. ES searches 3 weights. |
+| `proxy/measure.py` | Removed `_fit_queue_rate()`. `recommend_rates` retained as diagnostic only. |
+| `proxy/tuning.py` | Added `load_weight` to `HYPERPARAM_RANGES`. `rtt_weight` range widened to 50.0. |
+| `experiment_runner/policy_matrix_app.py` | Removed `_calibrate_gorgo_fleet()`. No calibration phase. |
 
 ## Trace analysis tool
 
 ```bash
 modal run --env=alessio-dev data_processing/build_mooncake_trace.py::analyze_trace_reuse \
   --trace-paths-csv "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_0030_to_0100.jsonl,/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_0100_to_0130.jsonl,/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_1230_to_1300.jsonl"
+```
+
+## Pareto frontier simulator
+
+```bash
+modal run --env=alessio-dev data_processing/build_mooncake_trace.py::simulate_pareto_sweep \
+  --trace-path "/data/mooncake_traces/abstract_night_traces/with_bodies/glm5_apr2_0030_to_0100.jsonl" \
+  --replicas-json '[{"region":"us-ashburn-1","rtt_ms":32,"prefill_rate":0.093},{"region":"eu-frankfurt-1","rtt_ms":364,"prefill_rate":0.073},{"region":"ap-seoul-1","rtt_ms":602,"prefill_rate":0.130}]' \
+  --prefill-weights-csv "1.0" \
+  --rtt-weights-csv "0.1,0.5,1.0,2.0,5.0,10.0" \
+  --queue-weights-csv "0.001,0.005,0.01,0.02,0.05,0.1,0.2,0.5"
 ```

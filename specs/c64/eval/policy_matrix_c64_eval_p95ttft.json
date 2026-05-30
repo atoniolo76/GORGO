@@ -1,5 +1,5 @@
 {
-  "_note": "GLM5 c=64 held-out eval for p95-TTFT-tuned params. Replace hyperparameters with learned values from glm5_c64_tuning_p95ttft run. Eval windows: (1) manifest_glm5_apr2_0100_0130.json (next-30-min, temporal generalization), (2) manifest_glm5_apr2_1230_1300.json (midday, diurnal generalization).",
+  "_note": "GLM5 c=64 eval for p95-TTFT-tuned weights. TODO: fill learned values from tuning run.",
   "run_id": "glm5_c64_eval_p95ttft",
   "trace_path": "",
   "start_delay_seconds": 30,
@@ -22,9 +22,9 @@
     {"name": "prefix-cache"},
     {"name": "simple-session-affinity"},
     {
-      "_note": "Learned from glm5_c64_tuning_p95ttft_v1 (ES converged step 21, best_score=-0.3993). prefill_rate calibrated at startup; queue_rate fitted live.",
+      "_note": "TODO: fill from glm5_c64_tuning_p95ttft best_params",
       "name": "gorgo", "label": "gorgo-static-p95",
-      "hyperparameters": {"prefill_weight": 1.650500264780837, "rtt_weight": 5.0}
+      "hyperparameters": {"prefill_weight": 0.0, "load_weight": 0.0, "rtt_weight": 0.0}
     }
   ],
   "replica_homogeneity_check": {

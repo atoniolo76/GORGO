@@ -1,5 +1,5 @@
 {
-  "_note": "GLM5 c=64 held-out eval for p50-TTFT-tuned params. Replace hyperparameters with learned values from glm5_c64_tuning_p50ttft run. Eval windows: (1) manifest_glm5_apr2_0100_0130.json (next-30-min, temporal generalization), (2) manifest_glm5_apr2_1230_1300.json (midday, diurnal generalization).",
+  "_note": "GLM5 c=64 eval for p50-TTFT-tuned weights. TODO: fill learned values from tuning run.",
   "run_id": "glm5_c64_eval_p50ttft",
   "trace_path": "",
   "start_delay_seconds": 30,
@@ -22,9 +22,9 @@
     {"name": "prefix-cache"},
     {"name": "simple-session-affinity"},
     {
-      "_note": "TODO: Replace prefill_weight and rtt_weight with learned values from glm5_c64_tuning_p50ttft. prefill_rate comes from Phase 0 calibration. queue_rate is fitted by the fit auto-tuner at runtime.",
+      "_note": "TODO: fill from glm5_c64_tuning_p50ttft best_params",
       "name": "gorgo", "label": "gorgo-static-p50",
-      "hyperparameters": {"prefill_weight": 0.0, "rtt_weight": 0.0}
+      "hyperparameters": {"prefill_weight": 0.0, "load_weight": 0.0, "rtt_weight": 0.0}
     }
   ],
   "replica_homogeneity_check": {

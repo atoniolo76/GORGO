@@ -1421,3 +1421,257 @@ def analyze_trace_reuse(trace_paths_csv: str, max_input_tokens: int = 24000, max
         print(flush=True)
 
     return results
+
+
+@app.function(
+    image=analyze_image,
+    volumes={"/data": completions_volume},
+    timeout=60 * 60,
+    memory=1024 * 16,
+)
+def simulate_pareto_sweep(
+    trace_path: str,
+    replicas_json: str,
+    prefill_weights_csv: str = "0.01,0.05,0.1,0.2,0.5,1.0,1.5,2.0,3.0,5.0",
+    rtt_weights_csv: str = "0.01,0.05,0.1,0.2,0.5,1.0,2.0,3.0,5.0,10.0,20.0",
+    queue_weights_csv: str = "",
+    concurrency: int = 64,
+    max_tokens: int = 128,
+    max_input_tokens: int = 24000,
+    block_size: int = 512,
+    decode_tok_per_s: float = 120.0,
+):
+    """Simulate GORGO routing for a grid of (prefill_weight, rtt_weight)
+    and produce per-point TTFT/E2E percentiles for Pareto frontier analysis.
+
+    Replays the trace through the scoring function with simulated queue
+    dynamics and prefix cache tracking. No GPUs needed.
+
+    ``replicas_json`` is a JSON list of objects, each with:
+      - ``region``: human label
+      - ``rtt_ms``: measured RTT in milliseconds
+      - ``prefill_rate``: calibrated ms/tok
+      - ``queue_rate``: fitted ms/tok (from live traffic)
+
+    Example::
+
+        [
+          {"region": "us-ashburn-1", "rtt_ms": 32, "prefill_rate": 0.093, "queue_rate": 0.01},
+          {"region": "eu-frankfurt-1", "rtt_ms": 364, "prefill_rate": 0.073, "queue_rate": 0.01},
+          {"region": "ap-seoul-1", "rtt_ms": 602, "prefill_rate": 0.130, "queue_rate": 0.01}
+        ]
+    """
+    import heapq
+    import json
+
+    completions_volume.reload()
+
+    replicas = json.loads(replicas_json)
+    prefill_weights = [float(x) for x in prefill_weights_csv.split(",")]
+    rtt_weights = [float(x) for x in rtt_weights_csv.split(",")]
+
+    effective_cap = max_input_tokens - max_tokens
+
+    print(f"[pareto] loading trace {trace_path}", flush=True)
+    rows = []
+    with open(trace_path) as f:
+        for line in f:
+            r = json.loads(line)
+            if r.get("input_length", 0) > effective_cap:
+                continue
+            rows.append(
+                {
+                    "ts_ms": r["timestamp"],
+                    "input_length": r["input_length"],
+                    "output_length": r.get("output_length", max_tokens),
+                    "hash_ids": r.get("hash_ids", []),
+                }
+            )
+
+    print(f"[pareto] loaded {len(rows)} requests, {len(replicas)} replicas", flush=True)
+
+    decode_ms_per_tok = 1000.0 / decode_tok_per_s
+
+    queue_weights = (
+        [float(x) for x in queue_weights_csv.split(",") if x.strip()]
+        if queue_weights_csv
+        else [0.0]
+    )
+
+    total_points = len(prefill_weights) * len(rtt_weights) * len(queue_weights)
+    print(
+        f"[pareto] grid: {len(prefill_weights)} x {len(rtt_weights)} x {len(queue_weights)} = {total_points} points",
+        flush=True,
+    )
+
+    from collections import Counter
+
+    results = []
+    for pw in prefill_weights:
+        for rw in rtt_weights:
+            for qw in queue_weights:
+                ttfts, e2es, targets = _simulate_one(
+                    rows=rows,
+                    replicas=replicas,
+                    prefill_weight=pw,
+                    rtt_weight=rw,
+                    queue_weight=qw,
+                    concurrency=concurrency,
+                    block_size=block_size,
+                    decode_ms_per_tok=decode_ms_per_tok,
+                )
+                n = len(ttfts)
+                if n == 0:
+                    continue
+                ttfts_sorted = sorted(ttfts)
+                e2es_sorted = sorted(e2es)
+
+                target_dist = Counter(targets)
+
+                point = {
+                    "prefill_weight": pw,
+                    "rtt_weight": rw,
+                    "queue_weight": qw,
+                    "n": n,
+                    "ttft_ms": {
+                        "avg": sum(ttfts) / n,
+                        "p50": ttfts_sorted[n // 2],
+                        "p95": ttfts_sorted[int(n * 0.95)],
+                        "p99": ttfts_sorted[int(n * 0.99)],
+                    },
+                    "e2e_ms": {
+                        "avg": sum(e2es) / n,
+                        "p50": e2es_sorted[n // 2],
+                        "p95": e2es_sorted[int(n * 0.95)],
+                        "p99": e2es_sorted[int(n * 0.99)],
+                    },
+                    "routing_distribution": {
+                        replicas[i]["region"]: target_dist.get(i, 0) for i in range(len(replicas))
+                    },
+                }
+                results.append(point)
+                qw_str = f" qw={qw:<6}" if len(queue_weights) > 1 else ""
+                print(
+                    f"[pareto] pw={pw:<5} rw={rw:<5}{qw_str}  "
+                    f"TTFT p50={point['ttft_ms']['p50']:>7.1f}  p95={point['ttft_ms']['p95']:>7.1f}  "
+                    f"E2E  p50={point['e2e_ms']['p50']:>7.1f}  p95={point['e2e_ms']['p95']:>7.1f}  "
+                    f"dist={dict(target_dist)}",
+                    flush=True,
+                )
+
+    print(f"\n[pareto] completed {len(results)} grid points", flush=True)
+    output_path = trace_path.rsplit(".", 1)[0] + "_pareto_sweep.json"
+    with open(output_path, "w") as f:
+        json.dump({"trace_path": trace_path, "replicas": replicas, "results": results}, f, indent=2)
+    completions_volume.commit()
+    print(f"[pareto] saved to {output_path}", flush=True)
+    return results
+
+
+def _simulate_one(
+    *,
+    rows: list[dict],
+    replicas: list[dict],
+    prefill_weight: float,
+    rtt_weight: float,
+    queue_weight: float = 0.0,
+    concurrency: int,
+    block_size: int,
+    decode_ms_per_tok: float,
+) -> tuple[list[float], list[float], list[int]]:
+    """Event-driven simulation of GORGO routing for one weight pair.
+
+    Queue dynamics emerge from serialized prefill scheduling — no
+    queue_rate constant.  Each replica processes prefills one at a time;
+    a request waits for all prefills ahead of it to complete before its
+    own prefill starts.  Decode runs concurrently (batched) and does not
+    block the next prefill.
+
+    The scoring function uses ``queue_weight * queued_tokens`` as a
+    routing signal (how the policy sees load), but the physical TTFT is
+    determined by the actual prefill queue depth in milliseconds.
+
+    Returns (ttft_list_ms, e2e_list_ms, target_indices).
+    """
+    import heapq
+
+    n_replicas = len(replicas)
+
+    # Per-replica prefix cache (hash_id based, simulating radix trie)
+    prefix_cache: list[set[int]] = [set() for _ in range(n_replicas)]
+    # Per-replica queued token counter (for the scoring function)
+    queued_tokens = [0] * n_replicas
+    # Per-replica: earliest time the GPU can start the next prefill (ms)
+    prefill_available_at = [0.0] * n_replicas
+    # Per-replica completion heap: (completion_time_ms, input_tokens)
+    completion_heaps: list[list[tuple[float, int]]] = [[] for _ in range(n_replicas)]
+
+    ttfts: list[float] = []
+    e2es: list[float] = []
+    targets: list[int] = []
+
+    for row in rows:
+        arrive_ms = float(row["ts_ms"])
+        input_len = row["input_length"]
+        output_len = row["output_length"]
+        hash_ids = row["hash_ids"]
+
+        # Drain completed requests from all replicas up to arrival time
+        for i in range(n_replicas):
+            heap = completion_heaps[i]
+            while heap and heap[0][0] <= arrive_ms:
+                _, completed_tokens = heapq.heappop(heap)
+                queued_tokens[i] = max(0, queued_tokens[i] - completed_tokens)
+
+        # Compute cached prefix length per replica (shared hash_id prefix)
+        cached_tokens = []
+        for i in range(n_replicas):
+            cached_blocks = 0
+            for bid in hash_ids:
+                if bid in prefix_cache[i]:
+                    cached_blocks += 1
+                else:
+                    break
+            cached_tokens.append(cached_blocks * block_size)
+
+        # Score each replica (routing decision)
+        best_idx = 0
+        best_score = float("inf")
+        for i in range(n_replicas):
+            rep = replicas[i]
+            uncached = max(0, input_len - cached_tokens[i])
+            prefill_cost = prefill_weight * rep["prefill_rate"] * uncached
+            queue_cost = queue_weight * queued_tokens[i]
+            rtt_cost = rtt_weight * rep["rtt_ms"]
+            score = rtt_cost + prefill_cost + queue_cost
+            if score < best_score:
+                best_score = score
+                best_idx = i
+
+        # Physical TTFT: RTT + wait for GPU + own prefill
+        rep = replicas[best_idx]
+        uncached = max(0, input_len - cached_tokens[best_idx])
+        own_prefill_ms = rep["prefill_rate"] * uncached
+        prefill_start = max(arrive_ms, prefill_available_at[best_idx])
+        wait_ms = prefill_start - arrive_ms
+        actual_ttft_ms = rep["rtt_ms"] + wait_ms + own_prefill_ms
+
+        # GPU is busy with this prefill until it finishes
+        prefill_available_at[best_idx] = prefill_start + own_prefill_ms
+
+        decode_ms = output_len * decode_ms_per_tok
+        e2e_ms = actual_ttft_ms + decode_ms
+
+        ttfts.append(actual_ttft_ms)
+        e2es.append(e2e_ms)
+        targets.append(best_idx)
+
+        # Update queued token counter and completion heap
+        queued_tokens[best_idx] += input_len
+        completion_time = arrive_ms + e2e_ms
+        heapq.heappush(completion_heaps[best_idx], (completion_time, input_len))
+
+        # Update prefix cache
+        prefix_cache[best_idx].update(hash_ids)
+
+    return ttfts, e2es, targets

@@ -318,86 +318,19 @@ async def measure_chat_completion(
 
 
 def recommend_rates(samples: list[dict]) -> dict:
-    """Median-of-rates recommendation for the GORGO physical rate
-    parameters, pooled across whatever replicas produced ``samples``.
+    """Median-of-rates recommendation, pooled across replicas.
 
-    ``prefill_rate`` has units of **milliseconds per token** in the
-    scoring function (matching the ms-scale RTT term), so we take the
-    median per-sample prefill rate in seconds-per-token and multiply by
-    1000.
-
-    ``queue_rate`` is fitted from the residual TTFT after subtracting
-    RTT and own-prefill cost::
-
-        residual = TTFT - RTT - (prefill_rate * uncached_tokens)
-                 = queue_rate * queued_tokens
-
-    The slope of residual vs queued_tokens gives the effective drain
-    rate of queued tokens under load.  Only samples with nonzero
-    ``queued_tokens_at_dispatch`` contribute to the regression; when
-    there aren't enough the returned ``queue_rate`` is ``None`` (caller
-    should keep the existing value).
-
-    Pooled output is the right answer for *defaults* (offline
-    calibrate, fleet-wide tuning) and for replicas the auto-tuner has
-    not yet observed. For per-replica recommendations off live
-    traffic, see :func:`recommend_rates_per_target`.
+    Returns ``prefill_rate`` in **ms/tok** as a diagnostic.  The
+    3-weight GORGO model does not use this value for routing — the ES
+    absorbs hardware speed into ``prefill_weight`` directly.  Retained
+    for the ``fit`` auto-tuner mode and ``proxy/calibrate.py``.
     """
     if not samples:
         return {"prefill_rate": 0.0}
     prefill_sorted = sorted(s["prefill_rate_seconds_per_token"] for s in samples)
-    prefill_rate_ms = prefill_sorted[len(prefill_sorted) // 2] * 1000.0
-
-    result: dict[str, float] = {"prefill_rate": prefill_rate_ms}
-
-    queue_rate = _fit_queue_rate(samples, prefill_rate_ms)
-    if queue_rate is not None:
-        result["queue_rate"] = queue_rate
-    return result
-
-
-def _fit_queue_rate(
-    samples: list[dict],
-    prefill_rate_ms_per_tok: float,
-    min_queued_samples: int = 10,
-) -> float | None:
-    """Regress queue_rate (ms/tok) from the TTFT residual.
-
-    For each sample with nonzero queued_tokens_at_dispatch::
-
-        residual_ms = (TTFT - RTT) * 1000  -  prefill_rate * uncached_tokens
-
-    We want the slope of residual_ms vs queued_tokens. Uses a simple
-    ratio-of-medians estimator (robust to outliers): median(residual)
-    / median(queued_tokens) over samples where both are positive.
-
-    Returns ``None`` when there aren't enough qualifying samples.
-    """
-    pairs = []
-    for s in samples:
-        qt = s.get("queued_tokens_at_dispatch", 0)
-        if qt <= 0:
-            continue
-        prefill_s = s.get("prefill_seconds", 0.0)
-        uncached = s.get("uncached_tokens", 1)
-        own_prefill_ms = prefill_rate_ms_per_tok * uncached
-        observed_prefill_ms = prefill_s * 1000.0
-        residual_ms = observed_prefill_ms - own_prefill_ms
-        if residual_ms > 0:
-            pairs.append((qt, residual_ms))
-
-    if len(pairs) < min_queued_samples:
-        return None
-
-    pairs.sort(key=lambda p: p[0])
-    n = len(pairs)
-    median_qt = pairs[n // 2][0]
-    residuals_sorted = sorted(p[1] for p in pairs)
-    median_residual = residuals_sorted[n // 2]
-
-    if median_qt <= 0:
-        return None
-    return median_residual / median_qt
+    return {
+        "prefill_rate": prefill_sorted[len(prefill_sorted) // 2] * 1000.0,
+    }
 
 
 # Backward-compatible alias used by callers that haven't migrated yet.
@@ -410,27 +343,11 @@ def recommend_rates_per_target(
     min_samples_per_target: int = 5,
 ) -> dict:
     """Bucket ``samples`` by ``target`` and produce per-replica
-    GORGO rate recommendations alongside a pooled ``defaults`` fallback.
-    ``prefill_rate`` and ``queue_rate`` are in **ms/tok** (see
-    :func:`recommend_rates`).
+    rate diagnostics alongside a pooled ``defaults`` fallback.
+    ``prefill_rate`` is in **ms/tok** (see :func:`recommend_rates`).
 
-    Returns the structured shape consumed by
-    :mod:`policy.gorgo`'s hyperparameter store::
-
-        {
-            "defaults":   {"prefill_rate": ..., "queue_rate": ...},
-            "per_target": {<url>: {"prefill_rate": ..., "queue_rate": ...}, ...}
-        }
-
-    ``queue_rate`` is omitted from any bucket that doesn't have enough
-    samples with nonzero queued_tokens (the existing value is preserved).
-
-    Targets with fewer than ``min_samples_per_target`` observations
-    in the window are skipped (the per-target median over <5 samples
-    is too noisy to be useful) -- those replicas keep falling back
-    to ``defaults`` until enough live signal accumulates. Targets
-    with no ``target`` field (e.g. legacy samples) contribute only
-    to ``defaults``.
+    Retained for the ``fit`` auto-tuner mode.  The 3-weight GORGO
+    model does not use these values for routing.
     """
     defaults = recommend_rates(samples)
 

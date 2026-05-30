@@ -1802,11 +1802,15 @@ def proxy(registry_key: str = ""):
             {
                 "prefill_weight": (
                     _parse_float(data, "prefill_weight_min", 1e-5),
-                    _parse_float(data, "prefill_weight_max", 1.0),
+                    _parse_float(data, "prefill_weight_max", 5.0),
+                ),
+                "load_weight": (
+                    _parse_float(data, "load_weight_min", 1e-5),
+                    _parse_float(data, "load_weight_max", 5.0),
                 ),
                 "rtt_weight": (
                     _parse_float(data, "rtt_weight_min", 1e-5),
-                    _parse_float(data, "rtt_weight_max", 5.0),
+                    _parse_float(data, "rtt_weight_max", 50.0),
                 ),
             }
         )
@@ -2385,17 +2389,6 @@ def proxy(registry_key: str = ""):
             # and use Gaussian (1+1)-ES to minimize the configured
             # objective metric over the rolling window.
             #
-            # Physical rates (prefill_rate, queue_rate) are fitted from
-            # the same window on every hop so the ES operates on a
-            # stable cost surface.  Rate updates go to per_target;
-            # weight proposals go to defaults.
-            rate_update = recommend_rates_per_target(window)
-            if at["apply"] and rate_update.get("per_target"):
-                state["hyperparameters"] = merge_update(
-                    state["hyperparameters"],
-                    {"defaults": {}, "per_target": rate_update["per_target"]},
-                    replace=False,
-                )
             metric = at.get("objective_metric", "neg_p95_ttft")
             score_fn = ONLINE_SCORE_FUNCTIONS.get(metric)
             tuner: GaussianESTuner | None = at.get("online_tuner")

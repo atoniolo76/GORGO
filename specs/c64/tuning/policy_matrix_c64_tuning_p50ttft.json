@@ -1,5 +1,5 @@
 {
-  "_note": "GLM5 c=64 tuning window, optimizing p50 TTFT. Same 3-parameter model as v8 but objective is neg_p50_ttft. Pair with manifest_glm5_apr2_0030_0100.json (Apr 2 night 00:30-01:00). Freeze learned params into the corresponding eval specs.",
+  "_note": "GLM5 c=64 tuning, optimizing p50 TTFT. 3-weight model: ES searches (prefill_weight, load_weight, rtt_weight). Pair with manifest_glm5_apr2_0030_0100.json.",
   "run_id": "glm5_c64_tuning_p50ttft",
   "trace_path": "",
   "start_delay_seconds": 30,
@@ -22,9 +22,8 @@
     {"name": "prefix-cache"},
     {"name": "simple-session-affinity"},
     {
-      "_note": "prefill_rate and queue_rate are set by calibration (Phase 0) and fit auto-tuner. The ES tuner searches prefill_weight and rtt_weight only.",
       "name": "gorgo", "label": "gorgo-hillclimb-p50",
-      "hyperparameters": {"prefill_weight": 1.0, "rtt_weight": 1.0},
+      "hyperparameters": {"prefill_weight": 1.0, "load_weight": 1.0, "rtt_weight": 1.0},
       "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "online-es", "objective_metric": "neg_p50_ttft"}
     }
   ],
