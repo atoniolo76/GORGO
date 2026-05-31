@@ -22,9 +22,9 @@
     {"name": "prefix-cache"},
     {"name": "simple-session-affinity"},
     {
-      "_note": "TODO: fill from glm5_c64_tuning_p95ttft best_params",
+      "_note": "Learned from glm5_c64_tuning_p95ttft_v2 (3-weight model, ES converged step 29, best_score=-0.4546).",
       "name": "gorgo", "label": "gorgo-static-p95",
-      "hyperparameters": {"prefill_weight": 0.0, "load_weight": 0.0, "rtt_weight": 0.0}
+      "hyperparameters": {"prefill_weight": 0.9074326660119114, "load_weight": 0.0, "rtt_weight": 0.22696903742285585}
     }
   ],
   "replica_homogeneity_check": {

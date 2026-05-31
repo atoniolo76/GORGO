@@ -1045,6 +1045,28 @@ async def _wait_for_workload(
         await asyncio.sleep(poll_interval)
 
 
+def _extract_learned_weights(matrix: dict) -> dict | None:
+    """Extract the learned gorgo weights from a tuning matrix result.
+
+    Walks the per-policy results looking for a gorgo policy with
+    ``auto_tune.hyperparameters.defaults``. Returns the defaults dict
+    (the learned weights) or ``None`` if not found.
+    """
+    for trace_result in matrix.get("results") or []:
+        manifest = trace_result.get("manifest") or {}
+        for r in manifest.get("results") or []:
+            if not isinstance(r, dict) or r.get("error"):
+                continue
+            at = r.get("auto_tune")
+            if not at:
+                continue
+            hp = at.get("hyperparameters") or {}
+            defaults = hp.get("defaults")
+            if defaults and isinstance(defaults, dict):
+                return defaults
+    return None
+
+
 def _auto_tune_payload(policy_spec: dict, *, global_seed: int | None = None) -> dict | None:
     auto = policy_spec.get("auto_tune")
     if not auto:
@@ -1415,6 +1437,81 @@ async def _run_policy_matrix_experiment(
         output_dir=Path(output_dir),
     )
 
+    # --- Tune → Eval chaining ---
+    # If an eval spec + manifest were provided, extract the learned gorgo
+    # weights from the tuning results, reconfigure the gorgo proxy with
+    # static weights, and run the eval on the same fleet.
+    eval_spec_raw = base_spec.get("_eval_spec")
+    eval_manifest_raw = base_spec.get("_eval_manifest")
+    eval_matrix = None
+    if eval_spec_raw and eval_manifest_raw:
+        learned = _extract_learned_weights(matrix)
+        if learned:
+            print(
+                f"[tune→eval] learned weights: {learned}",
+                flush=True,
+            )
+            eval_spec = deepcopy(eval_spec_raw)
+            for p in eval_spec.get("policies", []):
+                if p.get("name") == "gorgo":
+                    p["hyperparameters"] = learned
+                    print(
+                        f"[tune→eval] patched gorgo policy {p.get('label')!r} with learned weights",
+                        flush=True,
+                    )
+
+            eval_output_dir = _unique_output_dir(
+                output_dir.rsplit("/", 1)[0] + "/" + eval_spec.get("run_id", "eval"),
+                experiment_id + "_eval",
+            )
+
+            # Reconfigure fleet for eval: disable auto_tune, set static
+            # weights, flush workload state on each proxy.
+            for fleet_entry in fleet_manifest["fleets"]:
+                proxy_url = fleet_entry["proxy_url"]
+                policy_name = fleet_entry["policy"]
+                if policy_name == "gorgo":
+                    await _post_json(proxy_url, "/tune", {"enabled": False})
+                    await _post_json(proxy_url, "/hyperparameters", learned)
+                await _post_json(proxy_url, "/flush", {})
+
+            eval_launched = deepcopy(eval_spec)
+            eval_launched["policies"] = []
+            for p in eval_spec.get("policies", []):
+                label = _label(p)
+                matching = [f for f in fleet_manifest["fleets"] if f["label"] == label]
+                if matching:
+                    ep = deepcopy(p)
+                    ep["proxy_url"] = matching[0]["proxy_url"]
+                    eval_launched["policies"].append(ep)
+                else:
+                    print(
+                        f"[tune→eval][warn] no fleet entry for eval policy {label!r}, skipping",
+                        flush=True,
+                    )
+
+            print(
+                f"[tune→eval] starting eval with {len(eval_launched['policies'])} "
+                f"policies on {eval_manifest_raw.get('_note', 'eval trace')}",
+                flush=True,
+            )
+            eval_matrix = await _run_sweep_matrix(
+                base_spec=eval_launched,
+                sweep_manifest=eval_manifest_raw,
+                start_index=start_index,
+                top_k=top_k,
+                output_dir=Path(eval_output_dir),
+            )
+            run_manifest["eval"] = {
+                "learned_weights": learned,
+                "eval_output_dir": eval_output_dir,
+                "eval_spec": eval_spec_raw,
+                "eval_manifest": eval_manifest_raw,
+                "eval_results": eval_matrix,
+            }
+        else:
+            print("[tune→eval][warn] no learned weights found, skipping eval", flush=True)
+
     # Update the manifest with completion status and result paths.
     experiment_completed_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     run_manifest["status"] = "completed"
@@ -1449,9 +1546,20 @@ def main(
     start_index: int = 1,
     top_k: int = 1,
     output_dir: str = "/results/policy_matrix_sweep/moon_neurips_one_trace",
+    eval_spec_path: str = "",
+    eval_manifest_path: str = "",
 ):
     base_spec = json.loads(Path(base_spec_path).read_text())
     sweep_manifest = json.loads(Path(sweep_manifest_path).read_text())
+
+    if eval_spec_path and eval_manifest_path:
+        base_spec["_eval_spec"] = json.loads(Path(eval_spec_path).read_text())
+        base_spec["_eval_manifest"] = json.loads(Path(eval_manifest_path).read_text())
+        print(
+            f"[tune→eval] will chain eval after tuning: "
+            f"spec={eval_spec_path} manifest={eval_manifest_path}",
+            flush=True,
+        )
 
     _validate_spec(base_spec)
 
