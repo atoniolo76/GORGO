@@ -281,6 +281,7 @@ def engine_us_ashburn(registry_key: str) -> None:
     region="us-east",
     timeout=24 * 60 * 60,
     max_containers=8,
+    min_containers=1,
     retries=0,
     volumes={
         "/data": completions_volume,
@@ -952,18 +953,65 @@ async def _wait_for_keys(dct, keys: list[str], timeout_s: float) -> dict[str, st
     return found
 
 
-async def _post_json(url: str, path: str, payload: dict | list) -> dict:
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        r = await client.post(url.rstrip("/") + path, json=payload)
-        r.raise_for_status()
-        return r.json()
+async def _post_json(
+    url: str,
+    path: str,
+    payload: dict | list,
+    *,
+    retries: int = 3,
+    backoff_base: float = 2.0,
+) -> dict:
+    last_err: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                r = await client.post(url.rstrip("/") + path, json=payload)
+                r.raise_for_status()
+                return r.json()
+        except (httpx.ConnectError, httpx.ConnectTimeout, OSError) as e:
+            last_err = e
+            if attempt < retries:
+                wait = backoff_base**attempt
+                print(
+                    f"[retry] POST {path} to {url[-40:]} failed "
+                    f"({type(e).__name__}), retry {attempt + 1}/{retries} "
+                    f"in {wait:.0f}s",
+                    flush=True,
+                )
+                await asyncio.sleep(wait)
+            else:
+                raise
+    raise last_err  # unreachable but keeps type checker happy
 
 
-async def _get_json(url: str, path: str) -> dict:
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        r = await client.get(url.rstrip("/") + path)
-        r.raise_for_status()
-        return r.json()
+async def _get_json(
+    url: str,
+    path: str,
+    *,
+    retries: int = 3,
+    backoff_base: float = 2.0,
+) -> dict:
+    last_err: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                r = await client.get(url.rstrip("/") + path)
+                r.raise_for_status()
+                return r.json()
+        except (httpx.ConnectError, httpx.ConnectTimeout, OSError) as e:
+            last_err = e
+            if attempt < retries:
+                wait = backoff_base**attempt
+                print(
+                    f"[retry] GET {path} from {url[-40:]} failed "
+                    f"({type(e).__name__}), retry {attempt + 1}/{retries} "
+                    f"in {wait:.0f}s",
+                    flush=True,
+                )
+                await asyncio.sleep(wait)
+            else:
+                raise
+    raise last_err
 
 
 async def _wait_for_proxy_metrics(
@@ -1090,7 +1138,32 @@ def _auto_tune_payload(policy_spec: dict, *, global_seed: int | None = None) -> 
     seed = auto.get("seed", global_seed)
     if seed is not None:
         payload["seed"] = int(seed)
+    # Forward custom hyperparam ranges so the proxy uses spec-driven
+    # bounds instead of its hardcoded defaults.
+    if "hyperparam_ranges" in auto:
+        payload["hyperparam_ranges"] = auto["hyperparam_ranges"]
     return payload
+
+
+async def _respawn_proxy(policy_spec: dict, timeout_s: float = 120.0) -> str:
+    """Respawn a dead proxy container and return the new URL.
+
+    Spawns a fresh ``proxy_runner``, waits for it to register under the
+    same key, then reconfigures replicas so the new proxy knows its
+    backends.  Returns the new tunnel URL.
+    """
+    key = policy_spec["_proxy_key"]
+    label = policy_spec.get("label") or policy_spec.get("name")
+    replica_urls = policy_spec["_replica_urls"]
+
+    print(f"[respawn] spawning new proxy for {label!r} (key={key})", flush=True)
+    await proxy_runner.spawn.aio(key)
+    new_urls = await _wait_for_keys(proxies, [key], timeout_s)
+    new_url = new_urls[key]
+    print(f"[respawn] new proxy URL: {new_url}", flush=True)
+
+    await _post_json(new_url, "/replicas", {"replicas": replica_urls})
+    return new_url
 
 
 async def _run_one_policy(global_spec: dict, policy_spec: dict) -> dict:
@@ -1098,14 +1171,31 @@ async def _run_one_policy(global_spec: dict, policy_spec: dict) -> dict:
     label = policy_spec.get("label") or name
     url = policy_spec["proxy_url"].rstrip("/")
     run_id = f"{global_spec.get('run_id', 'policy_matrix')}_{_slug(label)}"
-    trace_id = policy_spec.get("trace_id") or run_id
-    output_path = global_spec.get(
-        "output_path_template", "/results/workload_runs/{run_id}.json"
-    ).format(
+    exp_id = global_spec.get("experiment_id", "")
+    trace_id = policy_spec.get("trace_id") or (f"{exp_id}/{run_id}" if exp_id else run_id)
+    default_template = (
+        "/results/workload_runs/{experiment_id}/{run_id}.json"
+        if exp_id
+        else "/results/workload_runs/{run_id}.json"
+    )
+    output_path = global_spec.get("output_path_template", default_template).format(
         run_id=run_id,
         policy=_slug(name),
+        experiment_id=exp_id,
     )
-    await _post_json(url, "/policy", {"policy": name})
+    try:
+        await _post_json(url, "/policy", {"policy": name})
+    except (httpx.ConnectError, httpx.ConnectTimeout, OSError) as e:
+        if "_proxy_key" not in policy_spec or "_replica_urls" not in policy_spec:
+            raise
+        print(
+            f"[respawn] proxy for {label!r} unreachable after retries "
+            f"({type(e).__name__}), respawning",
+            flush=True,
+        )
+        url = await _respawn_proxy(policy_spec)
+        policy_spec["proxy_url"] = url
+        await _post_json(url, "/policy", {"policy": name})
     if policy_spec.get("hyperparameters"):
         await _post_json(url, "/hyperparameters", policy_spec["hyperparameters"])
     await _post_json(url, "/flush", {})
@@ -1338,6 +1428,7 @@ async def _run_policy_matrix_experiment(
 
     experiment_started_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
+    base_spec["experiment_id"] = experiment_id
     policies = base_spec["policies"]
     regions = base_spec.get("fleet_regions") or ["CANADA-2", "sines-2", "us-west4"]
     output_dir = _unique_output_dir(output_dir, experiment_id)
@@ -1380,6 +1471,8 @@ async def _run_policy_matrix_experiment(
             await _post_json(proxy_url, "/hyperparameters", policy["hyperparameters"])
         p = deepcopy(policy)
         p["proxy_url"] = proxy_url
+        p["_proxy_key"] = proxy_key
+        p["_replica_urls"] = policy_replica_urls
         launched_spec["policies"].append(p)
         fleet_manifest["fleets"].append(
             {
@@ -1438,77 +1531,97 @@ async def _run_policy_matrix_experiment(
     )
 
     # --- Tune → Eval chaining ---
-    # If an eval spec + manifest were provided, extract the learned gorgo
+    # If eval spec(s) + manifest(s) were provided, extract the learned gorgo
     # weights from the tuning results, reconfigure the gorgo proxy with
-    # static weights, and run the eval on the same fleet.
-    eval_spec_raw = base_spec.get("_eval_spec")
-    eval_manifest_raw = base_spec.get("_eval_manifest")
-    eval_matrix = None
-    if eval_spec_raw and eval_manifest_raw:
+    # static weights, and run each eval on the same fleet sequentially.
+    eval_chain = base_spec.get("_eval_chain") or []
+    if not eval_chain:
+        eval_spec_raw = base_spec.get("_eval_spec")
+        eval_manifest_raw = base_spec.get("_eval_manifest")
+        if eval_spec_raw and eval_manifest_raw:
+            eval_chain = [{"spec": eval_spec_raw, "manifest": eval_manifest_raw}]
+
+    if eval_chain:
         learned = _extract_learned_weights(matrix)
         if learned:
-            print(
-                f"[tune→eval] learned weights: {learned}",
-                flush=True,
-            )
-            eval_spec = deepcopy(eval_spec_raw)
-            for p in eval_spec.get("policies", []):
-                if p.get("name") == "gorgo":
-                    p["hyperparameters"] = learned
-                    print(
-                        f"[tune→eval] patched gorgo policy {p.get('label')!r} with learned weights",
-                        flush=True,
-                    )
+            print(f"[tune→eval] learned weights: {learned}", flush=True)
+            run_manifest["evals"] = []
 
-            eval_output_dir = _unique_output_dir(
-                output_dir.rsplit("/", 1)[0] + "/" + eval_spec.get("run_id", "eval"),
-                experiment_id + "_eval",
-            )
+            for eval_idx, eval_entry in enumerate(eval_chain):
+                eval_spec_raw = eval_entry["spec"]
+                eval_manifest_raw = eval_entry["manifest"]
+                eval_label = eval_manifest_raw.get("_note", f"eval-{eval_idx}")
 
-            # Reconfigure fleet for eval: disable auto_tune, set static
-            # weights, flush workload state on each proxy.
-            for fleet_entry in fleet_manifest["fleets"]:
-                proxy_url = fleet_entry["proxy_url"]
-                policy_name = fleet_entry["policy"]
-                if policy_name == "gorgo":
-                    await _post_json(proxy_url, "/tune", {"enabled": False})
-                    await _post_json(proxy_url, "/hyperparameters", learned)
-                await _post_json(proxy_url, "/flush", {})
+                eval_spec = deepcopy(eval_spec_raw)
+                for p in eval_spec.get("policies", []):
+                    if p.get("name") == "gorgo":
+                        p["hyperparameters"] = learned
+                        print(
+                            f"[tune→eval][{eval_idx}] patched gorgo policy "
+                            f"{p.get('label')!r} with learned weights",
+                            flush=True,
+                        )
 
-            eval_launched = deepcopy(eval_spec)
-            eval_launched["policies"] = []
-            for p in eval_spec.get("policies", []):
-                label = _label(p)
-                matching = [f for f in fleet_manifest["fleets"] if f["label"] == label]
-                if matching:
-                    ep = deepcopy(p)
-                    ep["proxy_url"] = matching[0]["proxy_url"]
-                    eval_launched["policies"].append(ep)
-                else:
-                    print(
-                        f"[tune→eval][warn] no fleet entry for eval policy {label!r}, skipping",
-                        flush=True,
-                    )
+                eval_suffix = f"_eval{eval_idx}" if len(eval_chain) > 1 else "_eval"
+                eval_output_dir = _unique_output_dir(
+                    output_dir.rsplit("/", 1)[0] + "/" + eval_spec.get("run_id", "eval"),
+                    experiment_id + eval_suffix,
+                )
 
-            print(
-                f"[tune→eval] starting eval with {len(eval_launched['policies'])} "
-                f"policies on {eval_manifest_raw.get('_note', 'eval trace')}",
-                flush=True,
-            )
-            eval_matrix = await _run_sweep_matrix(
-                base_spec=eval_launched,
-                sweep_manifest=eval_manifest_raw,
-                start_index=start_index,
-                top_k=top_k,
-                output_dir=Path(eval_output_dir),
-            )
-            run_manifest["eval"] = {
-                "learned_weights": learned,
-                "eval_output_dir": eval_output_dir,
-                "eval_spec": eval_spec_raw,
-                "eval_manifest": eval_manifest_raw,
-                "eval_results": eval_matrix,
-            }
+                # Reconfigure fleet for eval: disable auto_tune, set static
+                # weights, flush workload state on each proxy.
+                for fleet_entry in fleet_manifest["fleets"]:
+                    proxy_url = fleet_entry["proxy_url"]
+                    policy_name = fleet_entry["policy"]
+                    if policy_name == "gorgo":
+                        await _post_json(proxy_url, "/tune", {"enabled": False})
+                        await _post_json(proxy_url, "/hyperparameters", learned)
+                    await _post_json(proxy_url, "/flush", {})
+
+                eval_launched = deepcopy(eval_spec)
+                eval_launched["experiment_id"] = experiment_id + eval_suffix
+                eval_launched["policies"] = []
+                for p in eval_spec.get("policies", []):
+                    label = _label(p)
+                    matching = [f for f in fleet_manifest["fleets"] if f["label"] == label]
+                    if matching:
+                        ep = deepcopy(p)
+                        ep["proxy_url"] = matching[0]["proxy_url"]
+                        eval_launched["policies"].append(ep)
+                    else:
+                        print(
+                            f"[tune→eval][{eval_idx}][warn] no fleet entry for "
+                            f"eval policy {label!r}, skipping",
+                            flush=True,
+                        )
+
+                print(
+                    f"[tune→eval][{eval_idx}] starting eval with "
+                    f"{len(eval_launched['policies'])} policies on {eval_label}",
+                    flush=True,
+                )
+                eval_matrix = await _run_sweep_matrix(
+                    base_spec=eval_launched,
+                    sweep_manifest=eval_manifest_raw,
+                    start_index=start_index,
+                    top_k=top_k,
+                    output_dir=Path(eval_output_dir),
+                )
+                run_manifest["evals"].append(
+                    {
+                        "index": eval_idx,
+                        "label": eval_label,
+                        "learned_weights": learned,
+                        "eval_output_dir": eval_output_dir,
+                        "eval_spec": eval_spec_raw,
+                        "eval_manifest": eval_manifest_raw,
+                        "eval_results": eval_matrix,
+                    }
+                )
+
+            # Backward compat: copy first eval to "eval" key
+            if run_manifest["evals"]:
+                run_manifest["eval"] = run_manifest["evals"][0]
         else:
             print("[tune→eval][warn] no learned weights found, skipping eval", flush=True)
 
@@ -1553,11 +1666,25 @@ def main(
     sweep_manifest = json.loads(Path(sweep_manifest_path).read_text())
 
     if eval_spec_path and eval_manifest_path:
-        base_spec["_eval_spec"] = json.loads(Path(eval_spec_path).read_text())
-        base_spec["_eval_manifest"] = json.loads(Path(eval_manifest_path).read_text())
+        eval_specs = [s.strip() for s in eval_spec_path.split(",") if s.strip()]
+        eval_manifests = [m.strip() for m in eval_manifest_path.split(",") if m.strip()]
+        if len(eval_specs) == 1 and len(eval_manifests) > 1:
+            eval_specs = eval_specs * len(eval_manifests)
+        if len(eval_specs) != len(eval_manifests):
+            raise ValueError(
+                f"eval_spec_path has {len(eval_specs)} entries but "
+                f"eval_manifest_path has {len(eval_manifests)}"
+            )
+        eval_chain = [
+            {"spec": json.loads(Path(s).read_text()), "manifest": json.loads(Path(m).read_text())}
+            for s, m in zip(eval_specs, eval_manifests)
+        ]
+        base_spec["_eval_chain"] = eval_chain
+        base_spec["_eval_spec"] = eval_chain[0]["spec"]
+        base_spec["_eval_manifest"] = eval_chain[0]["manifest"]
         print(
-            f"[tune→eval] will chain eval after tuning: "
-            f"spec={eval_spec_path} manifest={eval_manifest_path}",
+            f"[tune→eval] will chain {len(eval_chain)} eval(s) after tuning: "
+            f"specs={eval_specs} manifests={eval_manifests}",
             flush=True,
         )
 

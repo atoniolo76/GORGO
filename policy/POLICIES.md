@@ -34,7 +34,14 @@ Pick the replica whose radix trie has the longest cached prefix match for the in
 
 1. If running-request imbalance across replicas exceeds a threshold (default 8), fall back to `least-request` to prevent overload.
 2. Otherwise, find replicas with the best prefix match.
-3. Among those, pick the one with `running_reqs < mean + 2×std`.
+3. Among those, pick the one with `running_reqs < mean + 2×std`. # how the hell does this work? wouldn't by definition there be more than one replica that satisfies this criteria?
+
+21, 27, 18.
+
+mean = 21 + 27 + 18 / 3 = 66 / 3 = 22
+
+std = (21 - 22)^2 / 21 + (27 - 22)^2 + (18 - 22)^2 / 3 = 42 / 3 = 14
+
 4. If no match at all, fall back to `least-request`.
 
 Maximizes KV-cache hit rate but can herd traffic onto a single cache-warm replica.

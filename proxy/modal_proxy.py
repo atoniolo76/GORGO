@@ -1635,14 +1635,22 @@ def proxy(registry_key: str = ""):
             seed_defaults = (
                 state["hyperparameters"].get("defaults") or DEFAULT_GORGO_HYPERPARAMETERS
             )
-            seed = {k: float(seed_defaults.get(k, v)) for k, v in HYPERPARAM_RANGES.items()}
+            # Allow callers to override hyperparam ranges via POST body.
+            custom_ranges = data.get("hyperparam_ranges")
+            active_ranges = (
+                validated_ranges({k: tuple(v) for k, v in custom_ranges.items()})
+                if custom_ranges
+                else HYPERPARAM_RANGES
+            )
+            at["hyperparam_ranges"] = active_ranges
+            seed = {k: float(seed_defaults.get(k, v)) for k, v in active_ranges.items()}
             need_new_tuner = (
                 at.get("online_tuner") is None or was_mode != "online-es" or not was_enabled
             )
             if need_new_tuner:
                 at["online_tuner"] = GaussianESTuner(
                     initial_params=seed,
-                    ranges=HYPERPARAM_RANGES,
+                    ranges=active_ranges,
                     sigma=0.5,
                     sigma_min=0.05,
                     max_steps=10_000,

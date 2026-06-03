@@ -21,6 +21,19 @@ cache-first operating point instead of an RTT-first one.
 
 ## Results
 
+### Tuning window
+
+| Policy | TTFT p50 | TTFT p95 | TTFT p99 | E2E p50 | E2E p95 | E2E p99 | ITL avg | Decode tok/s | Sent | Fail |
+|--------|----------|----------|----------|---------|---------|---------|---------|-------------|------|------|
+| random | 282ms | 1,231ms | 2,117ms | 1.27s | 2.38s | 3.54s | 8.3ms | 124 | 2095 | 0 |
+| least-request | — | — | — | — | — | — | — | — | — | ERROR |
+| least-load | 214ms | 1,118ms | 2,105ms | 1.35s | 2.43s | 3.11s | 9.1ms | 116 | 2095 | 0 |
+| prefix-cache | 278ms | 968ms | 1,633ms | 1.36s | 2.36s | 3.28s | 9.1ms | 116 | 2095 | 0 |
+| session-affinity | 212ms | 1,033ms | 2,228ms | 1.49s | 2.64s | 3.65s | 10.1ms | 106 | 2095 | 0 |
+| **gorgo-hillclimb-p95** | **151ms** | **880ms** | 1,909ms | 1.38s | **2.23s** | 3.20s | 9.6ms | 110 | 2095 | 0 |
+
+## Evaluation window
+
 | Policy | TTFT p50 | TTFT p95 | TTFT p99 | E2E p50 | E2E p95 | E2E p99 | ITL avg | Decode tok/s | Sent | Fail |
 |--------|----------|----------|----------|---------|---------|---------|---------|-------------|------|------|
 | random | 282ms | 1,231ms | 2,117ms | 1.27s | 2.38s | 3.54s | 8.3ms | 124 | 2095 | 0 |

@@ -62,8 +62,11 @@ def _plot_hillclimb(events: list[dict], title: str, out_dir: Path) -> None:
         _get(e["best_params"], "prefill_weight", "prefill_rate", default=0) for e in events
     ]
     load_best = [_get(e["best_params"], "load_weight", "load_rate", default=0) for e in events]
+    rtt_best = [_get(e["best_params"], "rtt_weight", default=0) for e in events]
     ax.plot(samples, prefill_best, label="prefill (best)", color="tab:blue")
     ax.plot(samples, load_best, label="load (best)", color="tab:orange")
+    if any(v > 0 for v in rtt_best):
+        ax.plot(samples, rtt_best, label="rtt (best)", color="tab:green")
     proposals = [
         (e.get("total_samples", i), e["proposal"])
         for i, e in enumerate(events)
@@ -73,8 +76,11 @@ def _plot_hillclimb(events: list[dict], title: str, out_dir: Path) -> None:
         prop_x = [p[0] for p in proposals]
         prop_tp = [_get(p[1], "prefill_weight", "prefill_rate", default=0) for p in proposals]
         prop_qw = [_get(p[1], "load_weight", "load_rate", default=0) for p in proposals]
+        prop_rtt = [_get(p[1], "rtt_weight", default=0) for p in proposals]
         ax.scatter(prop_x, prop_tp, s=8, alpha=0.3, color="tab:blue", zorder=1)
         ax.scatter(prop_x, prop_qw, s=8, alpha=0.3, color="tab:orange", zorder=1)
+        if any(v > 0 for v in prop_rtt):
+            ax.scatter(prop_x, prop_rtt, s=8, alpha=0.3, color="tab:green", zorder=1)
     ax.set_yscale("log")
     ax.set_xlabel("Total samples")
     ax.set_ylabel("Hyperparameter value")

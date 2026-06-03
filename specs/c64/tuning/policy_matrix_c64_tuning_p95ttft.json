@@ -24,7 +24,15 @@
     {
       "name": "gorgo", "label": "gorgo-hillclimb-p95",
       "hyperparameters": {"prefill_weight": 1.0, "load_weight": 1.0, "rtt_weight": 1.0},
-      "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "online-es", "objective_metric": "neg_p95_ttft"}
+      "auto_tune": {
+        "enabled": true, "window_size": 64, "hop_size": 16, "apply": true,
+        "mode": "online-es", "objective_metric": "neg_p95_ttft",
+        "hyperparam_ranges": {
+          "prefill_weight": [1e-5, 5.0],
+          "load_weight": [0.1, 10.0],
+          "rtt_weight": [1e-5, 50.0]
+        }
+      }
     }
   ],
   "replica_homogeneity_check": {

@@ -15,7 +15,10 @@ import modal
 from app import app
 
 DEFAULT_MODEL = "Qwen/Qwen3.5-35B-A3B-FP8"
-HYPERPARAM_RANGES: dict[str, tuple[float, float]] = {
+
+# Fallback defaults for the CLI tuner only.  Production ranges should be
+# set in the experiment spec under auto_tune.hyperparam_ranges.
+_CLI_DEFAULT_RANGES: dict[str, tuple[float, float]] = {
     "prefill_weight": (1e-5, 5.0),
     "load_weight": (1e-5, 5.0),
     "rtt_weight": (1e-5, 50.0),
@@ -255,37 +258,37 @@ _TUNE_TUI_SPEC: list[tuple[str, list[dict]]] = [
             {
                 "name": "prefill_weight_min",
                 "kind": "float",
-                "default": HYPERPARAM_RANGES["prefill_weight"][0],
+                "default": _CLI_DEFAULT_RANGES["prefill_weight"][0],
                 "help": "Lower bound for prefill_weight",
             },
             {
                 "name": "prefill_weight_max",
                 "kind": "float",
-                "default": HYPERPARAM_RANGES["prefill_weight"][1],
+                "default": _CLI_DEFAULT_RANGES["prefill_weight"][1],
                 "help": "Upper bound for prefill_weight",
             },
             {
                 "name": "load_weight_min",
                 "kind": "float",
-                "default": HYPERPARAM_RANGES["load_weight"][0],
+                "default": _CLI_DEFAULT_RANGES["load_weight"][0],
                 "help": "Lower bound for load_weight",
             },
             {
                 "name": "load_weight_max",
                 "kind": "float",
-                "default": HYPERPARAM_RANGES["load_weight"][1],
+                "default": _CLI_DEFAULT_RANGES["load_weight"][1],
                 "help": "Upper bound for load_weight",
             },
             {
                 "name": "rtt_weight_min",
                 "kind": "float",
-                "default": HYPERPARAM_RANGES["rtt_weight"][0],
+                "default": _CLI_DEFAULT_RANGES["rtt_weight"][0],
                 "help": "Lower bound for rtt_weight",
             },
             {
                 "name": "rtt_weight_max",
                 "kind": "float",
-                "default": HYPERPARAM_RANGES["rtt_weight"][1],
+                "default": _CLI_DEFAULT_RANGES["rtt_weight"][1],
                 "help": "Upper bound for rtt_weight",
             },
         ],
@@ -439,12 +442,12 @@ def tune_cli(
     seed: int = -1,
     relative_tolerance: float = 0.005,
     output_dir: str = "",
-    prefill_weight_min: float = HYPERPARAM_RANGES["prefill_weight"][0],
-    prefill_weight_max: float = HYPERPARAM_RANGES["prefill_weight"][1],
-    load_weight_min: float = HYPERPARAM_RANGES["load_weight"][0],
-    load_weight_max: float = HYPERPARAM_RANGES["load_weight"][1],
-    rtt_weight_min: float = HYPERPARAM_RANGES["rtt_weight"][0],
-    rtt_weight_max: float = HYPERPARAM_RANGES["rtt_weight"][1],
+    prefill_weight_min: float = _CLI_DEFAULT_RANGES["prefill_weight"][0],
+    prefill_weight_max: float = _CLI_DEFAULT_RANGES["prefill_weight"][1],
+    load_weight_min: float = _CLI_DEFAULT_RANGES["load_weight"][0],
+    load_weight_max: float = _CLI_DEFAULT_RANGES["load_weight"][1],
+    rtt_weight_min: float = _CLI_DEFAULT_RANGES["rtt_weight"][0],
+    rtt_weight_max: float = _CLI_DEFAULT_RANGES["rtt_weight"][1],
     no_wait: bool = False,
     poll_interval_seconds: float = 5.0,
 ):
