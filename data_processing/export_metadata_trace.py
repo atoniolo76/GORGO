@@ -108,12 +108,34 @@ def export_metadata(
     FILE_PREFIX = "llm_responses_202604"
     FILE_CUTOFF = "llm_responses_20260408"
 
-    files = sorted(
+    all_files = sorted(
         f
         for f in os.listdir("/data")
         if f.endswith(".parquet") and f.startswith(FILE_PREFIX) and f < FILE_CUTOFF + ".parquet"
     )
-    print(f"[metadata] {len(files)} parquet files, window {start_time} -> {end_time}")
+
+    # Filter files by name-encoded timestamp to avoid scanning the entire
+    # volume for narrow time windows.  Each file covers a 30-min shard
+    # named like llm_responses_20260402_003000.parquet (= Apr 2 00:30).
+    # We keep files whose shard start is within [start - 30min, end]
+    # to account for requests that span shard boundaries.
+    def _file_ts(name: str) -> datetime | None:
+        stem = name.replace(".parquet", "")[len(FILE_PREFIX) :]
+        try:
+            return datetime.strptime(f"202604{stem}", "%Y%m%d_%H%M%S")
+        except ValueError:
+            return None
+
+    from datetime import timedelta
+
+    margin = timedelta(seconds=1800)
+    files = [
+        f for f in all_files if (fts := _file_ts(f)) is None or (start_dt - margin <= fts <= end_dt)
+    ]
+
+    print(
+        f"[metadata] {len(files)}/{len(all_files)} parquet files for window {start_time} -> {end_time}"
+    )
 
     # Prefix-aware block hashing (same as build_mooncake_trace.py)
     hash_to_id: dict[bytes, int] = {}
