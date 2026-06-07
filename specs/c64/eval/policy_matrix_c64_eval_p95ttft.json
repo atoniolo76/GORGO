@@ -22,9 +22,14 @@
     {"name": "prefix-cache"},
     {"name": "simple-session-affinity"},
     {
-      "_note": "Learned from glm5_c64_tuning_p95ttft_v2 (3-weight model, ES converged step 29, best_score=-0.4546).",
+      "name": "gorgo", "label": "gorgo-autotune",
+      "hyperparameters": {"prefill_weight": 1.0, "load_weight": 1.0, "rtt_weight": 1.0},
+      "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "fit"}
+    },
+    {
+      "_note": "Learned from decoded_v1 tuning on synthetic traces.",
       "name": "gorgo", "label": "gorgo-static-p95",
-      "hyperparameters": {"prefill_weight": 0.9074326660119114, "load_weight": 0.0, "rtt_weight": 0.22696903742285585}
+      "hyperparameters": {"rtt_weight": 0.9553619224703274, "prefill_weight": 0.37636535669159216, "load_weight": 2.8970081976516404}
     }
   ],
   "replica_homogeneity_check": {

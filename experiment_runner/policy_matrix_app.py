@@ -1625,6 +1625,14 @@ async def _run_policy_matrix_experiment(
         else:
             print("[tune→eval][warn] no learned weights found, skipping eval", flush=True)
 
+    # Always extract and record learned weights if available, even
+    # without eval chaining.  The sequencer uses this to pass weights
+    # between phases.
+    if "learned_weights" not in run_manifest:
+        lw = _extract_learned_weights(matrix)
+        if lw:
+            run_manifest["learned_weights"] = lw
+
     # Update the manifest with completion status and result paths.
     experiment_completed_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     run_manifest["status"] = "completed"

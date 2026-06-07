@@ -22,6 +22,11 @@
     {"name": "prefix-cache"},
     {"name": "simple-session-affinity"},
     {
+      "name": "gorgo", "label": "gorgo-autotune",
+      "hyperparameters": {"prefill_weight": 1.0, "load_weight": 1.0, "rtt_weight": 1.0},
+      "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "fit"}
+    },
+    {
       "name": "gorgo", "label": "gorgo-hillclimb-p95",
       "hyperparameters": {"prefill_weight": 1.0, "load_weight": 1.0, "rtt_weight": 1.0},
       "auto_tune": {

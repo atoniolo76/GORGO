@@ -1,0 +1,10 @@
+{
+  "_note": "Decoded synthetic trace: GLM5 April 2 01:00-01:30 (nighttime eval). Privacy-safe.",
+  "top": [
+    {
+      "result": {
+        "output_path": "/data/mooncake_traces/decoded/glm5_decoded_apr2_0100_to_0130.jsonl"
+      }
+    }
+  ]
+}
