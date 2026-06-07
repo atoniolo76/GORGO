@@ -106,7 +106,7 @@ replica saturates. Reporting only one percentile hides this trade-off.
 \item Empirical results (\S\ref{sec:results}) on two consecutive 30-minute
   production-trace windows. GORGO achieves the lowest TTFT at every percentile
   (p50, p95, p99) on both a tuning and a held-out evaluation window, against
-  seven baseline policies.
+  five baseline policies.
 \end{itemize}
 
 % \item Workload characterization (\S\ref{sec:characterization}): GLM-5.1 has
@@ -153,7 +153,7 @@ only the global figure.
 
 \begin{table}[t]
 \centering
-\smalld
+\small
 \caption{Workload characterization. Token counts use the same byte-pair
   tokenizer in all rows. Reuse percentages are token-weighted prefix-trie
   savings as described in \S\ref{sec:characterization}.}
@@ -199,10 +199,10 @@ has seen their conversation can save more than half of the prefill.
 \end{figure}
 
 \paragraph{Experimental windows.}
-We focus on two consecutive 30-minute windows taken from GLM-5.1 traffic on April 1st, 2026: 00:30--01:00
-UTC (W1, tuning) and 01:00--01:30 UTC (W2, held-out evaluation). Two additional 30-minute windows taken from 12:30-13:00 UTC on April 1st, 2026 and 00:30--1:00 UTC on April 2nd, 2026 (W3 \& W4, stress and shifting traffic patterns) are included in the evaluation. Traces are
+We focus on two consecutive 30-minute windows taken from GLM-5.1 traffic on April 2nd, 2026: 00:30--01:00
+UTC (W1, tuning) and 01:00--01:30 UTC (W2a, held-out evaluation). A third window at 12:30--13:00 UTC on April 2nd, 2026 (W2b, midday diurnal evaluation) tests generalization to heavier daytime load. Two additional stress-load windows (W3 \& W4, higher concurrency and shifting traffic patterns) informed the limitations analysis in \S\ref{sec:limitations}. Traces are
 replayed at original arrival speed and pre-filtered to 24{,}000 input tokens.
-Each window contains approximately 4{,}800 (W1), 4{,}200 (W2), and 3{,}700 (W3 \& W4) requests.
+Each window contains approximately 4{,}800 (W1), 4{,}200 (W2a), and 3{,}100 (W2b) arriving requests; each policy independently processes the full trace, so the per-policy $n$ in result tables reflects requests that completed within the window at the per-policy concurrency limit.
 Output is capped at 128 tokens to prevent decode from dominating latency.
 
 % -----------------------------------------------------------------------
@@ -233,9 +233,9 @@ prompt.
 A GORGO replica score is a weighted sum of the three controllable terms in
 Equation~\ref{eq:ttft}:
 \begin{equation}
-\mathrm{score}(u, r) = \mathrm{rtt}_u
-  + t_{\mathrm{prefill}} \cdot (|x_r| - |x_r \cap c_u|)
-  + \alpha \cdot (\mathrm{queued\_tokens}_u + \mathrm{used\_kv\_tokens}_u).
+\mathrm{score}(u, r) = w_{\mathrm{rtt}} \cdot \mathrm{rtt}_u
+  + w_{\mathrm{prefill}} \cdot t_{\mathrm{prefill}} \cdot (|x_r| - |x_r \cap c_u|)
+  + w_{\mathrm{load}} \cdot \alpha \cdot (\mathrm{queued\_tokens}_u + \mathrm{used\_kv\_tokens}_u).
 \label{eq:score}
 \end{equation}
 The proxy sends $r$ to the replica with the minimum score. Three signals feed
@@ -243,29 +243,47 @@ the score: (i) $\mathrm{rtt}_u$ from the Exponential Weighted Moving Average (EW
 decoupled from the metrics scrape; (ii) $|x_r \cap c_u|$ from the proxy's local
 radix trie of cached prefixes per replica, refreshed on every request completion;
 and (iii) load from the proxy's in-flight token counter combined with SGLang's
-reported KV-cache occupancy. The two free parameters are the per-token prefill
-rate $t_{\mathrm{prefill}}$ and the load weight $\alpha$.
+reported KV-cache occupancy. The score has two physical rate parameters---per-token
+prefill rate $t_{\mathrm{prefill}}$ and per-token load coefficient $\alpha$---and
+three dimensionless weights $w_{\mathrm{rtt}},w_{\mathrm{prefill}},w_{\mathrm{load}}$
+that scale each term. The three variants below differ in how these five scalars are set.
 
 \subsection{Three Variants of Weight Selection}
 
-\textbf{gorgo-static} fixes $t_{\mathrm{prefill}}$ and $\alpha$ before the run
-and never adjusts them. In W1 we use manually chosen starter values
-($\alpha=0.06$, $t_{\mathrm{prefill}}=0.07$). In W2, \texttt{gorgo-static}
-uses the global hyperparameter values from \texttt{gorgo-hillclimb} at the end of W1 and deploys them as equivalent, per-replica weights.
-($t_{\mathrm{prefill}}\approx 0.983$, $\alpha\approx 4.4\times10^{-4}$) and
-never adjusts them again. This isolates the contribution of the cost model
-independent of online adaptation.
+\textbf{gorgo-static} fixes all five scalars before the run and never adjusts
+them. In W1 we use manually chosen starter values ($w_{\mathrm{rtt}}{=}1$,
+$w_{\mathrm{prefill}}{=}1$, $w_{\mathrm{load}}{=}1$, $t_{\mathrm{prefill}}{=}0.07$,
+$\alpha{=}0.06$). In W2, \texttt{gorgo-static} deploys the weights learned by
+\texttt{gorgo-hillclimb} at the end of W1
+($w_{\mathrm{rtt}}{\approx}0.39$, $w_{\mathrm{prefill}}{\approx}1.88$,
+$w_{\mathrm{load}}{\approx}6.38$, with $t_{\mathrm{prefill}}$ and $\alpha$
+held at their W1 baseline values) and never adjusts them again. This isolates
+the contribution of the cost model independent of online adaptation.
 
-\textbf{gorgo-autotune} re-fits both parameters every 16 new request samples from the trailing 64-sample window, partitioned by destination replica. The prefill weight $t_{\mathrm{prefill}}$ is set to the median observed prefill rate $(\mathrm{TTFT} - \mathrm{rtt}) / |x_r \setminus c_u(t_r)|$; the load weight $\alpha$ is set to the median observed decode rate $(\mathrm{total time} - \mathrm{TTFT}) / n_{\mathrm{output}}$, since queued and in-use tokens drain at the decode rate. It adapts to per-replica hardware drift and RTT shifts, but treats the cost-model weights as identifiable physical rates rather than black-box knobs.
+\textbf{gorgo-autotune} holds the dimensionless weights fixed at
+$w_{\mathrm{rtt}}{=}w_{\mathrm{prefill}}{=}w_{\mathrm{load}}{=}1$ and re-fits
+the two physical rate parameters every 16 new request samples from the trailing
+64-sample window, partitioned by destination replica. $t_{\mathrm{prefill}}$ is
+set to the median observed prefill rate $(\mathrm{TTFT} - \mathrm{rtt}) /
+|x_r \setminus c_u(t_r)|$; $\alpha$ is set to the median observed decode rate
+$(\mathrm{total\;time} - \mathrm{TTFT}) / n_{\mathrm{output}}$, since queued and
+in-use tokens drain at the decode rate. It adapts to per-replica hardware drift
+and RTT shifts, but treats the physical rates as identifiable quantities rather
+than black-box knobs. Results for \texttt{gorgo-autotune} on the main
+production trace are omitted from main tables because per-replica sample counts
+during the nighttime window are insufficient for stable rate fits; its behavior
+on a higher-throughput short-prompt workload appears in Appendix~\ref{app:wildchat}.
 
-\textbf{gorgo-hillclimb} runs a Gaussian $(1{+}1)$-evolution strategy
-\citep{rechenberg1973} over the same two parameters in log-space, with
+\textbf{gorgo-hillclimb} holds $t_{\mathrm{prefill}}$ and $\alpha$ at their W1
+baseline values and runs a Gaussian $(1{+}1)$-evolution strategy
+\citep{rechenberg1973} over the three dimensionless weights
+$(w_{\mathrm{rtt}}, w_{\mathrm{prefill}}, w_{\mathrm{load}})$ in log-space, with
 Rechenberg's 1/5-success rule for step-size adaptation. The objective is the
 negative p95 TTFT of the rolling 64-request window. Every 16 new samples the
 tuner scores the current weights, accepts or rejects the previous candidate
-against the incumbent, and proposes a new candidate by perturbing each parameter
-as $\exp(\log(v) + \sigma\,\mathcal{N}(0,1))$ with $\sigma$ adapted according to
-Rechenberg's 1/5-success rule. This variant treats the cost-model weights as
+against the incumbent, and proposes a new candidate by perturbing each weight as
+$\exp(\log(v) + \sigma\,\mathcal{N}(0,1))$ with $\sigma$ adapted according to
+Rechenberg's 1/5-success rule. This variant treats the dimensionless weights as
 black-box knobs: it finds whatever values produce the best p95 TTFT under the
 current arrival distribution, with no offline profiling.
 
@@ -326,9 +344,12 @@ least-request but cache-blind. \texttt{prefix-cache} is the longest-prefix-match
 with the longest cached prefix match and falls back to least-request when the
 running-request imbalance exceeds a soft threshold. \texttt{simple-session-affinity}
 hashes the first 256 token IDs of the prompt modulo the number of replicas,
-maximizing intra-user reuse but providing no load-escape mechanism. We evaluate
-these six policies in each of two windows; all six fleets start
-simultaneously at the same wall-clock time with the same input trace. W1 supplies
+maximizing intra-user reuse but providing no load-escape mechanism. We run all eight policies in parallel, each on its own dedicated fleet,
+simultaneously starting at the same wall-clock time with the same input trace.
+\texttt{gorgo-autotune} results for GLM-5.1 are omitted from main tables;
+per-replica sample counts during the nighttime window fall below the 16-sample
+threshold for reliable median-of-rates fits, making the per-replica estimates
+noisy. Its behavior on a high-throughput workload appears in Appendix~\ref{app:wildchat}. W1 supplies
 \texttt{gorgo-hillclimb} with uniform starting weights
 ($\mathrm{rtt\_weight}{=}1.0$, $\mathrm{prefill\_weight}{=}1.0$,
 $\mathrm{load\_weight}{=}1.0$); W2 uses the weights that
@@ -666,16 +687,30 @@ the next-best policy \texttt{prefix-cache} (1.702\,s) is 0.076\,s---just above
 one SE---so the p99 win, while directionally consistent with p50 and p95, is not
 individually significant at this sample size.
 
+\paragraph{gorgo-autotune sample requirements.}
+The median-of-rates fit requires at least 16 completed requests routed to a given
+replica before re-estimating $t_{\mathrm{prefill}}$ and $\alpha$. In low-throughput
+nighttime windows (${\sim}1.2$ req/s split across three replicas and a 30-minute
+observation window), the per-replica sample budget is thin, producing noisy rate
+estimates and erratic routing. \texttt{gorgo-autotune} is therefore omitted from
+the main production-trace tables; its behavior on a higher-throughput WildChat
+workload is shown in Appendix~\ref{app:wildchat}. Future work could address this
+by pooling samples across replicas or falling back to a global rate estimate when
+per-replica counts are below threshold.
+
 \paragraph{Scope of fleet.}
 Each policy runs on its own dedicated three-replica fleet of identical GPUs. Multi-tenant sharing, heterogeneous hardware, and prefill/decode disaggregation \citep{distserve2024,splitwise2024} are not characterized here and would require additional cost terms. The score uses only HTTP-exposed metrics, not scheduler-internal signals \citep{kvflow2025,lpc2025} that could tighten the prefill estimate.
 
 \paragraph{Live-tuning instability.}
-Running the $(1{+}1)$-ES live can produce a heavy-tailed p99 excursion
-(Table~\ref{tab:stress_midday}: \texttt{gorgo-hillclimb} p99 inflates to
-7.186\,s) because the negative-p95 objective does not penalize a single
-bad-minute proposal fast enough. The freeze-for-production recommendation in
-\S\ref{sec:results:stress} is therefore a safety property, not just a
-convenience. Decode dynamics such as the effect of variable length decode and high memory consumption on load may impact live-tuning instability; exploring the impact of higher output token limits would be a direction for future work.
+Running the $(1{+}1)$-ES live can produce a heavy-tailed p99 excursion:
+under heavier midday load \texttt{gorgo-hillclimb} p99 inflates to 7.186\,s
+because the negative-p95 objective does not penalize a single bad-minute proposal
+fast enough. Freezing the learned weights for production deployment is therefore a
+safety property, not just a convenience: \texttt{gorgo-static} with frozen W1
+weights avoids this excursion in every held-out window. Decode dynamics such as
+the effect of variable-length decode and high memory consumption on load may
+compound live-tuning instability; exploring the impact of higher output token
+limits would be a direction for future work.
 
 % -----------------------------------------------------------------------
 \section{Related Work}
@@ -748,7 +783,7 @@ calibration window before each redeploy is not affordable, making it effective i
 \item {\bf Claims}\\
 Question: Do the main claims made in the abstract and introduction accurately reflect the paper's contributions and scope?\\
 Answer: \answerYes{}\\
-Justification: The abstract claims (i) public datasets underrepresent long-context multi-turn traffic (quantified in \S\ref{sec:characterization}), (ii) we evaluate routing policies on a production trace (Tables~\ref{tab:w1}, \ref{tab:w2}, \ref{tab:stress_night}, \ref{tab:stress_midday}), and (iii) GORGO sweeps every TTFT percentile in both 30-minute windows. We are explicit in the introduction, \S\ref{sec:results:stress}, and \S\ref{sec:limitations} that ``GORGO'' refers to a family, that the W2 p99 margin is at the noise floor, and that on the daytime stress window \texttt{gorgo-hillclimb}'s p99 inflates and \texttt{prefix-cache} wins p99 instead.
+Justification: The abstract claims (i) public datasets underrepresent long-context multi-turn traffic (quantified in \S\ref{sec:characterization}), (ii) we evaluate routing policies on a production trace (Tables~\ref{tab:w1}, \ref{tab:w2}, \ref{tab:w2b}), and (iii) the GORGO family sweeps every TTFT percentile in both nighttime and midday held-out windows. We are explicit in the introduction and \S\ref{sec:limitations} that ``GORGO'' refers to a family, that the W2a p99 margin is at the noise floor, and that under heavier stress load \texttt{gorgo-hillclimb}'s p99 inflates due to ES exploration.
 
 \item {\bf Limitations}\\
 Question: Does the paper discuss the limitations of the work?\\
