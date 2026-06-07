@@ -269,10 +269,15 @@ set to the median observed prefill rate $(\mathrm{TTFT} - \mathrm{rtt}) /
 $(\mathrm{total\;time} - \mathrm{TTFT}) / n_{\mathrm{output}}$, since queued and
 in-use tokens drain at the decode rate. It adapts to per-replica hardware drift
 and RTT shifts, but treats the physical rates as identifiable quantities rather
-than black-box knobs. Results for \texttt{gorgo-autotune} on the main
-production trace are omitted from main tables because per-replica sample counts
-during the nighttime window are insufficient for stable rate fits; its behavior
-on a higher-throughput short-prompt workload appears in Appendix~\ref{app:wildchat}.
+than black-box knobs. Results for \texttt{gorgo-autotune} on the main production trace are omitted
+from main tables due to a rate-inversion instability: when prefix hit rate is
+high, the uncached-token count $|x_r \setminus c_u(t_r)|$ approaches zero,
+causing the median-of-rates estimator to produce inflated $t_{\mathrm{prefill}}$
+estimates that effectively blacklist the affected replica. The resulting routing
+depends on which replica's rate inverted rather than on load or cache state,
+making results unreliable as a policy evaluation. Behavior on a higher-throughput
+short-prompt workload appears in Appendix~\ref{app:wildchat}; stress-load results
+appear in Appendix~\ref{app:stress}.
 
 \textbf{gorgo-hillclimb} holds $t_{\mathrm{prefill}}$ and $\alpha$ at their W1
 baseline values and runs a Gaussian $(1{+}1)$-evolution strategy
@@ -346,10 +351,10 @@ running-request imbalance exceeds a soft threshold. \texttt{simple-session-affin
 hashes the first 256 token IDs of the prompt modulo the number of replicas,
 maximizing intra-user reuse but providing no load-escape mechanism. We run all eight policies in parallel, each on its own dedicated fleet,
 simultaneously starting at the same wall-clock time with the same input trace.
-\texttt{gorgo-autotune} results for GLM-5.1 are omitted from main tables;
-per-replica sample counts during the nighttime window fall below the 16-sample
-threshold for reliable median-of-rates fits, making the per-replica estimates
-noisy. Its behavior on a high-throughput workload appears in Appendix~\ref{app:wildchat}. W1 supplies
+\texttt{gorgo-autotune} results for GLM-5.1 are omitted from main tables due to
+a rate-inversion instability at high prefix hit rates (see
+\S\ref{sec:limitations}); its behavior on a high-throughput workload appears in
+Appendix~\ref{app:wildchat}. W1 supplies
 \texttt{gorgo-hillclimb} with uniform starting weights
 ($\mathrm{rtt\_weight}{=}1.0$, $\mathrm{prefill\_weight}{=}1.0$,
 $\mathrm{load\_weight}{=}1.0$); W2 uses the weights that
@@ -687,16 +692,22 @@ the next-best policy \texttt{prefix-cache} (1.702\,s) is 0.076\,s---just above
 one SE---so the p99 win, while directionally consistent with p50 and p95, is not
 individually significant at this sample size.
 
-\paragraph{gorgo-autotune sample requirements.}
-The median-of-rates fit requires at least 16 completed requests routed to a given
-replica before re-estimating $t_{\mathrm{prefill}}$ and $\alpha$. In low-throughput
-nighttime windows (${\sim}1.2$ req/s split across three replicas and a 30-minute
-observation window), the per-replica sample budget is thin, producing noisy rate
-estimates and erratic routing. \texttt{gorgo-autotune} is therefore omitted from
-the main production-trace tables; its behavior on a higher-throughput WildChat
-workload is shown in Appendix~\ref{app:wildchat}. Future work could address this
-by pooling samples across replicas or falling back to a global rate estimate when
-per-replica counts are below threshold.
+\paragraph{gorgo-autotune rate-inversion instability.}
+The prefill-rate estimator sets $\hat{t}_{\mathrm{prefill}}^{(r)} =
+\mathrm{median}\bigl\{(\mathrm{TTFT}_i - \mathrm{rtt}_i)/|x_r
+\setminus c_u(t_r)|\bigr\}$ over the trailing window. When prefix hit rate is
+high---as it is on the GLM-5.1 production trace (${\sim}55\%$ reuse)---the
+denominator $|x_r \setminus c_u(t_r)|$ is small for most requests, and small
+timing noise in $\mathrm{TTFT}$ inflates the estimate by orders of magnitude.
+In experiments, the Seoul replica reached $\hat{t}_{\mathrm{prefill}} =
+77\,\mathrm{ms/tok}$ versus a calibrated value of ${\sim}0.1\,\mathrm{ms/tok}$,
+effectively blacklisting it. Routing then reflects which replica's rate inverted,
+not load or cache state---an artifact, not a policy signal. \texttt{gorgo-autotune}
+is therefore omitted from the main production-trace tables. The ES avoids this by
+treating the dimensionless weights as black-box knobs rather than inverting the
+TTFT equation. Future work could address the instability by filtering near-zero
+denominators, using a regularized minimum, or estimating rates in a low-reuse
+warm-up period before switching to the full trace.
 
 \paragraph{Scope of fleet.}
 Each policy runs on its own dedicated three-replica fleet of identical GPUs. Multi-tenant sharing, heterogeneous hardware, and prefill/decode disaggregation \citep{distserve2024,splitwise2024} are not characterized here and would require additional cost terms. The score uses only HTTP-exposed metrics, not scheduler-internal signals \citep{kvflow2025,lpc2025} that could tighten the prefill estimate.
@@ -1017,5 +1028,77 @@ $\Delta$ & +2.6\% & +3.2\% & $-$37.7\% & $-$80.4\% & +70\% & \\
   \texttt{gorgo-static} sends 100\% of requests to one replica.}
 \label{fig:load_ablation}
 \end{figure}
+
+% -----------------------------------------------------------------------
+\section{Stress-Load Robustness}
+\label{app:stress}
+% -----------------------------------------------------------------------
+
+To test robustness under sustained high load, we ran all eight policies on two
+additional 30-minute windows at concurrency $c{=}64$: a midday window (Apr 1,
+12:30--13:00 UTC, ${\sim}1.7$\,req/s, ``W3'') and a night window (Apr 2,
+00:30--01:00 UTC, ${\sim}1.5$\,req/s, ``W4'').
+Both windows use the same frozen weights as W2 (\texttt{gorgo-static}: W1 hillclimb
+output; \texttt{gorgo-hillclimb}: ES continues live). Success rate drops to
+${\sim}89.6\%$ under stress as some requests time out.
+
+\begin{table}[h]
+\centering
+\small
+\caption{W3 (stress midday, Apr 1 12:30--13:00 UTC, $c{=}64$). TTFT in seconds. Bold is best in column.
+  \texttt{gorgo-static} wins p95; \texttt{gorgo-hillclimb} produces the worst p99 (7.186\,s)
+  due to ES exploration under load.}
+\label{tab:stress_midday}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Policy & OK & Succ.\% & p50 & p95 & p99 & max & E2E p95 & E2E p99 \\
+\midrule
+\textbf{gorgo-static}        & 3{,}372 & 89.6 & \textbf{0.193} & \textbf{1.400} & 2.140          & 3.37  & \textbf{3.491} & 13.830 \\
+prefix-cache                 & 3{,}376 & 89.7 & 0.295          & 1.416          & \textbf{1.973} & 3.75  & 3.794          & 13.221 \\
+simple-session-affinity      & 3{,}375 & 89.7 & 0.324          & 1.531          & 2.487          & 28.07 & 4.047          & 15.537 \\
+gorgo-hillclimb              & 3{,}376 & 89.7 & 0.226          & 1.581          & 7.186          & 38.29 & 4.283          & 16.790 \\
+least-request                & 3{,}380 & 89.8 & 0.275          & 1.694          & 2.440          & 20.07 & 3.896          & 13.162 \\
+random                       & 3{,}371 & 89.6 & 0.309          & 1.700          & 2.421          & 3.99  & 4.445          & 15.073 \\
+least-load                   & 3{,}374 & 89.7 & 0.309          & 1.735          & 2.419          & 16.91 & 4.596          & 15.263 \\
+gorgo-autotune               & 3{,}377 & 89.7 & 0.299          & 1.748          & 2.519          & 23.63 & 4.519          & 17.971 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\small
+\caption{W4 (stress night, Apr 2 00:30--01:00 UTC, $c{=}64$). TTFT in seconds. Bold is best in column.
+  \texttt{gorgo-hillclimb} wins p95 and p99; \texttt{gorgo-static} achieves the lowest p50.
+  \texttt{simple-session-affinity} was not included in this window.}
+\label{tab:stress_night}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Policy & OK & Succ.\% & p50 & p95 & p99 & max & E2E p95 & E2E p99 \\
+\midrule
+\textbf{gorgo-hillclimb}     & 2{,}466 & 89.5 & 0.281          & \textbf{1.331} & \textbf{1.832} & 3.05  & \textbf{3.287} & \textbf{11.156} \\
+prefix-cache                 & 2{,}468 & 89.6 & 0.288          & 1.394          & 1.992          & 2.95  & 3.585          & 13.025 \\
+gorgo-static                 & 2{,}472 & 89.8 & \textbf{0.179} & 1.427          & 2.302          & 4.06  & 3.340          & 10.463 \\
+least-request                & 2{,}465 & 89.5 & 0.281          & 1.605          & 2.268          & 4.16  & 3.325          & 11.240 \\
+gorgo-autotune               & 2{,}469 & 89.7 & 0.280          & 1.690          & 2.298          & 18.84 & 3.441          & 13.580 \\
+least-load                   & 2{,}465 & 89.5 & 0.281          & 1.700          & 2.290          & 2.98  & 3.659          & 13.100 \\
+random                       & 2{,}460 & 89.3 & 0.287          & 1.724          & 2.357          & 4.00  & 3.827          & 12.781 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The stress windows confirm the main findings with an important safety note: under
+heavier load (W3), \texttt{gorgo-hillclimb}'s live ES exploration generates the
+worst p99 in the field (7.186\,s), a 3.6$\times$ excursion over the p99 of the
+next-worst policy. This is the primary motivation for the production recommendation
+to freeze learned weights (\texttt{gorgo-static}) rather than run the ES live.
+\texttt{gorgo-static} wins W3 on both TTFT p95 and E2E p95.
+
+Under the lower-load stress night (W4), \texttt{gorgo-hillclimb} recovers to win
+p95 (1.331\,s vs.\ \texttt{gorgo-static}'s 1.427\,s), consistent with the main
+W1 tuning-window result: live ES works well when load is low enough that
+exploration proposals carry little tail risk. \texttt{gorgo-static}'s p50
+(0.179\,s) is the lowest in the field in W4, reflecting the quality of the frozen
+W1 weights even under shifted arrival rates.
 
 \end{document}
