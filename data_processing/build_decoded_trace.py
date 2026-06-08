@@ -27,10 +27,14 @@ import modal
 
 from app import app, completions_volume
 
-DEFAULT_VOCAB_SIZE = 151643  # gpt-4o / Qwen tokenizer vocab
 DEFAULT_MAX_OUTPUT_TOKENS = 128
 
-image = modal.Image.debian_slim().pip_install("tiktoken").add_local_python_source("app")
+MODEL_ID = "Qwen/Qwen3.5-35B-A3B-FP8"
+MODEL_REVISION = "0b2752837483aa34b3db6e83e151b150c0e00e49"
+
+image = (
+    modal.Image.debian_slim().pip_install("transformers", "jinja2").add_local_python_source("app")
+)
 
 
 @app.function(
@@ -43,16 +47,20 @@ def build_decoded(
     metadata_path: str,
     output_path: str,
     seed: int = 42,
-    vocab_size: int = DEFAULT_VOCAB_SIZE,
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
 ):
-    import tiktoken
+    from transformers import AutoTokenizer
 
-    enc = tiktoken.encoding_for_model("gpt-4o")
+    tok = AutoTokenizer.from_pretrained(
+        MODEL_ID,
+        revision=MODEL_REVISION,
+        trust_remote_code=False,
+    )
     rng = random.Random(seed)
     t0 = time.perf_counter()
 
-    # Build a pool of common English words that are each exactly 1 token.
+    # Build a pool of common English words that are each exactly 1 token
+    # under the Qwen tokenizer (same tokenizer the proxy uses).
     # We interleave words with newlines to prevent BPE merging:
     # "word\nword\nword" = 2N-1 tokens for N words.
     candidate_words = [
@@ -116,9 +124,11 @@ def build_decoded(
         "each",
     ]
     single_token_words = [
-        w for w in candidate_words if len(enc.encode(w, disallowed_special=())) == 1
+        w for w in candidate_words if len(tok.encode(w, add_special_tokens=False)) == 1
     ]
-    print(f"[decoded] {len(single_token_words)} single-token words available")
+    nl_toks = tok.encode("\n", add_special_tokens=False)
+    assert len(nl_toks) == 1, f"newline is {len(nl_toks)} tokens under Qwen, expected 1"
+    print(f"[decoded] {len(single_token_words)} single-token words available (Qwen tokenizer)")
 
     # Read metadata trace
     rows_in: list[dict] = []

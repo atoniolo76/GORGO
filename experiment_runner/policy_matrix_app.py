@@ -1097,9 +1097,10 @@ def _extract_learned_weights(matrix: dict) -> dict | None:
     """Extract the learned gorgo weights from a tuning matrix result.
 
     Walks the per-policy results looking for a gorgo policy with
-    ``auto_tune.hyperparameters.defaults``. Returns the defaults dict
-    (the learned weights) or ``None`` if not found.
+    ``auto_tune.hyperparameters.defaults``. Prefers ``online-es`` (hillclimb)
+    over ``fit`` (autotune) when both are present.
     """
+    fallback: dict | None = None
     for trace_result in matrix.get("results") or []:
         manifest = trace_result.get("manifest") or {}
         for r in manifest.get("results") or []:
@@ -1110,9 +1111,15 @@ def _extract_learned_weights(matrix: dict) -> dict | None:
                 continue
             hp = at.get("hyperparameters") or {}
             defaults = hp.get("defaults")
-            if defaults and isinstance(defaults, dict):
+            if not defaults or not isinstance(defaults, dict):
+                continue
+            config = at.get("config") or {}
+            mode = config.get("mode", "")
+            if mode == "online-es":
                 return defaults
-    return None
+            if fallback is None:
+                fallback = defaults
+    return fallback
 
 
 def _auto_tune_payload(policy_spec: dict, *, global_seed: int | None = None) -> dict | None:
@@ -1435,6 +1442,55 @@ async def _run_policy_matrix_experiment(
 
     engine_calls = []
     engine_keys = []
+    proxy_calls = []
+    proxy_keys = []
+
+    async def _cleanup_all_containers():
+        """Cancel all spawned engine and proxy containers."""
+        print("[cleanup] cancelling all spawned containers...", flush=True)
+        await _cancel_spawns(proxy_calls, kind="proxy")
+        await _cancel_spawns(engine_calls, kind="engine")
+        print("[cleanup] done", flush=True)
+
+    try:
+        return await _run_policy_matrix_experiment_inner(
+            base_spec=base_spec,
+            sweep_manifest=sweep_manifest,
+            experiment_id=experiment_id,
+            start_index=start_index,
+            top_k=top_k,
+            output_dir=output_dir,
+            engine_timeout_s=engine_timeout_s,
+            proxy_timeout_s=proxy_timeout_s,
+            environment=environment,
+            engine_calls=engine_calls,
+            engine_keys=engine_keys,
+            proxy_calls=proxy_calls,
+            proxy_keys=proxy_keys,
+        )
+    finally:
+        await _cleanup_all_containers()
+
+
+async def _run_policy_matrix_experiment_inner(
+    *,
+    base_spec: dict,
+    sweep_manifest: dict,
+    experiment_id: str,
+    start_index: int,
+    top_k: int,
+    output_dir: str,
+    engine_timeout_s: float,
+    proxy_timeout_s: float,
+    environment: dict | None,
+    engine_calls: list,
+    engine_keys: list,
+    proxy_calls: list,
+    proxy_keys: list,
+) -> dict:
+    policies = base_spec["policies"]
+    regions = base_spec.get("fleet_regions") or ["CANADA-2", "sines-2", "us-west4"]
+
     for policy in policies:
         label = _label(policy)
         for region in regions:
@@ -1445,8 +1501,6 @@ async def _run_policy_matrix_experiment(
 
     replica_urls = await _wait_for_keys(replicas, engine_keys, engine_timeout_s)
 
-    proxy_keys = []
-    proxy_calls = []
     for policy in policies:
         label = _label(policy)
         key = f"{experiment_id}-{label}"

@@ -209,8 +209,8 @@ def export_metadata(
                     skipped += 1
                     continue
 
-                # Tokenize to get per-message counts and full token sequence.
-                # Token values are used only for hash_ids, then discarded.
+                # Tokenize with tiktoken (same as build_mooncake_trace.py)
+                # to match the original trace's filtering and token counts.
                 per_msg: list[dict] = []
                 all_token_ids: list[int] = []
                 system_prompt_hash = None
