@@ -103,11 +103,11 @@ replica saturates. Reporting only one percentile hides this trade-off.
   (\S\ref{sec:method}), which score each replica by an additive combination of
   network latency, estimated prefill cost on uncached tokens, and estimated decode cost on queued tokens. Variants differ in how scalar hyperparameters are set. The first variant is a static configuration (\texttt{gorgo-static}), the second is a per-replica online fit (\texttt{gorgo-autotune}), and the third is a Gaussian (1+1) evolution strategy hill climb that directly minimizes p95 TTFT (\texttt{gorgo-hillclimb}).
 \item An experimental setup (\S\ref{sec:setup}) running each of eight policies
-  on its own dedicated three-replica fleet of L40S SGLang servers in Asia, Europe, and the US East coast. Policies are benchmarked in parallel  to normalize the variability of cross-region RTT, which spans 26--466\,ms.
-\item Empirical results (\S\ref{sec:results}) on two consecutive 30-minute
-  production-trace windows. GORGO achieves the lowest TTFT at every percentile
-  (p50, p95, p99) on both a tuning and a held-out evaluation window, against
-  five baseline policies.
+  on its own dedicated three-replica fleet of L40S SGLang servers in Asia, Europe, and the US East coast. Policies are benchmarked in parallel to normalize the variability of cross-region RTT, which spans 26--466\,ms.
+\item \chg{Empirical results (\S\ref{sec:results}) across three 30-minute
+  production-trace windows (nighttime tuning W1, nighttime held-out W2a, midday
+  held-out W2b). The GORGO family achieves the lowest TTFT at every percentile
+  (p50, p95, p99) in all three windows against five baseline policies.}
 \end{itemize}
 
 % \item Workload characterization (\S\ref{sec:characterization}): GLM-5.1 has
@@ -201,7 +201,7 @@ has seen their conversation can save more than half of the prefill.
 
 \paragraph{Experimental windows.}
 We focus on two consecutive 30-minute windows taken from GLM-5.1 traffic on April 2nd, 2026: 00:30--01:00
-UTC (W1, tuning) and 01:00--01:30 UTC (W2a, held-out evaluation). A third window at 12:30--13:00 UTC on April 2nd, 2026 (W2b, midday diurnal evaluation) tests generalization to heavier daytime load. Two additional stress-load windows (W3 \& W4, higher concurrency and shifting traffic patterns) informed the limitations analysis in \S\ref{sec:limitations}. Traces are
+UTC (W1, tuning) and 01:00--01:30 UTC (W2a, held-out evaluation). A third window at 12:30--13:00 UTC on April 2nd, 2026 (W2b, midday diurnal evaluation) tests generalization to heavier daytime load. \chg{Two additional stress-load windows (W3 \& W4, run at higher sustained load with the same $c{=}64$ concurrency) appear in Appendix~\ref{app:stress} and inform the live-tuning instability discussion in \S\ref{sec:limitations}.} Traces are
 replayed at original arrival speed and pre-filtered to 24{,}000 input tokens.
 Each window contains approximately 4{,}800 (W1), 4{,}200 (W2a), and 3{,}100 (W2b) arriving requests; each policy independently processes the full trace, so the per-policy $n$ in result tables reflects requests that completed within the window at the per-policy concurrency limit.
 Output is capped at 128 tokens to prevent decode from dominating latency.
@@ -716,7 +716,7 @@ Each policy runs on its own dedicated three-replica fleet of identical GPUs. Mul
 \paragraph{Live-tuning instability.}
 Running the $(1{+}1)$-ES live can produce a heavy-tailed p99 excursion:
 under heavier midday load \texttt{gorgo-hillclimb} p99 inflates to 7.186\,s
-because the negative-p95 objective does not penalize a single bad-minute proposal
+\chg{(Table~\ref{tab:stress_midday})} because the negative-p95 objective does not penalize a single bad-minute proposal
 fast enough. Freezing the learned weights for production deployment is therefore a
 safety property, not just a convenience: \texttt{gorgo-static} with frozen W1
 weights avoids this excursion in every held-out window. Decode dynamics such as
@@ -773,7 +773,7 @@ terms of an additive per-replica cost and let online TTFT feedback optimize
 scaling weights, in place of operator-tuned constants or offline profiling. On a
 long-context, high-prefix-reuse production trace the GORGO policy family
 collectively achieves the lowest TTFT at every reported percentile in both a
-tuning and a held-out evaluation windows. On a short-prompt, low-reuse public
+\chg{tuning window and held-out evaluation windows.} On a short-prompt, low-reuse public
 trace (Appendix~\ref{app:wildchat}) the same policy is non-competitive, in
 agreement with the regime characterization in
 \S\ref{sec:characterization}. The advantage is therefore a property of the
@@ -1040,6 +1040,9 @@ To test robustness under sustained high load, we ran all eight policies on two
 additional 30-minute windows at concurrency $c{=}64$: a midday window (Apr 1,
 12:30--13:00 UTC, ${\sim}1.7$\,req/s, ``W3'') and a night window (Apr 2,
 00:30--01:00 UTC, ${\sim}1.5$\,req/s, ``W4'').
+\chg{W4 covers the same wall-clock period as the main W1 tuning window but is an
+independent experiment run at higher effective load (denser arrival bursts);
+it shares neither caches nor routing state with W1.}
 Both windows use the same frozen weights as W2 (\texttt{gorgo-static}: W1 hillclimb
 output; \texttt{gorgo-hillclimb}: ES continues live). Success rate drops to
 ${\sim}89.6\%$ under stress as some requests time out.
