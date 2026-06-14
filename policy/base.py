@@ -144,6 +144,12 @@ class RouteContext:
     (incremented by ``request_tokens`` on dispatch, decremented on
     completion). Used by load-aware policies that score on tokens.
 
+    ``endpoints_queued_uncached_tokens`` is the same lifecycle counter,
+    but cache-aware: it increments by the number of uncached tokens for
+    the request on the selected replica at dispatch time. New GORGO
+    variants use this as a better TTFT load signal than raw prompt
+    tokens.
+
     ``endpoints_inflight_requests`` is a per-target *request* counter
     with the same lifecycle. Lets request-counting policies (notably
     ``least-request``) bridge the staleness window of the SGLang
@@ -163,6 +169,7 @@ class RouteContext:
     replica_urls: list[str]
     metrics: dict[str, ReplicaSnapshot]
     endpoints_queued_tokens: dict[str, int]
+    endpoints_queued_uncached_tokens: dict[str, int]
     endpoints_inflight_requests: dict[str, int]
     radix_trie: RadixTrie
     token_ids: list[int]
@@ -274,6 +281,7 @@ def route(
     request_tokens: int,
     hyperparameters: dict[str, Any],
     endpoints_inflight_requests: dict[str, int] | None = None,
+    endpoints_queued_uncached_tokens: dict[str, int] | None = None,
 ) -> str:
     """Dispatch by normalized policy name. Thin wrapper over the
     registry kept around for tests / scripts that don't want to
@@ -294,6 +302,7 @@ def route(
             replica_urls=replica_urls,
             metrics=metrics,
             endpoints_queued_tokens=endpoints_queued_tokens,
+            endpoints_queued_uncached_tokens=endpoints_queued_uncached_tokens or {},
             endpoints_inflight_requests=endpoints_inflight_requests or {},
             radix_trie=radix_trie,
             token_ids=token_ids,

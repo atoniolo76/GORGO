@@ -968,7 +968,13 @@ async def _post_json(
                 r = await client.post(url.rstrip("/") + path, json=payload)
                 r.raise_for_status()
                 return r.json()
-        except (httpx.ConnectError, httpx.ConnectTimeout, OSError) as e:
+        except (httpx.TransportError, OSError) as e:
+            # httpx.TransportError covers ConnectError/ConnectTimeout/ReadTimeout
+            # *and* RemoteProtocolError ("Server disconnected without sending a
+            # response"), which a proxy throws while it is still cold-starting:
+            # it accepts the TCP connection but drops it before replying. These
+            # are all transient during fleet bring-up, so retry rather than
+            # letting one kill the whole phase.
             last_err = e
             if attempt < retries:
                 wait = backoff_base**attempt
@@ -998,7 +1004,9 @@ async def _get_json(
                 r = await client.get(url.rstrip("/") + path)
                 r.raise_for_status()
                 return r.json()
-        except (httpx.ConnectError, httpx.ConnectTimeout, OSError) as e:
+        except (httpx.TransportError, OSError) as e:
+            # See _post_json: TransportError also covers RemoteProtocolError,
+            # the cold-start "server disconnected" race during fleet bring-up.
             last_err = e
             if attempt < retries:
                 wait = backoff_base**attempt
@@ -1393,7 +1401,7 @@ def run_policy_matrix_experiment(
     start_index: int = 1,
     top_k: int = 1,
     output_dir: str = "/results/policy_matrix_sweep/moon_neurips_one_trace",
-    engine_timeout_s: float = 45 * 60,
+    engine_timeout_s: float = 24 * 60 * 60,
     proxy_timeout_s: float = 10 * 60,
     environment: dict | None = None,
 ) -> dict:
@@ -1488,6 +1496,9 @@ async def _run_policy_matrix_experiment_inner(
     proxy_calls: list,
     proxy_keys: list,
 ) -> dict:
+    experiment_started_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    run_instance_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    fleet_key_prefix = f"{experiment_id}-{run_instance_id}"
     policies = base_spec["policies"]
     regions = base_spec.get("fleet_regions") or ["CANADA-2", "sines-2", "us-west4"]
 
@@ -1495,7 +1506,7 @@ async def _run_policy_matrix_experiment_inner(
         label = _label(policy)
         for region in regions:
             fn = ENGINE_BY_REGION[region]
-            key = f"{experiment_id}-{label}-{region}"
+            key = f"{fleet_key_prefix}-{label}-{region}"
             engine_keys.append(key)
             engine_calls.append(await fn.spawn.aio(key))
 
@@ -1503,7 +1514,7 @@ async def _run_policy_matrix_experiment_inner(
 
     for policy in policies:
         label = _label(policy)
-        key = f"{experiment_id}-{label}"
+        key = f"{fleet_key_prefix}-{label}"
         proxy_keys.append(key)
         proxy_calls.append(await proxy_runner.spawn.aio(key))
 
@@ -1511,13 +1522,19 @@ async def _run_policy_matrix_experiment_inner(
 
     launched_spec = deepcopy(base_spec)
     launched_spec["policies"] = []
-    fleet_manifest = {"experiment_id": experiment_id, "regions": regions, "fleets": []}
+    fleet_manifest = {
+        "experiment_id": experiment_id,
+        "run_instance_id": run_instance_id,
+        "fleet_key_prefix": fleet_key_prefix,
+        "regions": regions,
+        "fleets": [],
+    }
 
     for policy in policies:
         label = _label(policy)
-        policy_replica_keys = [f"{experiment_id}-{label}-{region}" for region in regions]
+        policy_replica_keys = [f"{fleet_key_prefix}-{label}-{region}" for region in regions]
         policy_replica_urls = [replica_urls[k] for k in policy_replica_keys]
-        proxy_key = f"{experiment_id}-{label}"
+        proxy_key = f"{fleet_key_prefix}-{label}"
         proxy_url = proxy_urls[proxy_key]
         await _post_json(proxy_url, "/replicas", {"replicas": policy_replica_urls})
         await _post_json(proxy_url, "/policy", {"policy": policy["name"]})

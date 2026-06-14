@@ -141,7 +141,7 @@ def run_sequenced_experiment(
         tuning_output = f"{output_dir}/{tuning_id}"
         print(f"\n[sequencer] === PHASE 0: TUNING ({tuning_id}) ===", flush=True)
 
-        tuning_result = run_policy_matrix_experiment.remote(
+        tuning_call = run_policy_matrix_experiment.spawn(
             tuning_spec,
             tuning_manifest,
             experiment_id=tuning_id,
@@ -150,6 +150,7 @@ def run_sequenced_experiment(
             output_dir=tuning_output,
             environment=environment,
         )
+        tuning_result = tuning_call.get()
 
         learned = _extract_learned_weights_from_manifest(tuning_result)
         sequencer_manifest["phases"].append(
@@ -191,32 +192,53 @@ def run_sequenced_experiment(
 
         patched_eval_spec = deepcopy(eval_spec)
         for p in patched_eval_spec.get("policies", []):
-            if p.get("name") == "gorgo":
+            if p.get("name") in {"gorgo", "gorgo-2d"}:
                 p["hyperparameters"] = learned
                 print(
                     f"[sequencer] patched {p.get('label', 'gorgo')} with learned weights",
                     flush=True,
                 )
 
-        eval_result = run_policy_matrix_experiment.remote(
-            patched_eval_spec,
-            eval_manifest,
-            experiment_id=eval_id,
-            start_index=start_index,
-            top_k=top_k,
-            output_dir=eval_output,
-            environment=environment,
-        )
-
-        sequencer_manifest["phases"].append(
-            {
-                "phase": f"eval{eval_idx}",
-                "experiment_id": eval_id,
-                "learned_weights": learned,
-                "status": "completed",
-                "result_summary": _summarize_result(eval_result),
-            }
-        )
+        # Isolate each eval: a failure in one window (e.g. a transient proxy
+        # cold-start disconnect) must not abort the remaining eval windows.
+        # Record the phase outcome and carry on so every window gets a shot.
+        try:
+            eval_call = run_policy_matrix_experiment.spawn(
+                patched_eval_spec,
+                eval_manifest,
+                experiment_id=eval_id,
+                start_index=start_index,
+                top_k=top_k,
+                output_dir=eval_output,
+                environment=environment,
+            )
+            eval_result = eval_call.get()
+            sequencer_manifest["phases"].append(
+                {
+                    "phase": f"eval{eval_idx}",
+                    "experiment_id": eval_id,
+                    "learned_weights": learned,
+                    "status": "completed",
+                    "result_summary": _summarize_result(eval_result),
+                }
+            )
+        except Exception as e:
+            print(
+                f"[sequencer][ERROR] eval{eval_idx} ({eval_id}) failed: {type(e).__name__}: {e}",
+                flush=True,
+            )
+            sequencer_manifest["phases"].append(
+                {
+                    "phase": f"eval{eval_idx}",
+                    "experiment_id": eval_id,
+                    "learned_weights": learned,
+                    "status": "failed",
+                    "error": f"{type(e).__name__}: {e}",
+                }
+            )
+            # Persist progress immediately so a mid-run failure doesn't lose
+            # the record of which windows completed.
+            _write_sequencer_manifest(sequencer_manifest, output_dir)
 
         if eval_idx < len(eval_manifests) - 1:
             print(

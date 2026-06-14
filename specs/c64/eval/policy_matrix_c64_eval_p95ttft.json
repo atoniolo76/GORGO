@@ -27,9 +27,9 @@
       "auto_tune": {"enabled": true, "window_size": 64, "hop_size": 16, "apply": true, "mode": "fit"}
     },
     {
-      "_note": "Learned from decoded_v1 tuning on synthetic traces.",
+      "_note": "Learned from decoded_v9 tuning on synthetic traces (tiktoken metadata + Qwen decoded).",
       "name": "gorgo", "label": "gorgo-static-p95",
-      "hyperparameters": {"rtt_weight": 0.9553619224703274, "prefill_weight": 0.37636535669159216, "load_weight": 2.8970081976516404}
+      "hyperparameters": {"rtt_weight": 1.1190255312606117, "prefill_weight": 1.1057483550949103, "load_weight": 1.4462402382071315}
     }
   ],
   "replica_homogeneity_check": {

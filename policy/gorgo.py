@@ -62,6 +62,7 @@ DEFAULT_GORGO_HYPERPARAMETERS: dict[str, float] = {
     "rtt_weight": 1.0,
     "prefill_weight": 1.0,
     "load_weight": 1.0,
+    "queue_weight": 1.0,
 }
 
 ALLOWED_HYPERPARAM_KEYS: frozenset[str] = frozenset(DEFAULT_GORGO_HYPERPARAMETERS)
@@ -237,10 +238,57 @@ def route_gorgo(ctx: RouteContext) -> RouteDecision:
     return RouteDecision(min(scores, key=scores.get), None, scores)
 
 
+def route_gorgo_2d(ctx: RouteContext) -> RouteDecision:
+    """Score each replica with a normalized 2D GORGO model.
+
+    ``score(u) = rtt_weight * rtt_ms + uncached + queue_weight * queued``
+
+    The own-prefill term (``uncached``) is the reference unit and stays
+    cache-aware: it counts only the *current* request's tokens that miss
+    the replica's KV cache, so there is no learned ``prefill_weight``.
+
+    The load term uses ``queued`` -- the raw count of all prompt tokens
+    already dispatched to the replica and not yet completed, *not*
+    discounted by cache hits. A replica whose queue is full of cache-hit
+    requests is still saturated (those tokens still consume decode/compute
+    and add queueing delay), so the load signal must see them; the
+    cache-aware ``queued_uncached`` counter hid that load and let the tuner
+    drive ``queue_weight`` to zero.
+    """
+    if not ctx.replica_urls:
+        raise ValueError("no replicas")
+
+    endpoints_cached_tokens = (
+        ctx.radix_trie.cached_prefix_lengths(ctx.token_ids, ctx.replica_urls)
+        if ctx.token_ids
+        else {u: 0 for u in ctx.replica_urls}
+    )
+    scores: dict[str, float] = {}
+    for u in ctx.replica_urls:
+        snap = ctx.metrics.get(u)
+        if snap is None:
+            continue
+        eff = effective_hyperparameters(ctx.hyperparameters, u)
+        cached = endpoints_cached_tokens.get(u, 0)
+        uncached = max(0, ctx.request_tokens - cached)
+        queued = ctx.endpoints_queued_tokens.get(u, 0)
+
+        rtt = snap.network_rtt if snap.network_rtt > 0.0 else snap.latency
+        rtt_cost = eff["rtt_weight"] * (rtt * 1000.0)
+        prefill_cost = uncached
+        queue_cost = eff["queue_weight"] * queued
+
+        scores[u] = rtt_cost + prefill_cost + queue_cost
+    if not scores:
+        return RouteDecision(route_random(ctx.replica_urls).target, "empty-candidates", None)
+    return RouteDecision(min(scores, key=scores.get), None, scores)
+
+
 # ---------------------------------------------------------------------------
 # Registry export
 # ---------------------------------------------------------------------------
 
 GORGO_POLICIES: list[PolicyDef] = [
     PolicyDef("gorgo", needs_metrics=True, fn=route_gorgo),
+    PolicyDef("gorgo-2d", needs_metrics=True, fn=route_gorgo_2d),
 ]

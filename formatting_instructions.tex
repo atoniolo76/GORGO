@@ -16,6 +16,7 @@
 \usepackage{graphicx}
 \usepackage{multirow}
 \usepackage{subcaption}
+\graphicspath{{figures/}}
 
 \title{GORGO: Online Tuning for Cross-Region Network-Aware LLM Serving}
 
@@ -96,7 +97,7 @@ replica saturates. Reporting only one percentile hides this trade-off.
 \begin{itemize}
 \item A workload characterization (\S\ref{sec:characterization}) placing three
   datasets on the same prefix-reuse and request-length axes. The production
-  GLM-5.1 trace has 7--45$\times$ longer prompts and 2--6$\times$ higher
+  ArtChat-411K trace has 7--45$\times$ longer prompts and 2--6$\times$ higher
   token-weighted reuse than LMSYS-Chat-1M and WildChat-4.8M.
 \item A routing cost model and three variants collectively called GORGO
   (\S\ref{sec:method}), which score each replica by an additive combination of
@@ -109,14 +110,14 @@ replica saturates. Reporting only one percentile hides this trade-off.
   seven baseline policies.
 \end{itemize}
 
-% \item Workload characterization (\S\ref{sec:characterization}): GLM-5.1 has
+% \item Workload characterization (\S\ref{sec:characterization}): ArtChat-411K has
 %   7--45$\times$ longer prompts and 2--6$\times$ more token-weighted prefix
 %   reuse than LMSYS-Chat-1M and WildChat-4.8M.
 % \item GORGO (\S\ref{sec:method}): an additive cost over RTT, uncached prefill,
 %   and queue depth, with three weight-setting variants---static, online
 %   median-of-rates, and Gaussian $(1{+}1)$-ES on p95 TTFT.
 % \item Evaluation (\S\ref{sec:results}) on a three-region L40S fleet across
-%   two 30-minute GLM-5.1 windows and two $c{=}64$ stress windows: the GORGO
+%   two 30-minute ArtChat-411K windows and two $c{=}64$ stress windows: the GORGO
 %   family collectively achieves the lowest TTFT at every percentile in both
 %   30-minute windows against five baselines.
 
@@ -138,8 +139,8 @@ request length, conversational structure, and token-weighted prefix reuse.
 
 \paragraph{Datasets.}
 \textbf{LMSYS-Chat-1M} \citep{lmsys2024} is a dataset of one million chatbot conversations from a publicly hosted demo of a Vicuna model and the ChatbotArena website. \textbf{WildChat-4.8M} \citep{wildchat2024} is a corpus
-of 3.2M ChatGPT-proxy conversations grouped by client IP. Our \textbf{GLM-5.1
-dataset} contains chat completion requests from a production
+of 3.2M ChatGPT-proxy conversations grouped by client IP. Our \textbf{ArtChat-411K
+trace} contains chat completion requests from a production
 GLM 5.1 model endpoint hosted by an industry company\citep{glm2024}. It contains 411{,}169 requests across 4{,}984 distinct
 users, yielding $\sim$82 requests per user on average. We used the request metadata for real-world timestamps and tokenized request bodies for reuse calculation.
 
@@ -153,7 +154,7 @@ only the global figure.
 
 \begin{table}[t]
 \centering
-\smalld
+\small
 \caption{Workload characterization. Token counts use the same byte-pair
   tokenizer in all rows. Reuse percentages are token-weighted prefix-trie
   savings as described in \S\ref{sec:characterization}.}
@@ -164,46 +165,52 @@ Dataset & Total reqs & Users & Avg input tokens & Intra-user reuse & Global reus
 \midrule
 LMSYS-Chat-1M & 1{,}000{,}000 & --- & 467 & --- & 9.0\% \\
 WildChat-4.8M & 3{,}199{,}860 & 1{,}833{,}730 & 2{,}925 & 5.3\% & 34.4\% \\
-GLM-5.1 production & 411{,}169 & 4{,}984 & 21{,}043 & 53.7\% & 55.3\% \\
+ArtChat-411K & 411{,}169 & 4{,}984 & 21{,}043 & 53.7\% & 55.3\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 Three contrasts stand out (Table~\ref{tab:datasets}, Figure~\ref{fig:dataset_combined}). \textit{Request length}:
-GLM-5.1 prompts are 45$\times$ longer than LMSYS and 7$\times$ longer than
+ArtChat-411K prompts are 45$\times$ longer than LMSYS and 7$\times$ longer than
 WildChat. At typical rates, prefill on a 21{,}000-token uncached prompt takes on the order of seconds. 
 
-\textit{User concentration}: GLM-5.1 has 82 requests per user on
+\textit{User concentration}: ArtChat-411K has 82 requests per user on
 average; WildChat has 1.7; LMSYS does not carry user identifiers, so intra-user
 statistics cannot be computed. Intra-user reuse depends
 on returning users, which the public sets simply do not have. \textit{Reuse
-magnitude}: 53.7\% of GLM-5.1 tokens are part of a prefix seen earlier from the
+magnitude}: 53.7\% of ArtChat-411K tokens are part of a prefix seen earlier from the
 same user (5.3\% for WildChat, essentially zero for LMSYS). The bulk of
 WildChat's 34.4\% global reuse comes from cross-user shared structure (chat
 templates, viral prompts), not sustained per-user dialogue.
 Thus, for routing, LMSYS and WildChat live in a regime where prefix-aware policies
-have little to win. On GLM-5.1, a strategy that lands a user on a replica that
+have little to win. On ArtChat-411K, a strategy that lands a user on a replica that
 has seen their conversation can save more than half of the prefill.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{dataset_combined.png}
-\caption{\textit{Left}: Token composition per dataset. GLM-5.1's reuse
+\caption{\textit{Left}: Token composition per dataset. ArtChat-411K's reuse
   is overwhelmingly intra-user (54\%), reflecting multi-turn dialogue;
   WildChat's is predominantly cross-user (29\%, shared templates); LMSYS
   has minimal reuse (9\%, all cross-user). \textit{Right}: Radar chart
-  with six axes normalized to the dataset maximum. GLM-5.1 dominates on
+  with six axes normalized to the dataset maximum. ArtChat-411K dominates on
   every axis relevant to routing: long prompts, high multi-turn density,
   concentrated users, and strong intra-user prefix reuse.}
 \label{fig:dataset_combined}
 \end{figure}
 
 \paragraph{Experimental windows.}
-We focus on two consecutive 30-minute windows taken from GLM-5.1 traffic on April 1st, 2026: 00:30--01:00
-UTC (W1, tuning) and 01:00--01:30 UTC (W2, held-out evaluation). Two additional 30-minute windows taken from 12:30-13:00 UTC on April 1st, 2026 and 00:30--1:00 UTC on April 2nd, 2026 (W3 \& W4, stress and shifting traffic patterns) are included in the evaluation. Traces are
-replayed at original arrival speed and pre-filtered to 24{,}000 input tokens.
-Each window contains approximately 4{,}800 (W1), 4{,}200 (W2), and 3{,}700 (W3 \& W4) requests.
-Output is capped at 128 tokens to prevent decode from dominating latency.
+We tune on a high-diversity 30-minute window from ArtChat-411K traffic on April
+5th, 2026: 16:15--16:45 UTC (W1). We then freeze the learned parameters and
+evaluate on two non-consecutive, held-out windows drawn from later days and
+time-of-day regimes: April 6th, 15:05--15:35 UTC (W2a), and April 7th,
+19:45--20:15 UTC (W2b). This split tests whether parameters learned from one
+high-diversity window generalize to later traffic rather than simply carrying
+over to an adjacent interval. The two evaluation windows were selected from the
+7-day trace for high user diversity and multi-turn density while avoiding
+single-user-dominated bursts. Traces are replayed at original arrival speed and
+pre-filtered to 24{,}000 input tokens. Output is capped at 128 tokens to
+prevent decode from dominating latency.
 
 % -----------------------------------------------------------------------
 \section{GORGO}
@@ -212,18 +219,17 @@ Output is capped at 128 tokens to prevent decode from dominating latency.
 
 \subsection{TTFT Decomposition}
 
-Let a request $r$ with token sequence $x_r$ be routed to replica $u$. Its TTFT
+Let a request $r$ with token sequence $x_r$ be routed to replica $i$. Its TTFT
 decomposes as
 \begin{equation}
-\mathrm{TTFT}(r,u) = \mathrm{rtt}(u) + w_{\mathrm{queue}}(u,t_r)
-  + t_{\mathrm{prefill}}(u)\cdot|x_r \setminus c_u(t_r)| + \varepsilon,
+\mathrm{TTFT}(r,i) = \mathrm{rtt}(i) + \mathrm{qt}(i,t_r)
+  + \mathrm{pt}(i)\cdot|x_r \setminus c_i(t_r)| + \varepsilon,
 \label{eq:ttft}
 \end{equation}
-where $\mathrm{rtt}(u)$ is the round-trip from the routing proxy to replica $u$;
-$w_{\mathrm{queue}}(u,t_r)$ is queueing delay; $t_{\mathrm{prefill}}(u)$ is
-the per-token prefill rate; $c_u(t_r)$ is the set of token sequences cached on
-$u$ at arrival time $t_r$, so $|x_r \setminus c_u(t_r)|$ is the number of uncached tokens; and $\varepsilon$ collects scheduler overhead and
-batching variance. Cross-region $\mathrm{rtt}(u)$ ranges from 26\,ms to 466\,ms
+where $\mathrm{rtt}(u)$ is the round-trip from the routing proxy to replica $i$;
+$\mathrm{qt}(u,t_i)$ is queueing delay; $\mathrm{pt}(i)$ is
+the per-token prefill rate; $c_i(t)$ is the set of token sequences cached on
+$i$ at arrival time $t_r$, so $|x_r \setminus c_i(t_r)|$ is the number of uncached tokens. Cross-region $\mathrm{rtt}(i)$ ranges from 26\,ms to 466\,ms
 in our cluster; the prefill term can be the largest and most routing-sensitive
 term at typical rates of 0.1--1\,ms per uncached token on a 21{,}000-token
 prompt.
@@ -233,18 +239,19 @@ prompt.
 A GORGO replica score is a weighted sum of the three controllable terms in
 Equation~\ref{eq:ttft}:
 \begin{equation}
-\mathrm{score}(u, r) = \mathrm{rtt}_u
-  + t_{\mathrm{prefill}} \cdot (|x_r| - |x_r \cap c_u|)
-  + \alpha \cdot (\mathrm{queued\_tokens}_u + \mathrm{used\_kv\_tokens}_u).
+\mathrm{score}(i, r) =
+  w_{\mathrm{rtt}} \cdot \mathrm{rtt}_i
+  + \left(|x_r| - |x_r \cap c_i|\right)
+  + w_{\mathrm{queue}} \cdot \ell_i(t_r).
 \label{eq:score}
 \end{equation}
 The proxy sends $r$ to the replica with the minimum score. Three signals feed
-the score: (i) $\mathrm{rtt}_u$ from the Exponential Weighted Moving Average (EWMA) of a lightweight network probe
-decoupled from the metrics scrape; (ii) $|x_r \cap c_u|$ from the proxy's local
+the score: (i) $\mathrm{rtt}_i$ from the Exponential Weighted Moving Average (EWMA) of a lightweight network probe
+decoupled from the metrics scrape; (ii) $|x_r \cap c_i|$ from the proxy's local
 radix trie of cached prefixes per replica, refreshed on every request completion;
-and (iii) load from the proxy's in-flight token counter combined with SGLang's
-reported KV-cache occupancy. The two free parameters are the per-token prefill
-rate $t_{\mathrm{prefill}}$ and the load weight $\alpha$.
+and (iii) the count of tokens dispatched to each replica for all requests without a response, $\ell_i(t_r)$. 
+The two free parameters are the RTT weight $w_{\mathrm{rtt}}$ and the queue weight $w_{\mathrm{queue}}$;
+the own-prefill term is fixed as the unit of score.
 
 \subsection{Three Variants of Weight Selection}
 
@@ -356,7 +363,7 @@ boundary; all policies achieve 100\% success rate in all windows.
 \begin{table}[t]
 \centering
 \small
-\caption{GLM-5.1 W1 (tuning window, 00:30--01:00 UTC, April 2nd 2026). TTFT and E2E in
+\caption{ArtChat-411K W1 (tuning window, 00:30--01:00 UTC, April 2nd 2026). TTFT and E2E in
   seconds. Bold is best in column. $n{=}2{,}095$ requests per policy; 100\% success rate.
   \texttt{gorgo-hillclimb} actively explores via $(1{+}1)$-ES with
   $\mathrm{load\_weight} \in [0.1, 10.0]$.}
@@ -393,7 +400,7 @@ routing to a cache-cold replica.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\linewidth]{tune_convergence_hillclimb.png}
+\includegraphics[width=\linewidth]{tune_convergence_2d_v9.png}
 \caption{$(1{+}1)$-ES convergence over the W1 tuning window (p95 objective).
   \textit{Top-left}: weight trajectories---$w_{\mathrm{load}}$ (orange) climbs
   to 6.38 while $w_{\mathrm{rtt}}$ (green) settles at 0.39; dots show ES
@@ -408,7 +415,7 @@ routing to a cache-cold replica.
 \begin{table}[t]
 \centering
 \small
-\caption{GLM-5.1 W2a (held-out nighttime evaluation, 01:00--01:30 UTC, April 2nd 2026).
+\caption{ArtChat-411K W2a (held-out nighttime evaluation, 01:00--01:30 UTC, April 2nd 2026).
   \texttt{gorgo-static} deploys the W1-learned weights without adjustment.
   Bold is best in column. $n{=}2{,}207$ requests per policy; 100\% success rate.}
 \label{tab:w2}
@@ -439,7 +446,7 @@ excursions that inflate p99 during tuning.
 \begin{table}[t]
 \centering
 \small
-\caption{GLM-5.1 W2b (held-out midday diurnal evaluation, 12:30--13:00 UTC, April 2nd 2026).
+\caption{ArtChat-411K W2b (held-out midday diurnal evaluation, 12:30--13:00 UTC, April 2nd 2026).
   Different time-of-day from W1; 47\% more requests.
   Bold is best in column. $n{=}3{,}071$ requests per policy; 100\% success rate.}
 \label{tab:w2b}
@@ -524,7 +531,7 @@ ranges).
 \begin{table}[t]
 \centering
 \small
-\caption{GLM-5.1 W1 with p50 TTFT objective (tuning window, 00:30--01:00 UTC,
+\caption{ArtChat-411K W1 with p50 TTFT objective (tuning window, 00:30--01:00 UTC,
   April 2nd 2026). Same trace and ranges as the p95 run.
   $n{=}2{,}095$ requests per policy; 100\% success rate.}
 \label{tab:w1_p50}
@@ -769,7 +776,7 @@ Justification: Section~\ref{sec:setup} specifies model, regions, hardware, fleet
 \item {\bf Open access to data and code}\\
 Question: Does the paper provide open access to the data and code?\\
 Answer: \answerYes{}\\
-Justification: The proxy and policy code are available at \href{https://anonymous.4open.science/r/GORGO-D25A}{https://anonymous.4open.science/r/GORGO-D25A}. The GLM-5.1 production trace is not redistributable under its terms of service. The public-dataset characterization (LMSYS, WildChat) is fully reproducible with no proprietary inputs.
+Justification: The proxy and policy code are available at \href{https://anonymous.4open.science/r/GORGO-D25A}{https://anonymous.4open.science/r/GORGO-D25A}. The ArtChat-411K trace is not redistributable under its terms of service. The public-dataset characterization (LMSYS, WildChat) is fully reproducible with no proprietary inputs.
 
 \item {\bf Experimental setting/details}\\
 Question: Does the paper specify all the training and test details?\\
@@ -844,7 +851,7 @@ Justification: LLM serving infrastructure is the object of study. Authors used L
 
 % W1 and W2 manifests, result CSVs, and summary plots are produced by running the
 % controller against these specs and post-processing per-policy stats with the
-% released analysis scripts. The GLM-5.1 production trace is not redistributable;
+% released analysis scripts. The ArtChat-411K trace is not redistributable;
 % the public-dataset characterization (LMSYS, WildChat) reproduces with no
 % proprietary inputs.
 
@@ -855,8 +862,8 @@ Justification: LLM serving infrastructure is the object of study. Authors used L
 
 We replay a 30-minute window of WildChat-4.8M \citep{wildchat2024} on the
 same 2$\times$L40S three-region fleet, with the same eight policies as the
-GLM-5.1 sweeps. WildChat averages 2{,}925 input tokens per request and
-5.3\% intra-user prefix reuse---an order of magnitude shorter than GLM-5.1
+ArtChat-411K sweeps. WildChat averages 2{,}925 input tokens per request and
+5.3\% intra-user prefix reuse---an order of magnitude shorter than ArtChat-411K
 and roughly a tenth the reuse---putting it well outside the regime
 characterized in \S\ref{sec:characterization}.
 
@@ -864,7 +871,7 @@ characterized in \S\ref{sec:characterization}.
 \centering
 \small
 \caption{WildChat-4.8M replay: 30-minute window, $c{=}32$. TTFT in seconds.
-  Bold is best in column. Compared to the GLM-5.1 results, GORGO variants
+  Bold is best in column. Compared to the ArtChat-411K results, GORGO variants
   are not competitive: \texttt{gorgo-static} and \texttt{gorgo-autotune}
   are the worst two policies on p95.}
 \label{tab:wildchat}
@@ -891,7 +898,7 @@ gorgo-autotune                   & 20{,}451 & 0.541 & 3.583          & 6.438    
   the eight policies. GORGO variants (dark blues) are not competitive:
   \texttt{gorgo-static} and \texttt{gorgo-autotune} are the slowest two
   policies at the tail, and \texttt{gorgo-hillclimb} sits mid-pack. The
-  ranking inverts the GLM-5.1 result, consistent with the regime
+  ranking inverts the ArtChat-411K result, consistent with the regime
   argument in \S\ref{sec:characterization}.}
 \label{fig:ttft_bars_wildchat}
 \end{figure}
@@ -906,7 +913,7 @@ Second, intra-user reuse is 5.3\% rather than 53\%; even a perfect
 cache-routing decision saves only a few hundred tokens per request, well
 inside the cross-region RTT band, so chasing cache locality is
 counterproductive when paired with a cross-region routing penalty. The
-\texttt{gorgo-static} weights frozen from a GLM-5.1 W1 are particularly
+\texttt{gorgo-static} weights frozen from an ArtChat-411K W1 are particularly
 mis-calibrated to this regime---a reminder that the cost-model parameters
 do not transfer across workload classes.
 

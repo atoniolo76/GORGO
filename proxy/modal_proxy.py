@@ -127,9 +127,11 @@ HYPERPARAM_RANGES: dict[str, tuple[float, float]] = {
 
 def validated_ranges(
     overrides: dict[str, tuple[float, float]],
+    *,
+    merge_defaults: bool = True,
 ) -> dict[str, tuple[float, float]]:
     """Merge ``overrides`` with defaults and check each pair is ``0 < lo < hi``."""
-    merged = {k: tuple(v) for k, v in HYPERPARAM_RANGES.items()}
+    merged = {k: tuple(v) for k, v in HYPERPARAM_RANGES.items()} if merge_defaults else {}
     merged.update({k: tuple(v) for k, v in overrides.items()})
     for k, (lo, hi) in merged.items():
         if lo <= 0:
@@ -590,6 +592,10 @@ def proxy(registry_key: str = ""):
         },
     }
     endpoints_queued_tokens: dict[str, int] = {url: 0 for url in replica_urls}
+    # Cache-aware load counter: increments by the request's uncached tokens on
+    # the chosen replica at dispatch time, decrements by the same amount on
+    # completion. Used by the 2D GORGO variant.
+    endpoints_queued_uncached_tokens: dict[str, int] = {url: 0 for url in replica_urls}
     # Per-target proxy-side in-flight request counter; bumped on every
     # dispatch, decremented in finally on every completion / error path.
     # Mirrors ``endpoints_queued_tokens`` but counts requests rather than
@@ -684,9 +690,11 @@ def proxy(registry_key: str = ""):
         replica_urls.extend(normalized)
         for url in added:
             endpoints_queued_tokens[url] = 0
+            endpoints_queued_uncached_tokens[url] = 0
             endpoints_inflight_requests[url] = 0
         for url in removed:
             endpoints_queued_tokens.pop(url, None)
+            endpoints_queued_uncached_tokens.pop(url, None)
             endpoints_inflight_requests.pop(url, None)
             live_metrics.pop(url, None)
             metrics_meta["last_refresh_errors"].pop(url, None)
@@ -1221,6 +1229,7 @@ def proxy(registry_key: str = ""):
                 replica_urls=replica_urls,
                 metrics=metrics,
                 endpoints_queued_tokens=endpoints_queued_tokens,
+                endpoints_queued_uncached_tokens=endpoints_queued_uncached_tokens,
                 endpoints_inflight_requests=endpoints_inflight_requests,
                 radix_trie=radix_trie,
                 token_ids=token_ids,
@@ -1396,6 +1405,7 @@ def proxy(registry_key: str = ""):
                 for url, m in live_metrics.items()
             },
             "endpoints_queued_tokens": endpoints_queued_tokens,
+            "endpoints_queued_uncached_tokens": endpoints_queued_uncached_tokens,
             "endpoints_inflight_requests": endpoints_inflight_requests,
         }
 
@@ -1607,9 +1617,12 @@ def proxy(registry_key: str = ""):
         # in practice the explicit-default keeps the common case terse.
         new_enabled = bool(data.get("enabled", True))
 
-        if new_enabled and normalize_policy(state["policy"]) != "gorgo":
+        if new_enabled and normalize_policy(state["policy"]) not in {"gorgo", "gorgo-2d"}:
             return 400, {
-                "error": ("auto-tuning can only be enabled when the active policy is 'gorgo'"),
+                "error": (
+                    "auto-tuning can only be enabled when the active policy is "
+                    "'gorgo' or 'gorgo-2d'"
+                ),
                 "current_policy": state["policy"],
             }
 
@@ -1638,7 +1651,10 @@ def proxy(registry_key: str = ""):
             # Allow callers to override hyperparam ranges via POST body.
             custom_ranges = data.get("hyperparam_ranges")
             active_ranges = (
-                validated_ranges({k: tuple(v) for k, v in custom_ranges.items()})
+                validated_ranges(
+                    {k: tuple(v) for k, v in custom_ranges.items()},
+                    merge_defaults=False,
+                )
                 if custom_ranges
                 else HYPERPARAM_RANGES
             )
@@ -2273,6 +2289,68 @@ def proxy(registry_key: str = ""):
         await _send_json(send, status, payload)
         return True
 
+    def _median(xs: list[float]) -> float:
+        if not xs:
+            return 0.0
+        s = sorted(xs)
+        return s[len(s) // 2]
+
+    def _recommend_2d_physical_weights(window: list[dict]) -> dict:
+        """Fit physical rates and convert them into 2D normalized weights.
+
+        Physical model:
+
+            ttft_ms = rtt_ms + prefill_rate * uncached
+                    + queue_rate * queued_uncached
+
+        Normalized 2D model:
+
+            score = (1/prefill_rate) * rtt_ms
+                  + uncached
+                  + (queue_rate/prefill_rate) * queued_uncached
+        """
+        prefill_rates_ms = []
+        queue_rates_ms = []
+        residuals = []
+        for s in window:
+            uncached = float(s.get("uncached_tokens") or 0)
+            if uncached <= 0:
+                continue
+            ttft_ms = float(s.get("ttft_seconds") or 0) * 1000.0
+            rtt_ms = float(s.get("ping_seconds") or 0) * 1000.0
+            queued_uncached = float(s.get("queued_uncached_tokens_at_dispatch") or 0)
+            prefill_ms = max(ttft_ms - rtt_ms, 0.0)
+            prefill_rate = prefill_ms / max(uncached, 1.0)
+            if 0 < prefill_rate < 1000:
+                prefill_rates_ms.append(prefill_rate)
+                residual_ms = max(ttft_ms - rtt_ms - prefill_rate * uncached, 0.0)
+                residuals.append(residual_ms)
+                if queued_uncached > 0:
+                    q_rate = residual_ms / queued_uncached
+                    if 0 <= q_rate < 1000:
+                        queue_rates_ms.append(q_rate)
+
+        prefill_rate_ms = _median(prefill_rates_ms) or 0.1
+        queue_rate_ms = _median(queue_rates_ms) if queue_rates_ms else 0.01
+        rtt_weight = 1.0 / max(prefill_rate_ms, 1e-6)
+        queue_weight = queue_rate_ms / max(prefill_rate_ms, 1e-6)
+        rtt_weight = max(0.05, min(5.0, rtt_weight))
+        queue_weight = max(0.01, min(2.0, queue_weight))
+        return {
+            "defaults": {
+                "rtt_weight": rtt_weight,
+                "queue_weight": queue_weight,
+            },
+            "per_target": {},
+            "diagnostics": {
+                "prefill_rate_ms_per_token": prefill_rate_ms,
+                "queue_rate_ms_per_token": queue_rate_ms,
+                "prefill_rate_samples": len(prefill_rates_ms),
+                "queue_rate_samples": len(queue_rates_ms),
+                "median_residual_ms": _median(residuals) if residuals else 0.0,
+            },
+        }
+
     # ---------- Chat completions (streaming passthrough + tuning tap) ----------
 
     def _record_request_sample(
@@ -2284,6 +2362,7 @@ def proxy(registry_key: str = ""):
         completion_tokens: int | None,
         cached_tokens_at_dispatch: int = 0,
         queued_tokens_at_dispatch: int = 0,
+        queued_uncached_tokens_at_dispatch: int = 0,
     ) -> None:
         """Append a per-request sample shaped like
         :func:`proxy.measure.measure_chat_completion`'s output. Skipped
@@ -2355,6 +2434,7 @@ def proxy(registry_key: str = ""):
                 "prompt_tokens": prompt_tokens,
                 "cached_tokens_at_dispatch": cached_tokens_at_dispatch,
                 "queued_tokens_at_dispatch": queued_tokens_at_dispatch,
+                "queued_uncached_tokens_at_dispatch": queued_uncached_tokens_at_dispatch,
                 "uncached_tokens": uncached_tokens,
                 "completion_tokens": completion_tokens,
                 "prefill_rate_seconds_per_token": prefill_s / uncached_tokens,
@@ -2380,7 +2460,7 @@ def proxy(registry_key: str = ""):
             # earlier recomputes would over-weight whichever short prefix
             # of the run happens to have landed first.
             return
-        if normalize_policy(state["policy"]) != "gorgo":
+        if normalize_policy(state["policy"]) not in {"gorgo", "gorgo-2d"}:
             # Auto-tune only writes gorgo hyperparameters (rates or
             # weights); under any other policy the writes are inert. Skip
             # and keep the counter pinned so a switch back to gorgo
@@ -2522,7 +2602,39 @@ def proxy(registry_key: str = ""):
             )
             return
 
-        # ----- mode == "fit" (original behavior) -----
+        # ----- mode == "fit" -----
+        if normalize_policy(state["policy"]) == "gorgo-2d":
+            recommendation = _recommend_2d_physical_weights(window)
+            if at["apply"]:
+                state["hyperparameters"] = merge_update(
+                    state["hyperparameters"], recommendation, replace=False
+                )
+            at["applied_count"] += 1
+            at["last_applied_at_monotonic"] = time.monotonic()
+            at["last_recommendation"] = recommendation
+            at["samples_since_last_apply"] = 0
+            _trace_append(
+                "tune",
+                {
+                    "kind": "tune",
+                    "mode": "fit-2d",
+                    "wall_ts": _now_wall_ts(),
+                    "monotonic_s": time.monotonic(),
+                    "step": at["applied_count"],
+                    "total_samples": state["total_samples_appended"],
+                    "window_size": len(window),
+                    "defaults": recommendation["defaults"],
+                    "fit_diagnostics": recommendation.get("diagnostics", {}),
+                },
+            )
+            _log(
+                f"auto-tune 2d #{at['applied_count']} "
+                f"window={len(window)} defaults={recommendation['defaults']} "
+                f"(apply={at['apply']})"
+            )
+            return
+
+        # ----- mode == "fit" (original 3-weight behavior) -----
         # Per-target recommendation: pooled ``defaults`` for unseen
         # replicas, plus per-replica overrides for any replica with
         # at least ``min_samples_per_target`` observations in the
@@ -2614,6 +2726,7 @@ def proxy(registry_key: str = ""):
                     "utilization": snap.utilization if snap else None,
                     "gen_throughput": snap.gen_throughput if snap else None,
                     "queued_tokens": endpoints_queued_tokens.get(u, 0),
+                    "queued_uncached_tokens": endpoints_queued_uncached_tokens.get(u, 0),
                     "inflight_requests": endpoints_inflight_requests.get(u, 0),
                     "cached_prefix_tokens": cached_by_replica.get(u, 0),
                 }
@@ -2720,6 +2833,11 @@ def proxy(registry_key: str = ""):
         # against this target.
         queued_tokens_at_dispatch = endpoints_queued_tokens.get(target, 0)
         endpoints_queued_tokens[target] = queued_tokens_at_dispatch + request_tokens
+        queued_uncached_tokens_at_dispatch = endpoints_queued_uncached_tokens.get(target, 0)
+        uncached_tokens_at_dispatch = max(0, request_tokens - cached_for_target)
+        endpoints_queued_uncached_tokens[target] = (
+            queued_uncached_tokens_at_dispatch + uncached_tokens_at_dispatch
+        )
         endpoints_inflight_requests[target] = endpoints_inflight_requests.get(target, 0) + 1
         # Captured before client.stream(...) so TTFT measured by the SSE
         # tee includes request-send + response-headers latency, matching
@@ -2802,6 +2920,7 @@ def proxy(registry_key: str = ""):
                         ),
                         cached_tokens_at_dispatch=cached_for_target,
                         queued_tokens_at_dispatch=queued_tokens_at_dispatch,
+                        queued_uncached_tokens_at_dispatch=queued_uncached_tokens_at_dispatch,
                     )
                 else:
                     # Plain passthrough for non-SSE bodies (e.g. error
@@ -2850,6 +2969,11 @@ def proxy(registry_key: str = ""):
             if target in endpoints_queued_tokens:
                 endpoints_queued_tokens[target] = max(
                     0, endpoints_queued_tokens[target] - request_tokens
+                )
+            if target in endpoints_queued_uncached_tokens:
+                endpoints_queued_uncached_tokens[target] = max(
+                    0,
+                    endpoints_queued_uncached_tokens[target] - uncached_tokens_at_dispatch,
                 )
             if target in endpoints_inflight_requests:
                 endpoints_inflight_requests[target] = max(

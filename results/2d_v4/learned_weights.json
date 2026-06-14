@@ -1,0 +1,6 @@
+{
+  "rtt_weight": 0.5,
+  "prefill_weight": 1.0,
+  "load_weight": 1.0,
+  "queue_weight": 0.1
+}
