@@ -678,10 +678,10 @@ Each policy runs on its own dedicated three-replica fleet of identical GPUs. Mul
 
 \paragraph{Live-tuning instability.}
 Running the $(1{+}1)$-ES live can produce a heavy-tailed p99 excursion
-(Table~\ref{tab:stress_midday}: \texttt{gorgo-hillclimb} p99 inflates to
+(Table~\ref{tab:w2b}: \texttt{gorgo-hillclimb} p99 inflates to
 7.186\,s) because the negative-p95 objective does not penalize a single
 bad-minute proposal fast enough. The freeze-for-production recommendation in
-\S\ref{sec:results:stress} is therefore a safety property, not just a
+\S\ref{sec:results:p95} is therefore a safety property, not just a
 convenience. Decode dynamics such as the effect of variable length decode and high memory consumption on load may impact live-tuning instability; exploring the impact of higher output token limits would be a direction for future work.
 
 % -----------------------------------------------------------------------
@@ -755,7 +755,7 @@ calibration window before each redeploy is not affordable, making it effective i
 \item {\bf Claims}\\
 Question: Do the main claims made in the abstract and introduction accurately reflect the paper's contributions and scope?\\
 Answer: \answerYes{}\\
-Justification: The abstract claims (i) public datasets underrepresent long-context multi-turn traffic (quantified in \S\ref{sec:characterization}), (ii) we evaluate routing policies on a production trace (Tables~\ref{tab:w1}, \ref{tab:w2}, \ref{tab:stress_night}, \ref{tab:stress_midday}), and (iii) GORGO sweeps every TTFT percentile in both 30-minute windows. We are explicit in the introduction, \S\ref{sec:results:stress}, and \S\ref{sec:limitations} that ``GORGO'' refers to a family, that the W2 p99 margin is at the noise floor, and that on the daytime stress window \texttt{gorgo-hillclimb}'s p99 inflates and \texttt{prefix-cache} wins p99 instead.
+Justification: The abstract claims (i) public datasets underrepresent long-context multi-turn traffic (quantified in \S\ref{sec:characterization}), (ii) we evaluate routing policies on a production trace (Tables~\ref{tab:w1}, \ref{tab:w2}, \ref{tab:w2b}), and (iii) GORGO sweeps every TTFT percentile in both 30-minute windows. We are explicit in the introduction, \S\ref{sec:results:p95}, and \S\ref{sec:limitations} that ``GORGO'' refers to a family, that the W2 p99 margin is at the noise floor, and that on the daytime stress window \texttt{gorgo-hillclimb}'s p99 inflates and \texttt{prefix-cache} wins p99 instead.
 
 \item {\bf Limitations}\\
 Question: Does the paper discuss the limitations of the work?\\
