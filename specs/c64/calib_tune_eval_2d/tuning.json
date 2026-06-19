@@ -1,0 +1,70 @@
+{
+  "_note": "PHASE 1 - tuning, optimizing p95 TTFT. ms-normalized 2D GORGO model: score = rtt_weight*rtt_ms + prefill_rate*uncached + queue_rate*queue_weight*queued. prefill_rate/queue_rate are FIXED physical constants harvested from the calibration phase (sequencer patches them in); ES searches the now-commensurate, ~1.0-centered dimensionless rtt_weight/queue_weight. Window: apr6 15:05-15:35 (decoded eval).",
+  "run_id": "glm5_c64_tuning_p95ttft_2d",
+  "trace_path": "",
+  "start_delay_seconds": 30,
+  "concurrency": 64,
+  "stream": true,
+  "max_tokens": 128,
+  "max_input_tokens": 24000,
+  "arrival_mode": "open-loop",
+  "time_scale": 1.0,
+  "poll_interval_seconds": 60,
+  "fleet_regions": [
+    "ap-seoul-1",
+    "eu-frankfurt-1",
+    "us-ashburn-1"
+  ],
+  "policies": [
+    {
+      "name": "least-request"
+    },
+    {
+      "name": "least-load"
+    },
+    {
+      "name": "prefix-cache"
+    },
+    {
+      "name": "simple-session-affinity"
+    },
+    {
+      "name": "gorgo-2d",
+      "label": "gorgo-hillclimb-p95-2d",
+      "hyperparameters": {
+        "rtt_weight": 1.0,
+        "queue_weight": 1.0,
+        "prefill_rate": 0.1,
+        "queue_rate": 0.1
+      },
+      "auto_tune": {
+        "_note": "prefill_rate/queue_rate are patched from the calibration phase and held fixed; ES only searches rtt_weight/queue_weight (commensurate ms terms => optimum near 1.0).",
+        "enabled": true,
+        "window_size": 128,
+        "hop_size": 32,
+        "apply": true,
+        "mode": "online-es",
+        "objective_metric": "neg_p95_ttft",
+        "hyperparam_ranges": {
+          "rtt_weight": [
+            0.1,
+            10.0
+          ],
+          "queue_weight": [
+            0.1,
+            10.0
+          ]
+        }
+      }
+    }
+  ],
+  "replica_homogeneity_check": {
+    "enabled": true,
+    "warmup_requests_per_replica": 16,
+    "warmup_requests": 4,
+    "prompt_size_tokens": 4000,
+    "max_tokens": 16,
+    "max_ttft_ratio": 3.0,
+    "on_violation": "warn"
+  }
+}

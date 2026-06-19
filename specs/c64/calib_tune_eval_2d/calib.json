@@ -1,0 +1,47 @@
+{
+  "_note": "PHASE 0 - LIVE calibration. A single gorgo-2d fleet drives production-representative load (c=64, L40S:2 x3 regions). The proxy forwards upstream to SGLang /generate so per-request meta_info (queue_time, prefill_waiting_latency, prefill_launch_latency, cached_tokens) is emitted, and accumulates pooled physical rates live: prefill_rate = prefill_launch_latency_ms / uncached, queue_rate = (queue_time + prefill_waiting_latency)_ms / queued_tokens_at_dispatch. The sequencer harvests the converged pooled rates and patches them into the tuning + eval phases. Window: apr5 16:15-16:45 (decoded high-diversity).",
+  "run_id": "glm5_c64_calib_p95ttft_2d",
+  "trace_path": "",
+  "start_delay_seconds": 30,
+  "concurrency": 64,
+  "stream": true,
+  "max_tokens": 128,
+  "max_input_tokens": 24000,
+  "arrival_mode": "open-loop",
+  "time_scale": 1.0,
+  "poll_interval_seconds": 60,
+  "fleet_regions": [
+    "ap-seoul-1",
+    "eu-frankfurt-1",
+    "us-ashburn-1"
+  ],
+  "policies": [
+    {
+      "name": "gorgo-2d",
+      "label": "gorgo-calib-2d",
+      "hyperparameters": {
+        "rtt_weight": 1.0,
+        "queue_weight": 1.0,
+        "prefill_rate": 0.1,
+        "queue_rate": 0.1
+      },
+      "auto_tune": {
+        "_note": "calibrate mode: accumulate pooled prefill_rate/queue_rate from /generate meta_info as requests complete; does NOT modify live weights (apply=false). Sequencer reads the converged rates from the proxy at phase end.",
+        "enabled": true,
+        "mode": "calibrate",
+        "window_size": 128,
+        "hop_size": 32,
+        "apply": false
+      }
+    }
+  ],
+  "replica_homogeneity_check": {
+    "enabled": true,
+    "warmup_requests_per_replica": 16,
+    "warmup_requests": 4,
+    "prompt_size_tokens": 4000,
+    "max_tokens": 16,
+    "max_ttft_ratio": 3.0,
+    "on_violation": "warn"
+  }
+}
