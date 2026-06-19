@@ -42,6 +42,50 @@ WINDOWS = [
 ]
 
 
+def _msg_count(request_raw):
+    try:
+        req = json.loads(request_raw) if isinstance(request_raw, str) else request_raw
+        if isinstance(req, dict):
+            msgs = req.get("messages", [])
+            if isinstance(msgs, list):
+                return len(msgs)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return 0
+
+
+def _prompt_tokens(response_raw):
+    """Extract usage.prompt_tokens from a plain-JSON or SSE-streaming response."""
+    if not isinstance(response_raw, str):
+        response_raw = "" if response_raw is None else str(response_raw)
+    # Plain JSON (non-streaming) fast path.
+    try:
+        resp = json.loads(response_raw)
+        if isinstance(resp, dict):
+            usage = resp.get("usage")
+            if isinstance(usage, dict) and isinstance(usage.get("prompt_tokens"), int):
+                return usage["prompt_tokens"]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    # SSE stream: scan "data: {...}" chunks for the one carrying usage.
+    best = 0
+    for line in response_raw.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line[len("data:") :].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            obj = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        usage = obj.get("usage") if isinstance(obj, dict) else None
+        if isinstance(usage, dict) and isinstance(usage.get("prompt_tokens"), int):
+            best = usage["prompt_tokens"]
+    return best
+
+
 def _percentile(sorted_vals, q):
     if not sorted_vals:
         return 0
@@ -86,9 +130,12 @@ def _score_window(rows):
     }
 
 
+OUT_PATH = "/data/window_diversity_stats.json"
+
+
 @app.function(
     image=image,
-    memory=1024 * 32,
+    memory=1024 * 16,
     timeout=14400,
     volumes={"/data": completions_volume},
 )
@@ -101,87 +148,62 @@ def scan_windows():
     ]
     min_ts = min(b[1] for b in bounds)
     max_ts = max(b[2] for b in bounds)
+    min_iso = datetime.utcfromtimestamp(min_ts).isoformat()
+    max_iso = datetime.utcfromtimestamp(max_ts).isoformat()
 
     files = sorted(
-        f
+        os.path.join("/data", f)
         for f in os.listdir("/data")
         if f.endswith(".parquet") and f.startswith(FILE_PREFIX) and f < FILE_CUTOFF + ".parquet"
     )
-    print(f"[scan] {len(files)} parquet files to scan", flush=True)
+    print(f"[scan] {len(files)} parquet files; window span {min_iso}..{max_iso}", flush=True)
 
-    # rows per window label
     buckets: dict[str, list[tuple]] = {label: [] for label, _, _ in WINDOWS}
 
+    # Push keep-alive + timestamp-range filtering into DuckDB so only the rows
+    # that fall inside one of the target windows ever reach Python. This turns a
+    # 7-day full-parse into a tiny, fast scan.
     t0 = time.perf_counter()
     con = duckdb.connect()
-    for i, filename in enumerate(files):
-        path = os.path.join("/data", filename)
-        cursor = con.execute(
-            """
-            SELECT timestamp, request_metadata.token_hash AS token_hash, request, response
-            FROM read_parquet(?)
-            WHERE request NOT LIKE '%keep-alive%'
-            """,
-            [path],
-        )
-        while True:
-            chunk = cursor.fetchmany(4096)
-            if not chunk:
-                break
-            for ts_raw, token_hash, request_raw, response_raw in chunk:
-                if isinstance(ts_raw, datetime):
-                    ts = ts_raw
-                elif isinstance(ts_raw, str):
-                    try:
-                        ts = datetime.fromisoformat(ts_raw[:26])
-                    except ValueError:
-                        continue
-                else:
-                    continue
-                ts_epoch = ts.timestamp()
-                if ts_epoch < min_ts or ts_epoch >= max_ts:
-                    continue
+    cursor = con.execute(
+        """
+        SELECT
+            epoch(CAST(timestamp AS TIMESTAMP)) AS ts_epoch,
+            request_metadata.token_hash AS token_hash,
+            request,
+            response
+        FROM read_parquet(?)
+        WHERE request NOT LIKE '%keep-alive%'
+          AND CAST(timestamp AS TIMESTAMP) >= CAST(? AS TIMESTAMP)
+          AND CAST(timestamp AS TIMESTAMP) <  CAST(? AS TIMESTAMP)
+        """,
+        [files, min_iso, max_iso],
+    )
 
-                # which window?
-                label = None
-                for lbl, ws, we in bounds:
-                    if ws <= ts_epoch < we:
-                        label = lbl
-                        break
-                if label is None:
-                    continue
-
-                msg_count = 0
-                try:
-                    req = json.loads(request_raw) if isinstance(request_raw, str) else request_raw
-                    if isinstance(req, dict):
-                        msgs = req.get("messages", [])
-                        if isinstance(msgs, list):
-                            msg_count = len(msgs)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                if msg_count == 0:
-                    continue
-
-                est_tokens = 0
-                try:
-                    resp = (
-                        json.loads(response_raw) if isinstance(response_raw, str) else response_raw
-                    )
-                    if isinstance(resp, dict):
-                        usage = resp.get("usage")
-                        if isinstance(usage, dict):
-                            pt = usage.get("prompt_tokens")
-                            if isinstance(pt, int):
-                                est_tokens = pt
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
-                buckets[label].append((ts_epoch, token_hash or "", msg_count, est_tokens))
-
-        if (i + 1) % 20 == 0 or i == len(files) - 1:
-            print(f"[scan] {i + 1}/{len(files)} files, {time.perf_counter() - t0:.0f}s", flush=True)
+    total = 0
+    while True:
+        chunk = cursor.fetchmany(8192)
+        if not chunk:
+            break
+        for ts_epoch, token_hash, request_raw, response_raw in chunk:
+            if ts_epoch is None:
+                continue
+            label = None
+            for lbl, ws, we in bounds:
+                if ws <= ts_epoch < we:
+                    label = lbl
+                    break
+            if label is None:
+                continue
+            msg_count = _msg_count(request_raw)
+            if msg_count == 0:
+                continue
+            buckets[label].append(
+                (ts_epoch, token_hash or "", msg_count, _prompt_tokens(response_raw))
+            )
+            total += 1
     con.close()
+    print(f"[scan] {total:,} in-window rows in {time.perf_counter() - t0:.0f}s", flush=True)
 
     out = []
     for label, _, _ in WINDOWS:
@@ -189,11 +211,16 @@ def scan_windows():
         stats = _score_window(rows) if rows else {"n_requests": 0}
         out.append({"window": label, **stats})
 
+    with open(OUT_PATH, "w") as f:
+        json.dump(out, f, indent=2)
+    completions_volume.commit()
+
     print(f"\n{'=' * 100}")
     print("WINDOW DIVERSITY / LOAD STATS")
     print(f"{'=' * 100}")
     for s in out:
         print(json.dumps(s))
+    print(f"\n[scan] wrote {OUT_PATH}", flush=True)
     return out
 
 

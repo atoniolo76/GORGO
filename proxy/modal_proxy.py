@@ -493,6 +493,16 @@ def proxy(registry_key: str = ""):
         # live samples accumulate per replica; offline tools (calibrate,
         # tuning.py) typically write only ``defaults``.
         "hyperparameters": make_default_store(),
+        # A/B switch for the in-flight load-signal semantics. When False
+        # (default), the queue+prefill load counters
+        # (``endpoints_queued_tokens`` / ``endpoints_queued_uncached_tokens``
+        # / ``endpoints_inflight_requests``) are released at end-of-decode
+        # in the request's ``finally`` (all-stages load, the original
+        # behavior). When True, they are released at first token so the
+        # signal represents queue+prefill load only. Toggled at runtime via
+        # ``POST /config`` and stamped onto each request trace event so a
+        # calibration run can tell which semantics produced it.
+        "load_release_at_ttft": False,
         "upstream_client": None,
         "metrics_task": None,
         # Total samples appended over the proxy lifetime. Doesn't
@@ -1290,6 +1300,26 @@ def proxy(registry_key: str = ""):
         state["policy"] = name
         _log(f"routing policy set to {name!r}")
         return 200, _policy_payload(include_supported=False)
+
+    def _config_payload() -> dict:
+        """Runtime config knobs that can be flipped without a redeploy.
+        Currently just the load-signal A/B switch; shaped as a dict so
+        more boolean/scalar knobs can be added without changing callers."""
+        return {"load_release_at_ttft": bool(state.get("load_release_at_ttft"))}
+
+    async def _handle_get_config(_data) -> tuple[int, dict]:
+        return 200, {"config": _config_payload()}
+
+    async def _handle_post_config(data) -> tuple[int, dict]:
+        if not isinstance(data, dict):
+            return 400, {"error": "body must be a JSON object"}
+        if "load_release_at_ttft" in data:
+            val = _parse_optional_bool(data, "load_release_at_ttft")
+            if val is None:
+                return 400, {"error": "load_release_at_ttft must be true/false"}
+            state["load_release_at_ttft"] = val
+            _log(f"config load_release_at_ttft set to {val}")
+        return 200, {"config": _config_payload()}
 
     async def _handle_get_replicas(_data) -> tuple[int, dict]:
         # Read-only: never mutate ``replica_urls`` from a GET. Used by
@@ -2242,6 +2272,8 @@ def proxy(registry_key: str = ""):
     json_routes: dict[tuple[str, str], object] = {
         ("GET", "/policy"): _handle_get_policy,
         ("POST", "/policy"): _handle_post_policy,
+        ("GET", "/config"): _handle_get_config,
+        ("POST", "/config"): _handle_post_config,
         ("GET", "/replicas"): _handle_get_replicas,
         ("POST", "/replicas"): _handle_post_replicas,
         ("GET", "/trie"): _handle_get_trie,
@@ -2363,6 +2395,7 @@ def proxy(registry_key: str = ""):
         cached_tokens_at_dispatch: int = 0,
         queued_tokens_at_dispatch: int = 0,
         queued_uncached_tokens_at_dispatch: int = 0,
+        inflight_requests_at_dispatch: int = 0,
     ) -> None:
         """Append a per-request sample shaped like
         :func:`proxy.measure.measure_chat_completion`'s output. Skipped
@@ -2435,6 +2468,7 @@ def proxy(registry_key: str = ""):
                 "cached_tokens_at_dispatch": cached_tokens_at_dispatch,
                 "queued_tokens_at_dispatch": queued_tokens_at_dispatch,
                 "queued_uncached_tokens_at_dispatch": queued_uncached_tokens_at_dispatch,
+                "inflight_requests_at_dispatch": inflight_requests_at_dispatch,
                 "uncached_tokens": uncached_tokens,
                 "completion_tokens": completion_tokens,
                 "prefill_rate_seconds_per_token": prefill_s / uncached_tokens,
@@ -2756,9 +2790,15 @@ def proxy(registry_key: str = ""):
             cached_for_target = 0
 
         at = state.get("auto_tune") or {}
+        # Snapshot the load-signal A/B flag once at dispatch so the whole
+        # request (first-token release callback, finally fallback, and the
+        # trace record) agrees on a single value even if /config flips it
+        # mid-stream.
+        release_at_ttft = bool(state.get("load_release_at_ttft"))
         request_trace_event = {
             "kind": "request",
             "trace_id": state["trace"]["trace_id"],
+            "load_release_at_ttft": release_at_ttft,
             "request_id": request_id,
             "trace_row_index": trace_row_index,
             "source_row_id": source_row_id,
@@ -2782,6 +2822,7 @@ def proxy(registry_key: str = ""):
             "total_ns": None,
             "prompt_tokens": None,
             "completion_tokens": None,
+            "meta_info": None,
             "error": None,
         }
 
@@ -2824,13 +2865,14 @@ def proxy(registry_key: str = ""):
         prompt_tokens = None
         completion_tokens = None
         output_tokens = 0
-        # Bump the per-target inflight counters immediately before the
-        # try/finally so the finally is the only place that can decrement
-        # them and there's no leak window if request-prep above raises
-        # (e.g. ``json.dumps`` on a non-serializable body). Both counters
-        # are read by routing policies on the next request, so an
-        # unmatched increment would persistently bias future decisions
-        # against this target.
+        # Bump the per-target load counters immediately before the
+        # try/finally so there's no leak window if request-prep above
+        # raises (e.g. ``json.dumps`` on a non-serializable body). The
+        # matching decrement goes through ``_release_counters`` below,
+        # which fires exactly once -- at first token when the A/B flag is
+        # on, otherwise in the finally. These counters are read by routing
+        # policies on the next request, so an unmatched increment would
+        # persistently bias future decisions against this target.
         queued_tokens_at_dispatch = endpoints_queued_tokens.get(target, 0)
         endpoints_queued_tokens[target] = queued_tokens_at_dispatch + request_tokens
         queued_uncached_tokens_at_dispatch = endpoints_queued_uncached_tokens.get(target, 0)
@@ -2838,7 +2880,39 @@ def proxy(registry_key: str = ""):
         endpoints_queued_uncached_tokens[target] = (
             queued_uncached_tokens_at_dispatch + uncached_tokens_at_dispatch
         )
-        endpoints_inflight_requests[target] = endpoints_inflight_requests.get(target, 0) + 1
+        inflight_requests_at_dispatch = endpoints_inflight_requests.get(target, 0)
+        endpoints_inflight_requests[target] = inflight_requests_at_dispatch + 1
+
+        # Single exactly-once release of the queue+prefill load counters.
+        # Two callers may invoke it: the first-token callback (only when
+        # ``release_at_ttft`` is on) and the ``finally`` block (always).
+        # ``counter_released`` makes the second call a no-op so every path
+        # -- first-token, end-of-decode, errors before first token, non-SSE
+        # / stream=False passthrough, 4xx/5xx, and empty/zero-token
+        # generations -- decrements each counter exactly once. The
+        # ``if target in <dict>`` guards mirror the original finally so a
+        # replica removed mid-request via POST /replicas isn't re-created.
+        counter_released = False
+
+        def _release_counters() -> None:
+            nonlocal counter_released
+            if counter_released:
+                return
+            counter_released = True
+            if target in endpoints_queued_tokens:
+                endpoints_queued_tokens[target] = max(
+                    0, endpoints_queued_tokens[target] - request_tokens
+                )
+            if target in endpoints_queued_uncached_tokens:
+                endpoints_queued_uncached_tokens[target] = max(
+                    0,
+                    endpoints_queued_uncached_tokens[target] - uncached_tokens_at_dispatch,
+                )
+            if target in endpoints_inflight_requests:
+                endpoints_inflight_requests[target] = max(
+                    0, endpoints_inflight_requests[target] - 1
+                )
+
         # Captured before client.stream(...) so TTFT measured by the SSE
         # tee includes request-send + response-headers latency, matching
         # the contract in proxy/measure.py::consume_sse_stream.
@@ -2899,16 +2973,22 @@ def proxy(registry_key: str = ""):
                 if is_sse and 200 <= upstream.status_code < 300:
                     # Tee path: parse SSE for tuning samples while the
                     # raw bytes flow straight through to the client.
+                    # ``on_first_token`` releases the load counters at TTFT
+                    # only when the A/B flag is on; otherwise release stays
+                    # in ``finally`` (end-of-decode, original behavior).
                     (
                         ttft_ns,
                         output_tokens,
                         prompt_tokens,
                         completion_tokens,
+                        meta_info,
                     ) = await consume_sse_stream(
                         upstream,
                         request_start_ns=request_start_ns,
                         chunk_sink=_sink,
+                        on_first_token=_release_counters if release_at_ttft else None,
                     )
+                    request_trace_event["meta_info"] = meta_info
                     total_ns = time.perf_counter_ns() - request_start_ns
                     _record_request_sample(
                         target=target,
@@ -2921,6 +3001,7 @@ def proxy(registry_key: str = ""):
                         cached_tokens_at_dispatch=cached_for_target,
                         queued_tokens_at_dispatch=queued_tokens_at_dispatch,
                         queued_uncached_tokens_at_dispatch=queued_uncached_tokens_at_dispatch,
+                        inflight_requests_at_dispatch=inflight_requests_at_dispatch,
                     )
                 else:
                     # Plain passthrough for non-SSE bodies (e.g. error
@@ -2963,22 +3044,16 @@ def proxy(registry_key: str = ""):
                 }
             )
             _trace_append("request", request_trace_event)
-            # Only decrement if the replica is still registered; if it was
-            # removed mid-request via /replicas POST, don't leak its key
-            # back into the queue-tokens dict.
-            if target in endpoints_queued_tokens:
-                endpoints_queued_tokens[target] = max(
-                    0, endpoints_queued_tokens[target] - request_tokens
-                )
-            if target in endpoints_queued_uncached_tokens:
-                endpoints_queued_uncached_tokens[target] = max(
-                    0,
-                    endpoints_queued_uncached_tokens[target] - uncached_tokens_at_dispatch,
-                )
-            if target in endpoints_inflight_requests:
-                endpoints_inflight_requests[target] = max(
-                    0, endpoints_inflight_requests[target] - 1
-                )
+            # Exactly-once release of the load counters. When the A/B flag
+            # is on and the first ``delta.content`` event already fired
+            # ``_release_counters`` this is a no-op (``counter_released`` is
+            # set); otherwise (flag off, or no token ever emitted -- errors
+            # before first token, non-SSE / stream=False passthrough,
+            # 4xx/5xx, empty generations) this is where the release
+            # happens. The ``if target in <dict>`` guards live inside the
+            # helper so a replica removed mid-request via POST /replicas
+            # isn't leaked back into the counters.
+            _release_counters()
 
     # ---------- Lifespan ----------
 

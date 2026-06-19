@@ -119,9 +119,10 @@ async def consume_sse_stream(
     *,
     request_start_ns: int,
     chunk_sink: Callable[[bytes], Awaitable[None]] | None = None,
-) -> tuple[int | None, int, int | None, int | None]:
+    on_first_token: Callable[[], None] | None = None,
+) -> tuple[int | None, int, int | None, int | None, dict | None]:
     """Drain an SSE chat-completions response, returning
-    ``(ttft_ns, output_tokens, prompt_tokens, completion_tokens)``.
+    ``(ttft_ns, output_tokens, prompt_tokens, completion_tokens, meta_info)``.
 
     ``ttft_ns`` is the wire-arrival time -- relative to the caller-supplied
     ``request_start_ns`` -- of the chunk that delivered the first byte of
@@ -138,11 +139,25 @@ async def consume_sse_stream(
     parsing, so the proxy can tee bytes to its downstream client without
     waiting for parse to complete -- this is what lets the proxy do
     on-the-fly tuning without delaying TTFT for live traffic.
+
+    ``on_first_token`` is a cheap synchronous callback invoked exactly once,
+    immediately when ``ttft_ns`` transitions from ``None`` to set (i.e. the
+    first ``delta.content`` event arrives). The proxy uses it to release its
+    queue+prefill load counters at first token rather than end-of-decode.
+    It is guarded so an exception inside it can never break the parse loop.
+
+    ``meta_info`` is the last per-request ``meta_info`` (or ``metadata``)
+    object surfaced anywhere in the SSE payloads -- top-level on the event
+    object or nested under ``choices[0]``. SGLang's chat stream may carry
+    timing fields (``queue_time``, ``prefill_waiting_latency``,
+    ``e2e_latency``, ``cached_tokens``, ``*_ts`` wall-clock timestamps,
+    ...). ``None`` when the stream surfaces no such object.
     """
     ttft_ns: int | None = None
     output_tokens = 0
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    meta_info: dict | None = None
 
     buffer = bytearray()
     # Wire-arrival time of the chunk that delivered the first byte
@@ -192,7 +207,18 @@ async def consume_sse_stream(
                         prompt_tokens = pt
                     if isinstance(ct, int):
                         completion_tokens = ct
+                # Capture per-request meta_info wherever it shows up.
+                # SGLang may surface it top-level on the event or nested
+                # under choices[0]; keep the last-seen dict so the final
+                # event's (most complete) timing block wins.
+                top_meta = obj.get("meta_info") or obj.get("metadata")
+                if isinstance(top_meta, dict):
+                    meta_info = top_meta
                 choices = obj.get("choices") or []
+                if choices:
+                    nested_meta = choices[0].get("meta_info") or choices[0].get("metadata")
+                    if isinstance(nested_meta, dict):
+                        meta_info = nested_meta
                 if not choices:
                     continue
                 delta = choices[0].get("delta") or {}
@@ -200,11 +226,19 @@ async def consume_sse_stream(
                 if content:
                     if ttft_ns is None and event_arrival_ns is not None:
                         ttft_ns = event_arrival_ns - request_start_ns
+                        # First-token transition: release load counters now
+                        # (when wired). Guarded so a buggy callback can't
+                        # corrupt the parse loop or starve the stream.
+                        if on_first_token is not None:
+                            try:
+                                on_first_token()
+                            except Exception:
+                                pass
                     # One ``delta.content`` event ~= one decoded token in
                     # SGLang's streaming output.
                     output_tokens += 1
 
-    return ttft_ns, output_tokens, prompt_tokens, completion_tokens
+    return ttft_ns, output_tokens, prompt_tokens, completion_tokens, meta_info
 
 
 async def ping_once(
@@ -285,6 +319,7 @@ async def measure_chat_completion(
                 output_tokens,
                 prompt_tokens,
                 completion_tokens,
+                _meta_info,
             ) = await consume_sse_stream(resp, request_start_ns=request_start_ns)
     except httpx.HTTPError:
         return None
