@@ -44,6 +44,7 @@ from experiment_runner.policy_matrix_app import (
 )
 
 WEIGHTS_FILENAME = "learned_weights.json"
+CALIB_FILENAME = "calibrated_rates.json"
 
 
 def _utc_now() -> str:
@@ -52,6 +53,58 @@ def _utc_now() -> str:
 
 def _weights_volume_path(output_dir: str) -> str:
     return f"{output_dir}/{WEIGHTS_FILENAME}"
+
+
+def _calib_volume_path(output_dir: str) -> str:
+    return f"{output_dir}/{CALIB_FILENAME}"
+
+
+def _save_calibrated_rates_to_volume(rates: dict, output_dir: str) -> None:
+    """Persist live-calibrated physical rates to the bench-results volume."""
+    vpath = _calib_volume_path(output_dir)
+    p = Path(vpath)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(rates, indent=2))
+    bench_results_volume.commit()
+    print(f"[sequencer] saved calibrated rates to volume: {vpath}", flush=True)
+
+
+def _load_calibrated_rates_from_volume(output_dir: str) -> dict | None:
+    """Load previously saved calibrated rates from the bench-results volume."""
+    vpath = _calib_volume_path(output_dir)
+    p = Path(vpath)
+    if not p.exists():
+        bench_results_volume.reload()
+        if not p.exists():
+            return None
+    try:
+        rates = json.loads(p.read_text())
+        print(f"[sequencer] loaded calibrated rates from volume: {vpath}", flush=True)
+        return rates
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[sequencer][warn] failed to load {vpath}: {e}", flush=True)
+        return None
+
+
+def _patch_rates_into_spec(spec: dict | None, rates: dict | None) -> None:
+    """Inject calibrated ``prefill_rate``/``queue_rate`` into every gorgo
+    policy's starter hyperparameters (in place). No-op if either is missing.
+    These are held fixed while the ES (tuning) searches the dimensionless
+    rtt_weight/queue_weight on top, so the cost-model terms are commensurate.
+    """
+    if not spec or not rates:
+        return
+    pr = rates.get("prefill_rate")
+    qr = rates.get("queue_rate")
+    if pr is None and qr is None:
+        return
+    for p in spec.get("policies", []):
+        if p.get("name") in {"gorgo", "gorgo-2d"}:
+            hp = p.setdefault("hyperparameters", {})
+            if pr is not None:
+                hp["prefill_rate"] = pr
+            if qr is not None:
+                hp["queue_rate"] = qr
 
 
 def _save_weights_to_volume(weights: dict, output_dir: str) -> None:
@@ -98,6 +151,8 @@ SEQUENCER_IMAGE = (
 )
 def run_sequenced_experiment(
     *,
+    calib_spec: dict | None,
+    calib_manifest: dict | None,
     tuning_spec: dict | None,
     tuning_manifest: dict | None,
     eval_spec: dict | None,
@@ -107,6 +162,7 @@ def run_sequenced_experiment(
     start_index: int,
     top_k: int,
     cooldown_seconds: float,
+    skip_calib: bool,
     skip_tuning: bool,
     environment: dict,
 ) -> dict:
@@ -121,9 +177,64 @@ def run_sequenced_experiment(
     }
 
     learned = None
+    calibrated = None
 
     # ----------------------------------------------------------------
-    # Phase 0: Tuning (or load weights from volume)
+    # Phase 0: Calibration (live physical-rate measurement) -- or load
+    # previously-saved rates from the volume.
+    # ----------------------------------------------------------------
+    if skip_calib:
+        calibrated = _load_calibrated_rates_from_volume(output_dir)
+        if calibrated:
+            print(f"[sequencer] resumed with calibrated rates: {calibrated}", flush=True)
+    elif calib_spec and calib_manifest:
+        calib_id = f"{experiment_id}_calib"
+        calib_output = f"{output_dir}/{calib_id}"
+        print(f"\n[sequencer] === PHASE 0: CALIBRATION ({calib_id}) ===", flush=True)
+        calib_call = run_policy_matrix_experiment.spawn(
+            calib_spec,
+            calib_manifest,
+            experiment_id=calib_id,
+            start_index=start_index,
+            top_k=top_k,
+            output_dir=calib_output,
+            environment=environment,
+        )
+        calib_result = calib_call.get()
+        calibrated = calib_result.get("calibrated_rates")
+        sequencer_manifest["phases"].append(
+            {
+                "phase": "calibration",
+                "experiment_id": calib_id,
+                "status": "completed" if calibrated else "completed_no_rates",
+                "calibrated_rates": calibrated,
+                "result_summary": _summarize_result(calib_result),
+            }
+        )
+        if calibrated:
+            _save_calibrated_rates_to_volume(calibrated, output_dir)
+            print(f"[sequencer] calibrated rates: {calibrated}", flush=True)
+            print(
+                f"[sequencer] cooling down {cooldown_seconds}s to let calibration "
+                "containers drain...",
+                flush=True,
+            )
+            time.sleep(cooldown_seconds)
+        else:
+            print(
+                "[sequencer][warn] calibration produced no rates; tuning/eval will "
+                "use spec placeholder rates",
+                flush=True,
+            )
+        _write_sequencer_manifest(sequencer_manifest, output_dir)
+
+    # Hold calibrated physical rates fixed across tuning + eval so the ES
+    # only searches the dimensionless weights on commensurate ms terms.
+    _patch_rates_into_spec(tuning_spec, calibrated)
+    _patch_rates_into_spec(eval_spec, calibrated)
+
+    # ----------------------------------------------------------------
+    # Phase 1: Tuning (or load weights from volume)
     # ----------------------------------------------------------------
     if skip_tuning:
         print(f"\n[sequencer] skipping tuning, loading weights from volume...", flush=True)
@@ -139,7 +250,7 @@ def run_sequenced_experiment(
 
         tuning_id = f"{experiment_id}_tune"
         tuning_output = f"{output_dir}/{tuning_id}"
-        print(f"\n[sequencer] === PHASE 0: TUNING ({tuning_id}) ===", flush=True)
+        print(f"\n[sequencer] === PHASE 1: TUNING ({tuning_id}) ===", flush=True)
 
         tuning_call = run_policy_matrix_experiment.spawn(
             tuning_spec,
@@ -186,7 +297,7 @@ def run_sequenced_experiment(
         eval_label = eval_manifest.get("_note", f"eval-{eval_idx}")
 
         print(
-            f"\n[sequencer] === PHASE {eval_idx + 1}: EVAL ({eval_id}) on {eval_label} ===",
+            f"\n[sequencer] === PHASE {eval_idx + 2}: EVAL ({eval_id}) on {eval_label} ===",
             flush=True,
         )
 
@@ -255,6 +366,8 @@ def run_sequenced_experiment(
 
 @app.local_entrypoint()
 def sequencer(
+    calib_spec_path: str = "",
+    calib_manifest_path: str = "",
     tuning_spec_path: str = "",
     tuning_manifest_path: str = "",
     eval_spec_path: str = "",
@@ -264,11 +377,16 @@ def sequencer(
     start_index: int = 0,
     top_k: int = 1,
     cooldown_seconds: float = 30.0,
+    skip_calib: bool = False,
     skip_tuning: bool = False,
 ):
     """Local entrypoint: reads specs from disk, then hands off to a
     Modal function that orchestrates all phases remotely."""
 
+    calib_spec = json.loads(Path(calib_spec_path).read_text()) if calib_spec_path else None
+    calib_manifest = (
+        json.loads(Path(calib_manifest_path).read_text()) if calib_manifest_path else None
+    )
     tuning_spec = json.loads(Path(tuning_spec_path).read_text()) if tuning_spec_path else None
     tuning_manifest = (
         json.loads(Path(tuning_manifest_path).read_text()) if tuning_manifest_path else None
@@ -281,8 +399,8 @@ def sequencer(
             if m:
                 eval_manifests.append(json.loads(Path(m).read_text()))
 
-    ref_spec = tuning_spec or eval_spec or {}
-    ref_manifest = tuning_manifest or {"top": []}
+    ref_spec = calib_spec or tuning_spec or eval_spec or {}
+    ref_manifest = calib_manifest or tuning_manifest or {"top": []}
     if ref_spec:
         _validate_spec(ref_spec)
     environment = _capture_environment(ref_spec, ref_manifest)
@@ -290,7 +408,15 @@ def sequencer(
     if environment.get("gorgo_dirty"):
         print("[sequencer][warn] working tree has uncommitted changes", flush=True)
 
-    result = run_sequenced_experiment.remote(
+    # Use .spawn() (not .remote()): a detached orchestrator must outlive this
+    # local client. .remote()/.map() are tied to the caller's connection and
+    # Modal may cancel them when the local process disconnects (which is what
+    # tore down an earlier detached run on a local network blip). .spawn()
+    # launches the orchestrator in the background and returns a handle
+    # immediately, so the run is decoupled from this process entirely.
+    call = run_sequenced_experiment.spawn(
+        calib_spec=calib_spec,
+        calib_manifest=calib_manifest,
         tuning_spec=tuning_spec,
         tuning_manifest=tuning_manifest,
         eval_spec=eval_spec,
@@ -300,10 +426,21 @@ def sequencer(
         start_index=start_index,
         top_k=top_k,
         cooldown_seconds=cooldown_seconds,
+        skip_calib=skip_calib,
         skip_tuning=skip_tuning,
         environment=environment,
     )
-    print(json.dumps(result, indent=2))
+    print(
+        f"[sequencer] spawned run_sequenced_experiment call_id={call.object_id} "
+        f"experiment_id={experiment_id}",
+        flush=True,
+    )
+    print(
+        "[sequencer] detached: orchestrator runs independently of this client. "
+        "Track via the Modal app dashboard or `modal app logs`. Results land under "
+        f"{output_dir} on the bench-results volume.",
+        flush=True,
+    )
 
 
 def _extract_learned_weights_from_manifest(result: dict) -> dict | None:

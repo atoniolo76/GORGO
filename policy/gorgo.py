@@ -63,6 +63,11 @@ DEFAULT_GORGO_HYPERPARAMETERS: dict[str, float] = {
     "prefill_weight": 1.0,
     "load_weight": 1.0,
     "queue_weight": 1.0,
+    # ms-normalized 2D model: physical rates calibrated live (see the
+    # calibration phase) so every term resolves to milliseconds. Defaults of
+    # 1.0 reproduce the prior token-unit behavior until rates are patched in.
+    "prefill_rate": 1.0,
+    "queue_rate": 1.0,
 }
 
 ALLOWED_HYPERPARAM_KEYS: frozenset[str] = frozenset(DEFAULT_GORGO_HYPERPARAMETERS)
@@ -239,21 +244,25 @@ def route_gorgo(ctx: RouteContext) -> RouteDecision:
 
 
 def route_gorgo_2d(ctx: RouteContext) -> RouteDecision:
-    """Score each replica with a normalized 2D GORGO model.
+    """Score each replica with the ms-normalized 2D GORGO model.
 
-    ``score(u) = rtt_weight * rtt_ms + uncached + queue_weight * queued``
+    ``score(u) = rtt_weight * rtt_ms
+               + prefill_rate * uncached
+               + queue_rate * queue_weight * queued``
 
-    The own-prefill term (``uncached``) is the reference unit and stays
-    cache-aware: it counts only the *current* request's tokens that miss
-    the replica's KV cache, so there is no learned ``prefill_weight``.
+    ``prefill_rate`` (ms / uncached token) and ``queue_rate`` (ms / queued
+    token) are physical constants calibrated live from SGLang ``meta_info``
+    so all three terms resolve to milliseconds; the dimensionless
+    ``rtt_weight`` / ``queue_weight`` knobs (~1.0) are what the ES tunes on
+    top. With the default rates of 1.0 this reduces to the prior
+    token-unit model (``rtt_weight*rtt + uncached + queue_weight*queued``).
 
-    The load term uses ``queued`` -- the raw count of all prompt tokens
-    already dispatched to the replica and not yet completed, *not*
-    discounted by cache hits. A replica whose queue is full of cache-hit
-    requests is still saturated (those tokens still consume decode/compute
-    and add queueing delay), so the load signal must see them; the
-    cache-aware ``queued_uncached`` counter hid that load and let the tuner
-    drive ``queue_weight`` to zero.
+    The own-prefill term stays cache-aware: ``uncached`` counts only the
+    current request's tokens that miss the replica's KV cache. The load
+    term uses ``queued`` -- the raw count of all prompt tokens already
+    dispatched to the replica and not yet completed (released at first token
+    when the ``load_release_at_ttft`` proxy flag is on), *not* discounted by
+    cache hits, so a queue full of cache-hit work is still seen as load.
     """
     if not ctx.replica_urls:
         raise ValueError("no replicas")
@@ -275,8 +284,8 @@ def route_gorgo_2d(ctx: RouteContext) -> RouteDecision:
 
         rtt = snap.network_rtt if snap.network_rtt > 0.0 else snap.latency
         rtt_cost = eff["rtt_weight"] * (rtt * 1000.0)
-        prefill_cost = uncached
-        queue_cost = eff["queue_weight"] * queued
+        prefill_cost = eff["prefill_rate"] * uncached
+        queue_cost = eff["queue_rate"] * eff["queue_weight"] * queued
 
         scores[u] = rtt_cost + prefill_cost + queue_cost
     if not scores:

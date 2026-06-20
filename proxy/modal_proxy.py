@@ -180,7 +180,7 @@ ONLINE_SCORE_FUNCTIONS: dict[str, Callable[[list[dict]], float]] = {
 }
 
 
-SUPPORTED_AUTO_TUNE_MODES: frozenset[str] = frozenset({"fit", "online-es"})
+SUPPORTED_AUTO_TUNE_MODES: frozenset[str] = frozenset({"fit", "online-es", "calibrate"})
 
 
 class GaussianESTuner:
@@ -503,6 +503,30 @@ def proxy(registry_key: str = ""):
         # ``POST /config`` and stamped onto each request trace event so a
         # calibration run can tell which semantics produced it.
         "load_release_at_ttft": False,
+        # Live physical-rate calibration accumulator (regression, not ratios).
+        # We fit ``ttft_ms ~ intercept_r + P*uncached + Q*queued`` by ordinary
+        # least squares using ONLY proxy-measured TTFT and the proxy's own
+        # ``queued_tokens_at_dispatch`` -- no engine meta_info. P (prefill_rate,
+        # ms/uncached-tok) and Q (queue_rate, ms/queued-tok) are shared physical
+        # constants; the per-replica intercept soaks up RTT + fixed overhead so
+        # it doesn't leak into P (a raw TTFT/uncached ratio explodes because it
+        # mis-attributes queue+RTT to prefill). We keep online sufficient
+        # statistics (normal-equation aggregates) so the fit is O(1) per request
+        # and solved on demand in ``_calibrated_rates_payload``. Read via
+        # GET /calibrated_rates.
+        "calibration": {
+            "n": 0,
+            # shared (global) cross terms for the P/Q columns
+            "sum_unc2": 0.0,  # Σ uncached²
+            "sum_q2": 0.0,  # Σ queued²
+            "sum_uncq": 0.0,  # Σ uncached·queued
+            "sum_unc_ttft": 0.0,  # Σ uncached·ttft
+            "sum_q_ttft": 0.0,  # Σ queued·ttft
+            # per-target fixed-effect blocks: intercept_r row/cross terms
+            # target -> {n, sum_ttft, sum_unc, sum_q}
+            "per_target": {},
+            "skipped": 0,
+        },
         "upstream_client": None,
         "metrics_task": None,
         # Total samples appended over the proxy lifetime. Doesn't
@@ -1305,7 +1329,9 @@ def proxy(registry_key: str = ""):
         """Runtime config knobs that can be flipped without a redeploy.
         Currently just the load-signal A/B switch; shaped as a dict so
         more boolean/scalar knobs can be added without changing callers."""
-        return {"load_release_at_ttft": bool(state.get("load_release_at_ttft"))}
+        return {
+            "load_release_at_ttft": bool(state.get("load_release_at_ttft")),
+        }
 
     async def _handle_get_config(_data) -> tuple[int, dict]:
         return 200, {"config": _config_payload()}
@@ -1320,6 +1346,140 @@ def proxy(registry_key: str = ""):
             state["load_release_at_ttft"] = val
             _log(f"config load_release_at_ttft set to {val}")
         return 200, {"config": _config_payload()}
+
+    def _accumulate_calibration(
+        *,
+        target: str,
+        uncached_at_dispatch: int,
+        queued_at_dispatch: int,
+        ttft_ms: float | None,
+    ) -> None:
+        """Fold one successful request into the online regression accumulator.
+
+        Updates the normal-equation sufficient statistics for the model::
+
+            ttft_ms ≈ intercept_r + P * uncached + Q * queued
+
+        using only the proxy-measured TTFT, the request's uncached prompt
+        tokens, and the proxy's ``queued_tokens_at_dispatch`` load counter --
+        no engine ``meta_info`` (its prefill timings are null and ``queue_time``
+        is 0 in unified mode on this build). Regressing on ``uncached`` AND
+        ``queued`` jointly, with a per-replica intercept absorbing RTT + fixed
+        overhead, is what keeps queue/RTT from contaminating P (a raw
+        ``ttft/uncached`` ratio explodes under load). Solved on demand in
+        ``_calibrated_rates_payload``.
+        """
+        if ttft_ms is None or ttft_ms <= 0.0:
+            state["calibration"]["skipped"] += 1
+            return
+        u = float(max(1, uncached_at_dispatch))
+        q = float(max(0, queued_at_dispatch))
+        y = float(ttft_ms)
+
+        cal = state["calibration"]
+        cal["n"] += 1
+        cal["sum_unc2"] += u * u
+        cal["sum_q2"] += q * q
+        cal["sum_uncq"] += u * q
+        cal["sum_unc_ttft"] += u * y
+        cal["sum_q_ttft"] += q * y
+        per = cal["per_target"].setdefault(
+            target, {"n": 0, "sum_ttft": 0.0, "sum_unc": 0.0, "sum_q": 0.0}
+        )
+        per["n"] += 1
+        per["sum_ttft"] += y
+        per["sum_unc"] += u
+        per["sum_q"] += q
+
+    def _solve_spd(matrix: list[list[float]], rhs: list[float]) -> list[float] | None:
+        """Solve ``A x = b`` for a small symmetric system via Gauss-Jordan with
+        partial pivoting. Dependency-free (avoids numpy in the hot path); the
+        system is tiny (n_targets + 2). Returns None if singular."""
+        n = len(rhs)
+        a = [row[:] + [rhs[i]] for i, row in enumerate(matrix)]
+        for col in range(n):
+            piv = max(range(col, n), key=lambda r: abs(a[r][col]))
+            if abs(a[piv][col]) < 1e-12:
+                return None
+            a[col], a[piv] = a[piv], a[col]
+            pivval = a[col][col]
+            a[col] = [v / pivval for v in a[col]]
+            for r in range(n):
+                if r == col:
+                    continue
+                factor = a[r][col]
+                if factor != 0.0:
+                    a[r] = [v - factor * a[col][i] for i, v in enumerate(a[r])]
+        return [a[i][n] for i in range(n)]
+
+    def _calibrated_rates_payload() -> dict:
+        """Solve the accumulated regression for the shared physical rates.
+
+        Builds the normal equations for ``ttft ~ intercept_r + P*uncached +
+        Q*queued`` from the online sufficient statistics and solves for
+        ``[intercept_1..intercept_T, P, Q]``. ``prefill_rate``/``queue_rate``
+        are the fleet-shared P/Q the sequencer patches into tuning + eval.
+        """
+        cal = state["calibration"]
+        targets = sorted(cal["per_target"].keys())
+        n_t = len(targets)
+        dim = n_t + 2
+        result: dict = {
+            "prefill_rate": None,
+            "queue_rate": None,
+            "diagnostics": {
+                "model": "ols: ttft_ms ~ intercept_r + P*uncached + Q*queued",
+                "samples": cal["n"],
+                "skipped": cal["skipped"],
+                "n_targets": n_t,
+                "per_target_n": {t: cal["per_target"][t]["n"] for t in targets},
+                "per_replica_intercept_ms": None,
+                "warnings": [],
+            },
+        }
+        # Need at least a few samples and >1 distinct (uncached, queued) pattern.
+        if cal["n"] < dim + 2 or n_t == 0:
+            result["diagnostics"]["warnings"].append("insufficient samples")
+            return result
+
+        # Assemble the symmetric normal matrix A and rhs b for coef ordering
+        # [intercept_t0..t{T-1}, P, Q].
+        p_i, q_i = n_t, n_t + 1
+        a = [[0.0] * dim for _ in range(dim)]
+        b = [0.0] * dim
+        for idx, t in enumerate(targets):
+            pt = cal["per_target"][t]
+            a[idx][idx] = float(pt["n"])  # intercept diagonal
+            a[idx][p_i] = a[p_i][idx] = pt["sum_unc"]
+            a[idx][q_i] = a[q_i][idx] = pt["sum_q"]
+            b[idx] = pt["sum_ttft"]
+        a[p_i][p_i] = cal["sum_unc2"]
+        a[q_i][q_i] = cal["sum_q2"]
+        a[p_i][q_i] = a[q_i][p_i] = cal["sum_uncq"]
+        b[p_i] = cal["sum_unc_ttft"]
+        b[q_i] = cal["sum_q_ttft"]
+
+        coef = _solve_spd(a, b)
+        if coef is None:
+            result["diagnostics"]["warnings"].append("singular normal matrix")
+            return result
+
+        prefill_rate = coef[p_i]
+        queue_rate = coef[q_i]
+        result["prefill_rate"] = prefill_rate
+        result["queue_rate"] = queue_rate
+        result["diagnostics"]["per_replica_intercept_ms"] = {
+            t: coef[i] for i, t in enumerate(targets)
+        }
+        # Negative coefficients are unphysical (collinearity / too little
+        # independent variation in this window); surface rather than ship them.
+        for name, val in (("prefill_rate", prefill_rate), ("queue_rate", queue_rate)):
+            if val < 0.0:
+                result["diagnostics"]["warnings"].append(f"{name} negative ({val:.4g})")
+        return result
+
+    async def _handle_get_calibrated_rates(_data) -> tuple[int, dict]:
+        return 200, {"calibrated_rates": _calibrated_rates_payload()}
 
     async def _handle_get_replicas(_data) -> tuple[int, dict]:
         # Read-only: never mutate ``replica_urls`` from a GET. Used by
@@ -2274,6 +2434,7 @@ def proxy(registry_key: str = ""):
         ("POST", "/policy"): _handle_post_policy,
         ("GET", "/config"): _handle_get_config,
         ("POST", "/config"): _handle_post_config,
+        ("GET", "/calibrated_rates"): _handle_get_calibrated_rates,
         ("GET", "/replicas"): _handle_get_replicas,
         ("POST", "/replicas"): _handle_post_replicas,
         ("GET", "/trie"): _handle_get_trie,
@@ -2504,6 +2665,13 @@ def proxy(registry_key: str = ""):
 
         window = list(samples)[-at["window_size"] :]
         mode = at.get("mode", "fit")
+
+        if mode == "calibrate":
+            # Calibration accumulates physical rates per-request from the
+            # /generate meta_info (see ``_accumulate_calibration``); the
+            # windowed tuner is a deliberate no-op here and never writes
+            # weights (apply is effectively forced off).
+            return
 
         if mode == "online-es":
             # ----- Option B: empirical hyperparameter search -----
@@ -2847,17 +3015,24 @@ def proxy(registry_key: str = ""):
         # the encoder. ``accept-encoding: identity`` tells the upstream
         # not to compress so we don't have to juggle ``content-encoding``
         # on the way out to the client.
+        # Upstream is always the OpenAI chat endpoint. (Calibration previously
+        # forwarded to SGLang's native ``/generate`` to harvest per-request
+        # ``meta_info`` scheduler timings, but those are null in unified mode on
+        # this build, so calibration now regresses on proxy-measured TTFT +
+        # ``queued_tokens`` and runs on the same chat path as tuning / eval /
+        # production -- keeping the calibrated TTFT relationship consistent.)
+        upstream_headers = {
+            "accept-encoding": "identity",
+            "content-type": "application/json",
+        }
         if data.get("stream") is True:
             stream_options = data.get("stream_options")
             if not isinstance(stream_options, dict):
                 stream_options = {}
                 data["stream_options"] = stream_options
             stream_options.setdefault("include_usage", True)
+        upstream_path = "/v1/chat/completions"
         upstream_body = json.dumps(data).encode()
-        upstream_headers = {
-            "accept-encoding": "identity",
-            "content-type": "application/json",
-        }
         headers_sent = False
         upstream_status = None
         ttft_ns = None
@@ -2920,7 +3095,7 @@ def proxy(registry_key: str = ""):
         try:
             async with client.stream(
                 "POST",
-                f"{target}/v1/chat/completions",
+                f"{target}{upstream_path}",
                 content=upstream_body,
                 headers=upstream_headers,
             ) as upstream:
@@ -2971,11 +3146,11 @@ def proxy(registry_key: str = ""):
                     )
 
                 if is_sse and 200 <= upstream.status_code < 300:
-                    # Tee path: parse SSE for tuning samples while the
-                    # raw bytes flow straight through to the client.
-                    # ``on_first_token`` releases the load counters at TTFT
-                    # only when the A/B flag is on; otherwise release stays
-                    # in ``finally`` (end-of-decode, original behavior).
+                    # Tee path: parse SSE for tuning samples while the raw bytes
+                    # flow straight through to the client. ``on_first_token``
+                    # releases the load counters at TTFT only when the A/B flag
+                    # is on; otherwise release stays in ``finally``
+                    # (end-of-decode, original behavior).
                     (
                         ttft_ns,
                         output_tokens,
@@ -2989,6 +3164,17 @@ def proxy(registry_key: str = ""):
                         on_first_token=_release_counters if release_at_ttft else None,
                     )
                     request_trace_event["meta_info"] = meta_info
+                    # Feed the live regression accumulator (only while a
+                    # calibrate run is active, so tuning/eval traffic doesn't
+                    # pollute the fit). Uses proxy-measured TTFT + the proxy's
+                    # queued_tokens_at_dispatch -- no engine meta_info.
+                    if (state.get("auto_tune") or {}).get("mode") == "calibrate":
+                        _accumulate_calibration(
+                            target=target,
+                            uncached_at_dispatch=uncached_tokens_at_dispatch,
+                            queued_at_dispatch=queued_tokens_at_dispatch,
+                            ttft_ms=(ttft_ns / 1e6) if ttft_ns is not None else None,
+                        )
                     total_ns = time.perf_counter_ns() - request_start_ns
                     _record_request_sample(
                         target=target,

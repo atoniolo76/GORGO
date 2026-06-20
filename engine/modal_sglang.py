@@ -19,8 +19,12 @@ sglang_image = (
     .entrypoint(
         []  # silence chatty logs on container start
     )
-    .add_local_python_source("app", "engine", copy=True)
 )
+# NOTE: the local source is added as the LAST image layer (see below, after
+# compile_deep_gemm). compile_deep_gemm doesn't need our code, and baking the
+# source in before it would make every code edit invalidate that ~20-min
+# compile layer. Keeping the copy last means edits only rebuild the cheap
+# final layer.
 
 REGION = os.getenv("REGION", "us-east")
 GPU_TYPE = os.getenv("GPU_TYPE", "H100")
@@ -73,6 +77,9 @@ sglang_image = sglang_image.run_commands(
     volumes={HF_CACHE_PATH: HF_CACHE_VOL},
     gpu=GPU,
 )
+# Local source goes LAST so editing app/engine only rebuilds this cheap copy
+# layer, not the expensive compile_deep_gemm step above.
+sglang_image = sglang_image.add_local_python_source("app", "engine", copy=True)
 
 
 @app.function(

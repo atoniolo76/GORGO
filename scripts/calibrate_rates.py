@@ -405,6 +405,95 @@ def compute_Q(records: list[Record]) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Joint regression calibration (canonical for builds where meta_info prefill
+# timings are absent / queue_time is dead -- i.e. all unified-mode SGLang here)
+# --------------------------------------------------------------------------- #
+def compute_regression(records: list[Record], *, trim_quantile: float = 0.99) -> dict:
+    """Fit the GORGO physical rates by least squares on proxy-measured TTFT.
+
+    Model (one row per successful request ``i`` routed to replica ``r``)::
+
+        ttft_ms_i ≈ intercept_r + P * uncached_i + Q * queued_i
+
+    - ``P`` (prefill_rate, ms / uncached token) and ``Q`` (queue_rate,
+      ms / queued token) are shared physical constants -- the coefficients we
+      want for the cost model.
+    - ``intercept_r`` is a per-replica fixed effect that soaks up the
+      ~constant baseline (network RTT + fixed prefill overhead) so it does NOT
+      leak into ``P``. This is why a plain ``TTFT / uncached`` ratio explodes
+      (it attributes queue + RTT to prefill); regressing TTFT on ``uncached``
+      AND ``queued`` together separates the two contributions.
+
+    The engine ``meta_info`` prefill/queue timings are intentionally NOT used:
+    on this SGLang build they are null (prefill) or always 0 (queue_time) in
+    unified mode, so we recover the rates purely from the proxy's own TTFT and
+    its ``queued_tokens_at_dispatch`` load counter -- the exact signal
+    ``route_gorgo_2d`` scores on.
+
+    ``trim_quantile`` drops the heavy TTFT tail (bursts / pre-emption outliers)
+    before fitting; the coefficients are stable across trims, the tail just
+    inflates residual variance.
+    """
+    try:
+        import numpy as np
+    except ImportError as e:  # offline tool runs in the venv; numpy expected
+        return {"error": f"numpy required for regression calibration: {e}"}
+
+    rows = [
+        (r.target, r.ttft_ms, float(r.uncached_tokens), float(r.queued_tokens_at_dispatch))
+        for r in records
+        if r.ttft_ms is not None and r.uncached_tokens > 0
+    ]
+    if len(rows) < 8:
+        return {"error": f"too few usable rows for regression ({len(rows)})"}
+
+    ttft_cap = None
+    if 0.0 < trim_quantile < 1.0:
+        tts = sorted(row[1] for row in rows)
+        ttft_cap = tts[min(len(tts) - 1, int(len(tts) * trim_quantile))]
+        rows = [row for row in rows if row[1] <= ttft_cap]
+
+    targets = sorted({row[0] for row in rows})
+    tidx = {t: i for i, t in enumerate(targets)}
+    n_t = len(targets)
+
+    X = np.zeros((len(rows), n_t + 2))
+    y = np.zeros(len(rows))
+    for i, (t, tt, u, q) in enumerate(rows):
+        X[i, tidx[t]] = 1.0
+        X[i, n_t] = u
+        X[i, n_t + 1] = q
+        y[i] = tt
+
+    coef, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
+    pred = X @ coef
+    ss_res = float(((y - pred) ** 2).sum())
+    ss_tot = float(((y - y.mean()) ** 2).sum())
+    r2 = (1.0 - ss_res / ss_tot) if ss_tot > 0 else None
+
+    prefill_rate = float(coef[n_t])
+    queue_rate = float(coef[n_t + 1])
+    intercepts = {t: float(coef[tidx[t]]) for t in targets}
+
+    return {
+        "prefill_rate": prefill_rate,
+        "queue_rate": queue_rate,
+        # Negative coefficients are unphysical (collinearity / too little
+        # independent variation); flag them rather than silently shipping.
+        "warnings": [
+            name
+            for name, val in (("prefill_rate", prefill_rate), ("queue_rate", queue_rate))
+            if val < 0.0
+        ],
+        "per_replica_intercept_ms": intercepts,
+        "r2": r2,
+        "n": len(rows),
+        "trim_quantile": trim_quantile,
+        "ttft_cap_ms": ttft_cap,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Per-window aggregation
 # --------------------------------------------------------------------------- #
 def compute_windows(records: list[Record], window_seconds: float) -> list[dict]:
@@ -502,9 +591,10 @@ def crosscheck_ahead_load(records: list[Record]) -> dict:
 # --------------------------------------------------------------------------- #
 # Reporting
 # --------------------------------------------------------------------------- #
-def build_report(res: LoadResult, window_seconds: float) -> dict:
+def build_report(res: LoadResult, window_seconds: float, trim_quantile: float = 0.99) -> dict:
     records = res.records
     return {
+        "regression": compute_regression(records, trim_quantile=trim_quantile),
         "diagnostics": {
             "total_rows": res.total_rows,
             "kept_requests": res.kept,
@@ -535,6 +625,25 @@ def _print_summary(report: dict) -> None:
     print("=" * 72)
     print("GORGO rate calibration")
     print("=" * 72)
+
+    reg = report.get("regression") or {}
+    print("-" * 72)
+    print("REGRESSION calibration (CANONICAL): ttft_ms ~ intercept_r + P*uncached + Q*queued")
+    if reg.get("error"):
+        print(f"  unavailable: {reg['error']}")
+    else:
+        print(
+            f"  P prefill_rate = {_fmt(reg.get('prefill_rate'), 5)} ms/uncached-tok   "
+            f"Q queue_rate = {_fmt(reg.get('queue_rate'), 6)} ms/queued-tok"
+        )
+        print(
+            f"  fit: n={reg.get('n')} R2={_fmt(reg.get('r2'), 3)} "
+            f"trim_q={reg.get('trim_quantile')} ttft_cap={_fmt(reg.get('ttft_cap_ms'), 0)}ms"
+        )
+        if reg.get("warnings"):
+            print(f"  WARNING: negative (unphysical) coefficient(s): {reg['warnings']}")
+        for t, v in (reg.get("per_replica_intercept_ms") or {}).items():
+            print(f"    intercept[{t}] = {_fmt(v, 1)} ms")
     print(f"total trace rows         : {diag['total_rows']}")
     print(f"kept (2xx + fields)      : {diag['kept_requests']}")
     print(f"  excluded non-request   : {diag['excluded_non_request']}")
@@ -786,6 +895,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Window size (seconds) for per-window P/Q stability aggregation.",
     )
     parser.add_argument(
+        "--trim-quantile",
+        type=float,
+        default=0.99,
+        help="Drop requests above this TTFT quantile before the regression fit "
+        "(heavy-tail outlier guard). Set to 1.0 to disable trimming.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=None,
@@ -807,7 +923,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"trace file not found: {args.trace}")
 
     res = load_trace(args.trace)
-    report = build_report(res, window_seconds=args.window_seconds)
+    report = build_report(res, window_seconds=args.window_seconds, trim_quantile=args.trim_quantile)
     _print_summary(report)
 
     if args.output is not None:

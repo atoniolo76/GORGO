@@ -1,5 +1,5 @@
 {
-  "_note": "PHASE 0 - LIVE calibration. A single gorgo-2d fleet drives production-representative load (c=64, L40S:2 x3 regions). The proxy forwards upstream to SGLang /generate so per-request meta_info (queue_time, prefill_waiting_latency, prefill_launch_latency, cached_tokens) is emitted, and accumulates pooled physical rates live: prefill_rate = prefill_launch_latency_ms / uncached, queue_rate = (queue_time + prefill_waiting_latency)_ms / queued_tokens_at_dispatch. The sequencer harvests the converged pooled rates and patches them into the tuning + eval phases. Window: apr5 16:15-16:45 (decoded high-diversity).",
+  "_note": "PHASE 0 - LIVE calibration. A single gorgo-2d fleet drives production-representative load (c=64, L40S:2 x3 regions) on the normal chat path. The proxy fits the physical rates online by least squares over each request: ttft_ms ~ per-replica intercept + prefill_rate*uncached + queue_rate*queued_tokens_at_dispatch (the per-replica intercept absorbs RTT + fixed overhead so queue/RTT don't contaminate prefill_rate). Uses only proxy-measured TTFT + the proxy's queued-token counter -- NO engine meta_info (its prefill timings are null and queue_time is 0 in unified mode on this build). The sequencer harvests the converged rates and patches them into the tuning + eval phases. Window: apr5 16:15-16:45 (decoded high-diversity).",
   "run_id": "glm5_c64_calib_p95ttft_2d",
   "trace_path": "",
   "start_delay_seconds": 30,
@@ -26,7 +26,7 @@
         "queue_rate": 0.1
       },
       "auto_tune": {
-        "_note": "calibrate mode: accumulate pooled prefill_rate/queue_rate from /generate meta_info as requests complete; does NOT modify live weights (apply=false). Sequencer reads the converged rates from the proxy at phase end.",
+        "_note": "calibrate mode: accumulate online regression sufficient-stats and fit prefill_rate/queue_rate from proxy-measured TTFT + queued_tokens as requests complete; does NOT modify live weights (apply=false). Sequencer reads the converged rates from the proxy at phase end.",
         "enabled": true,
         "mode": "calibrate",
         "window_size": 128,

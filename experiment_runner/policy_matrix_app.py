@@ -1130,6 +1130,24 @@ def _extract_learned_weights(matrix: dict) -> dict | None:
     return fallback
 
 
+def _extract_calibrated_rates(matrix: dict) -> dict | None:
+    """Extract pooled live-calibrated physical rates from a calibration
+    matrix result. Walks per-policy results for the first gorgo policy
+    carrying a ``calibrated_rates`` block with a non-null rate.
+    """
+    for trace_result in matrix.get("results") or []:
+        manifest = trace_result.get("manifest") or {}
+        for r in manifest.get("results") or []:
+            if not isinstance(r, dict) or r.get("error"):
+                continue
+            cr = r.get("calibrated_rates")
+            if not isinstance(cr, dict):
+                continue
+            if cr.get("prefill_rate") is not None or cr.get("queue_rate") is not None:
+                return cr
+    return None
+
+
 def _auto_tune_payload(policy_spec: dict, *, global_seed: int | None = None) -> dict | None:
     auto = policy_spec.get("auto_tune")
     if not auto:
@@ -1253,7 +1271,16 @@ async def _run_one_policy(global_spec: dict, policy_spec: dict) -> dict:
         timeout_seconds=workload_timeout,
     )
     final_hyperparameters = None
+    calibrated_rates = None
     if auto_tune_config:
+        # Harvest live-calibrated physical rates before disabling the tuner
+        # so a 'calibrate' run surfaces its pooled prefill_rate/queue_rate.
+        if auto_tune_config.get("mode") == "calibrate":
+            try:
+                cr = await _get_json(url, "/calibrated_rates")
+                calibrated_rates = (cr or {}).get("calibrated_rates")
+            except Exception as e:
+                print(f"[calib][warn] failed to read /calibrated_rates: {e}", flush=True)
         await _post_json(url, "/tune", {"enabled": False})
         hps = await _get_json(url, "/hyperparameters")
         final_hyperparameters = hps.get("hyperparameters")
@@ -1288,6 +1315,7 @@ async def _run_one_policy(global_spec: dict, policy_spec: dict) -> dict:
             if auto_tune_config
             else None
         ),
+        "calibrated_rates": calibrated_rates,
         "workload": workload,
         "trace": trace_doc,
         "fallback_summary": fallback_summary,
@@ -1704,6 +1732,12 @@ async def _run_policy_matrix_experiment_inner(
         if lw:
             run_manifest["learned_weights"] = lw
 
+    # Surface live-calibrated physical rates so the sequencer can pass them
+    # from a calibration phase into the tuning + eval phases.
+    cr = _extract_calibrated_rates(matrix)
+    if cr:
+        run_manifest["calibrated_rates"] = cr
+
     # Update the manifest with completion status and result paths.
     experiment_completed_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     run_manifest["status"] = "completed"
@@ -1774,7 +1808,11 @@ def main(
     if environment.get("gorgo_dirty"):
         print("[env][warn] working tree has uncommitted changes", flush=True)
 
-    result = run_policy_matrix_experiment.remote(
+    # Use .spawn() (not .remote()): for a detached run the experiment must
+    # outlive this local client. .remote()/.map() are coupled to the caller's
+    # connection and Modal may cancel them when the local process disconnects.
+    # .spawn() launches in the background and returns a handle immediately.
+    call = run_policy_matrix_experiment.spawn(
         base_spec,
         sweep_manifest,
         experiment_id=experiment_id,
@@ -1783,4 +1821,14 @@ def main(
         output_dir=output_dir,
         environment=environment,
     )
-    print(json.dumps(result, indent=2))
+    print(
+        f"[policy-matrix] spawned run_policy_matrix_experiment call_id={call.object_id} "
+        f"experiment_id={experiment_id}",
+        flush=True,
+    )
+    print(
+        "[policy-matrix] detached: experiment runs independently of this client. "
+        "Track via the Modal app dashboard or `modal app logs`. Results land under "
+        f"{output_dir} on the bench-results volume.",
+        flush=True,
+    )
