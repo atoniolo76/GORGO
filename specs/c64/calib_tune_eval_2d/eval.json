@@ -1,5 +1,5 @@
 {
-  "_note": "PHASE 2 - eval for the calibrated + p95-tuned 2D GORGO model. ms-normalized model: score = rtt_weight*rtt_ms + prefill_rate*uncached + queue_rate*queue_weight*queued. Sequencer patches the calibrated prefill_rate/queue_rate (from PHASE 0) AND the learned rtt_weight/queue_weight (from PHASE 1) into gorgo-static-p95-2d; gorgo-autotune-2d re-fits rates online. Window: apr7 19:45-20:15 (decoded eval).",
+  "_note": "PHASE 2 - eval for the calibrated + p95-tuned 2D GORGO model. ms-normalized model: score = rtt_weight*rtt_ms + prefill_rate*uncached + queue_rate*queue_weight*queued. Sequencer patches the calibrated prefill_rate/queue_rate (from PHASE 0) AND the learned rtt_weight/queue_weight (from PHASE 1) into gorgo-static-p95-2d. Single gorgo policy: gorgo-static-p95-2d (the calibrate->tune->eval pipeline replaces the old live-autotune-during-eval approach). Window: apr7 19:45-20:15 (decoded eval).",
   "run_id": "glm5_c64_eval_p95ttft_2d",
   "trace_path": "",
   "start_delay_seconds": 30,
@@ -27,23 +27,6 @@
     },
     {
       "name": "simple-session-affinity"
-    },
-    {
-      "name": "gorgo-2d",
-      "label": "gorgo-autotune-2d",
-      "hyperparameters": {
-        "rtt_weight": 1.0,
-        "queue_weight": 1.0,
-        "prefill_rate": 0.1,
-        "queue_rate": 0.1
-      },
-      "auto_tune": {
-        "enabled": true,
-        "window_size": 64,
-        "hop_size": 16,
-        "apply": true,
-        "mode": "fit"
-      }
     },
     {
       "_note": "Placeholder; sequencer patches calibrated rates (prefill_rate/queue_rate) + learned weights (rtt_weight/queue_weight).",

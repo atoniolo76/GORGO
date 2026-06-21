@@ -357,8 +357,8 @@ def recommend_rates(samples: list[dict]) -> dict:
 
     Returns ``prefill_rate`` in **ms/tok** as a diagnostic.  The
     3-weight GORGO model does not use this value for routing — the ES
-    absorbs hardware speed into ``prefill_weight`` directly.  Retained
-    for the ``fit`` auto-tuner mode and ``proxy/calibrate.py``.
+    absorbs hardware speed into ``prefill_weight`` directly.  Used by
+    ``proxy/calibrate.py`` for offline rate fitting.
     """
     if not samples:
         return {"prefill_rate": 0.0}
@@ -366,44 +366,6 @@ def recommend_rates(samples: list[dict]) -> dict:
     return {
         "prefill_rate": prefill_sorted[len(prefill_sorted) // 2] * 1000.0,
     }
-
-
-# Backward-compatible alias used by callers that haven't migrated yet.
-recommend_hyperparameters = recommend_rates
-
-
-def recommend_rates_per_target(
-    samples: list[dict],
-    *,
-    min_samples_per_target: int = 5,
-) -> dict:
-    """Bucket ``samples`` by ``target`` and produce per-replica
-    rate diagnostics alongside a pooled ``defaults`` fallback.
-    ``prefill_rate`` is in **ms/tok** (see :func:`recommend_rates`).
-
-    Retained for the ``fit`` auto-tuner mode.  The 3-weight GORGO
-    model does not use these values for routing.
-    """
-    defaults = recommend_rates(samples)
-
-    by_target: dict[str, list[dict]] = {}
-    for s in samples:
-        url = s.get("target")
-        if not isinstance(url, str) or not url:
-            continue
-        by_target.setdefault(url, []).append(s)
-
-    per_target: dict[str, dict[str, float]] = {}
-    for url, group in by_target.items():
-        if len(group) < min_samples_per_target:
-            continue
-        per_target[url] = recommend_rates(group)
-
-    return {"defaults": defaults, "per_target": per_target}
-
-
-# Backward-compatible alias.
-recommend_hyperparameters_per_target = recommend_rates_per_target
 
 
 def summarize_samples(samples: list[dict]) -> dict:

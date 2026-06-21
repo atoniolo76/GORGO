@@ -86,8 +86,6 @@ from app import (
 from proxy.measure import (
     NS_PER_S,
     consume_sse_stream,
-    recommend_rates,
-    recommend_rates_per_target,
     summarize_samples,
 )
 from policy import (
@@ -180,7 +178,7 @@ ONLINE_SCORE_FUNCTIONS: dict[str, Callable[[list[dict]], float]] = {
 }
 
 
-SUPPORTED_AUTO_TUNE_MODES: frozenset[str] = frozenset({"fit", "online-es", "calibrate"})
+SUPPORTED_AUTO_TUNE_MODES: frozenset[str] = frozenset({"online-es", "calibrate"})
 
 
 class GaussianESTuner:
@@ -551,21 +549,13 @@ def proxy(registry_key: str = ""):
             "last_applied_at_monotonic": None,
             "last_recommendation": None,
             "enabled_at_monotonic": None,
-            # Tuning mode (Option B):
-            #   "fit"       -- median-of-rates per-target fit on observed
-            #                  prefill/decode samples (the original behavior).
-            #                  Best when the cost-model parameters have a
-            #                  direct physical interpretation and the
-            #                  uncached-token correction (Option A) is in
-            #                  place.
-            #   "online-es" -- treat (rtt_weight, prefill_weight) as
-            #                  dimensionless knobs and use
+            # Tuning mode:
+            #   "online-es" -- treat the dimensionless weights as knobs and use
             #                  Gaussian-(1+1)-ES to minimize the configured
-            #                  ``objective_metric`` over the rolling
-            #                  window. Defaults-only (per-target stays
-            #                  empty); the ES doesn't fan out to per-replica
-            #                  to keep the search space low-dimensional.
-            "mode": "fit",
+            #                  ``objective_metric`` over the rolling window.
+            #   "calibrate" -- accumulate the physical-rate regression (see
+            #                  ``_accumulate_calibration``); never writes weights.
+            "mode": "online-es",
             "objective_metric": "neg_p95_ttft",
             "online_tuner": None,
             "online_state": None,
@@ -1692,7 +1682,7 @@ def proxy(registry_key: str = ""):
             "window_size": at["window_size"],
             "hop_size": at["hop_size"],
             "apply": at["apply"],
-            "mode": at.get("mode", "fit"),
+            "mode": at.get("mode", "online-es"),
             "objective_metric": at.get("objective_metric", "neg_p95_ttft"),
             "online_tuner_state": tuner_state,
             "pending_candidate": at.get("pending_candidate"),
@@ -1767,7 +1757,7 @@ def proxy(registry_key: str = ""):
         new_window = at["window_size"]
         new_hop = at["hop_size"]
         new_apply = at["apply"]
-        new_mode = at.get("mode", "fit")
+        new_mode = at.get("mode", "online-es")
         new_metric = at.get("objective_metric", "neg_p95_ttft")
 
         if "window_size" in data:
@@ -1817,7 +1807,7 @@ def proxy(registry_key: str = ""):
             }
 
         was_enabled = at["enabled"]
-        was_mode = at.get("mode", "fit")
+        was_mode = at.get("mode", "online-es")
         at["window_size"] = new_window
         at["hop_size"] = new_hop
         at["apply"] = new_apply
@@ -1828,9 +1818,6 @@ def proxy(registry_key: str = ""):
         # Lifecycle for the online-ES tuner instance:
         #   - fresh enable into online-es      -> create tuner from current
         #     defaults, reset pending state
-        #   - mode flip fit -> online-es       -> create tuner, reset pending
-        #   - mode flip online-es -> fit       -> drop tuner + pending state
-        #     so a future flip back starts fresh from current incumbent
         #   - reconfiguration within online-es -> keep tuner, only reset
         #     pending if window_size changed (the prior pending window is
         #     no longer the right size)
@@ -1864,10 +1851,6 @@ def proxy(registry_key: str = ""):
                 at["pending_candidate"] = None
                 at["pending_started_at_count"] = state["total_samples_appended"]
                 at["last_score"] = None
-        elif new_mode == "fit" and (was_mode == "online-es" or at.get("online_tuner")):
-            at["online_tuner"] = None
-            at["pending_candidate"] = None
-            at["last_score"] = None
 
         if new_enabled and not was_enabled:
             # Fresh enable: zero the per-window counter so the first
@@ -1898,7 +1881,6 @@ def proxy(registry_key: str = ""):
             window = list(samples)[-new_window:]
             preview = {
                 "window_size_used": len(window),
-                "recommendation": recommend_rates_per_target(window),
                 "stats": summarize_samples(window),
             }
 
@@ -2482,68 +2464,6 @@ def proxy(registry_key: str = ""):
         await _send_json(send, status, payload)
         return True
 
-    def _median(xs: list[float]) -> float:
-        if not xs:
-            return 0.0
-        s = sorted(xs)
-        return s[len(s) // 2]
-
-    def _recommend_2d_physical_weights(window: list[dict]) -> dict:
-        """Fit physical rates and convert them into 2D normalized weights.
-
-        Physical model:
-
-            ttft_ms = rtt_ms + prefill_rate * uncached
-                    + queue_rate * queued_uncached
-
-        Normalized 2D model:
-
-            score = (1/prefill_rate) * rtt_ms
-                  + uncached
-                  + (queue_rate/prefill_rate) * queued_uncached
-        """
-        prefill_rates_ms = []
-        queue_rates_ms = []
-        residuals = []
-        for s in window:
-            uncached = float(s.get("uncached_tokens") or 0)
-            if uncached <= 0:
-                continue
-            ttft_ms = float(s.get("ttft_seconds") or 0) * 1000.0
-            rtt_ms = float(s.get("ping_seconds") or 0) * 1000.0
-            queued_uncached = float(s.get("queued_uncached_tokens_at_dispatch") or 0)
-            prefill_ms = max(ttft_ms - rtt_ms, 0.0)
-            prefill_rate = prefill_ms / max(uncached, 1.0)
-            if 0 < prefill_rate < 1000:
-                prefill_rates_ms.append(prefill_rate)
-                residual_ms = max(ttft_ms - rtt_ms - prefill_rate * uncached, 0.0)
-                residuals.append(residual_ms)
-                if queued_uncached > 0:
-                    q_rate = residual_ms / queued_uncached
-                    if 0 <= q_rate < 1000:
-                        queue_rates_ms.append(q_rate)
-
-        prefill_rate_ms = _median(prefill_rates_ms) or 0.1
-        queue_rate_ms = _median(queue_rates_ms) if queue_rates_ms else 0.01
-        rtt_weight = 1.0 / max(prefill_rate_ms, 1e-6)
-        queue_weight = queue_rate_ms / max(prefill_rate_ms, 1e-6)
-        rtt_weight = max(0.05, min(5.0, rtt_weight))
-        queue_weight = max(0.01, min(2.0, queue_weight))
-        return {
-            "defaults": {
-                "rtt_weight": rtt_weight,
-                "queue_weight": queue_weight,
-            },
-            "per_target": {},
-            "diagnostics": {
-                "prefill_rate_ms_per_token": prefill_rate_ms,
-                "queue_rate_ms_per_token": queue_rate_ms,
-                "prefill_rate_samples": len(prefill_rates_ms),
-                "queue_rate_samples": len(queue_rates_ms),
-                "median_residual_ms": _median(residuals) if residuals else 0.0,
-            },
-        }
-
     # ---------- Chat completions (streaming passthrough + tuning tap) ----------
 
     def _record_request_sample(
@@ -2664,7 +2584,7 @@ def proxy(registry_key: str = ""):
             return
 
         window = list(samples)[-at["window_size"] :]
-        mode = at.get("mode", "fit")
+        mode = at.get("mode", "online-es")
 
         if mode == "calibrate":
             # Calibration accumulates physical rates per-request from the
@@ -2804,74 +2724,11 @@ def proxy(registry_key: str = ""):
             )
             return
 
-        # ----- mode == "fit" -----
-        if normalize_policy(state["policy"]) == "gorgo-2d":
-            recommendation = _recommend_2d_physical_weights(window)
-            if at["apply"]:
-                state["hyperparameters"] = merge_update(
-                    state["hyperparameters"], recommendation, replace=False
-                )
-            at["applied_count"] += 1
-            at["last_applied_at_monotonic"] = time.monotonic()
-            at["last_recommendation"] = recommendation
-            at["samples_since_last_apply"] = 0
-            _trace_append(
-                "tune",
-                {
-                    "kind": "tune",
-                    "mode": "fit-2d",
-                    "wall_ts": _now_wall_ts(),
-                    "monotonic_s": time.monotonic(),
-                    "step": at["applied_count"],
-                    "total_samples": state["total_samples_appended"],
-                    "window_size": len(window),
-                    "defaults": recommendation["defaults"],
-                    "fit_diagnostics": recommendation.get("diagnostics", {}),
-                },
-            )
-            _log(
-                f"auto-tune 2d #{at['applied_count']} "
-                f"window={len(window)} defaults={recommendation['defaults']} "
-                f"(apply={at['apply']})"
-            )
-            return
-
-        # ----- mode == "fit" (original 3-weight behavior) -----
-        # Per-target recommendation: pooled ``defaults`` for unseen
-        # replicas, plus per-replica overrides for any replica with
-        # at least ``min_samples_per_target`` observations in the
-        # window. Replicas that fall below the threshold simply
-        # inherit ``defaults`` instead of getting a noisy single-
-        # sample median.
-        recommendation = recommend_rates_per_target(window)
-        if at["apply"]:
-            state["hyperparameters"] = merge_update(
-                state["hyperparameters"], recommendation, replace=False
-            )
-        at["applied_count"] += 1
-        at["last_applied_at_monotonic"] = time.monotonic()
-        at["last_recommendation"] = recommendation
-        at["samples_since_last_apply"] = 0
-        _trace_append(
-            "tune",
-            {
-                "kind": "tune",
-                "mode": "fit",
-                "wall_ts": _now_wall_ts(),
-                "monotonic_s": time.monotonic(),
-                "step": at["applied_count"],
-                "total_samples": state["total_samples_appended"],
-                "window_size": len(window),
-                "defaults": recommendation["defaults"],
-                "per_target": recommendation["per_target"],
-            },
-        )
-        _log(
-            f"auto-tune #{at['applied_count']} "
-            f"window={len(window)} defaults={recommendation['defaults']} "
-            f"per_target={list(recommendation['per_target'])} "
-            f"(apply={at['apply']})"
-        )
+        # Only "online-es" and "calibrate" are supported. The legacy
+        # live-autotune "fit" mode (median-of-rates per-target fitting) was
+        # removed in favor of the calibrate -> tune -> eval pipeline; any
+        # other mode is a no-op.
+        return
 
     async def _handle_chat_completions(scope, receive, send) -> None:
         headers = {
