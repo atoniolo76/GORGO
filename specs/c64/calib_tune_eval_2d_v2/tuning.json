@@ -1,5 +1,5 @@
 {
-  "_note": "PHASE 1 - tuning (v2 spec set), optimizing p95 TTFT. ms-normalized 2D GORGO model: score = rtt_weight*rtt_ms + prefill_rate*uncached + queue_rate*queue_weight*queued. prefill_rate/queue_rate are FIXED physical constants harvested from the calibration phase (sequencer patches them in; defaults here are the v14 calibration P~=0.057, Q~=0.008). The ES searches only the dimensionless rtt_weight/queue_weight. RANGES/STARTERS UPDATED from the v14 analysis: in the prior run rtt_weight railed to its 0.1 floor (boundary-pinned, untrustworthy) and the ES thrashed; napkin math (20k-tok reqs, ~30 cached turns, RTT 100-800ms, P=0.057/Q=0.008) shows queue_weight's routing optimum is ~1.0-1.5 (physical prior holds) but rtt_weight's is ~0.1-0.2, far below 1.0 -- a high rtt_weight concentrates load on near replicas and blows up the queue term, and rtt_weight>~1.5 abandons cache affinity. So rtt_weight starts low (0.2) with floor 0.0 and ceiling 1.5; queue_weight starts at 1.0 in a tightened [0.25, 4.0] range. Window: apr6 15:05-15:35 (decoded).",
+  "_note": "PHASE 1 - tuning (v2 spec set), optimizing p95 TTFT. ms-normalized 2D GORGO model: score = rtt_weight*rtt_ms + prefill_rate*uncached + queue_rate*queue_weight*queued. prefill_rate/queue_rate are FIXED physical constants harvested from the calibration phase (sequencer patches them in; defaults here are the v14 calibration P~=0.057, Q~=0.008). The ES searches only the dimensionless rtt_weight/queue_weight. RANGES/STARTERS UPDATED from the v14 analysis: in the prior run rtt_weight railed to its 0.1 floor (boundary-pinned, untrustworthy) and the ES thrashed; napkin math (20k-tok reqs, ~30 cached turns, RTT 100-800ms, P=0.057/Q=0.008) shows queue_weight's routing optimum is ~1.0-1.5 (physical prior holds) but rtt_weight's is ~0.1-0.2, far below 1.0 -- a high rtt_weight concentrates load on near replicas and blows up the queue term, and rtt_weight>~1.5 abandons cache affinity. So rtt_weight starts low (0.2) with floor 0.01 (log-space ES requires lo>0) and ceiling 1.5; queue_weight starts at 1.0 in a tightened [0.25, 4.0] range. Window: apr6 15:05-15:35 (decoded).",
   "run_id": "glm5_c64_tuning_p95ttft_2d_v2",
   "trace_path": "",
   "start_delay_seconds": 30,
@@ -47,7 +47,7 @@
         "objective_metric": "neg_p95_ttft",
         "hyperparam_ranges": {
           "rtt_weight": [
-            0.0,
+            0.01,
             1.5
           ],
           "queue_weight": [

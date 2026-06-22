@@ -42,7 +42,13 @@ def _content_to_str(content) -> str:
     timeout=14400,
     volumes={"/data": completions_volume},
 )
-def scan_all_parquets():
+def scan_all_parquets(
+    midrange_rps_min: float = 2.0,
+    midrange_rps_max: float = 4.5,
+    midrange_min_users: int = 250,
+    midrange_max_top_user_share: float = 0.30,
+    midrange_min_median_tokens: int = 500,
+):
     import duckdb
 
     files = sorted(
@@ -177,14 +183,73 @@ def scan_all_parquets():
             f"{start_dt.strftime('%Y-%m-%d %H:%M')}–{end_dt.strftime('%H:%M')} UTC"
         )
         print(
-            f"  requests={stats['n_requests']:,}  users={stats['n_users']}  "
+            f"  requests={stats['n_requests']:,}  rps={stats['request_rate_rps']:.1f}  "
+            f"users={stats['n_users']}  "
             f"multi_turn={stats['multi_turn_pct']:.1f}%  "
             f"avg_tokens={stats['avg_tokens']:.0f}  "
             f"top_user_share={stats['top_user_share']:.1f}%  "
             f"median_tokens={stats['median_tokens']:.0f}"
         )
 
-    return [{"rank": i + 1, "score": s, **st} for i, (s, st) in enumerate(results[:20])]
+    # ------------------------------------------------------------------
+    # MIDRANGE ranking: keep the diversity / multi-turn / long-context
+    # rewards but (a) drop the throughput (sqrt(n)) reward that biases the
+    # default ranking toward the busiest, fleet-saturating windows, and
+    # (b) hard-filter to a moderate request-rate band plus diversity and
+    # non-trivial-prompt floors. This targets the "Goldilocks" regime
+    # where the fleet is not saturated, so cache/RTT-aware routing has
+    # room to beat load-agnostic session-affinity.
+    # ------------------------------------------------------------------
+    midrange = []
+    for _, st in results:
+        if not (midrange_rps_min <= st["request_rate_rps"] <= midrange_rps_max):
+            continue
+        if st["n_users"] < midrange_min_users:
+            continue
+        if st["top_user_share"] > midrange_max_top_user_share * 100:
+            continue
+        if st["median_tokens"] < midrange_min_median_tokens:
+            continue
+        m_score = (
+            math.log(max(st["n_users"], 1))
+            * (st["multi_turn_pct"] / 100 + 0.1)
+            * math.log(max(st["avg_tokens"], 1))
+            * (1 - st["top_user_share"] / 100)
+        )
+        midrange.append((m_score, st))
+    midrange.sort(key=lambda r: -r[0])
+
+    print(f"\n{'=' * 80}")
+    print(
+        f"TOP 20 MIDRANGE WINDOWS (of {len(midrange)} passing filters: "
+        f"rps∈[{midrange_rps_min},{midrange_rps_max}], users≥{midrange_min_users}, "
+        f"top_user≤{midrange_max_top_user_share * 100:.0f}%, median_tok≥{midrange_min_median_tokens})"
+    )
+    print(f"{'=' * 80}")
+    for rank, (m_score, stats) in enumerate(midrange[:20]):
+        start_dt = datetime.utcfromtimestamp(stats["start_ts"])
+        end_dt = datetime.utcfromtimestamp(stats["end_ts"])
+        print(
+            f"\n#{rank + 1} midrange_score={m_score:.1f} | "
+            f"{start_dt.strftime('%Y-%m-%d %H:%M')}–{end_dt.strftime('%H:%M')} UTC"
+        )
+        print(
+            f"  requests={stats['n_requests']:,}  rps={stats['request_rate_rps']:.1f}  "
+            f"users={stats['n_users']}  "
+            f"multi_turn={stats['multi_turn_pct']:.1f}%  "
+            f"avg_tokens={stats['avg_tokens']:.0f}  "
+            f"top_user_share={stats['top_user_share']:.1f}%  "
+            f"median_tokens={stats['median_tokens']:.0f}"
+        )
+
+    return {
+        "top_diversity": [
+            {"rank": i + 1, "score": s, **st} for i, (s, st) in enumerate(results[:20])
+        ],
+        "top_midrange": [
+            {"rank": i + 1, "score": s, **st} for i, (s, st) in enumerate(midrange[:20])
+        ],
+    }
 
 
 def _bisect_left(rows, target_ts):
@@ -222,10 +287,12 @@ def _score_window(rows, start_ts, end_ts):
         * math.sqrt(n)  # mild reward for more requests
     )
 
+    window_sec = max(end_ts - start_ts, 1)
     stats = {
         "start_ts": start_ts,
         "end_ts": end_ts,
         "n_requests": n,
+        "request_rate_rps": n / window_sec,
         "n_users": n_users,
         "multi_turn_pct": multi_turn_pct,
         "avg_tokens": avg_tokens,
@@ -237,7 +304,19 @@ def _score_window(rows, start_ts, end_ts):
 
 
 @app.local_entrypoint()
-def main():
-    results = scan_all_parquets.remote()
+def main(
+    midrange_rps_min: float = 2.0,
+    midrange_rps_max: float = 4.5,
+    midrange_min_users: int = 250,
+    midrange_max_top_user_share: float = 0.30,
+    midrange_min_median_tokens: int = 500,
+):
+    results = scan_all_parquets.remote(
+        midrange_rps_min=midrange_rps_min,
+        midrange_rps_max=midrange_rps_max,
+        midrange_min_users=midrange_min_users,
+        midrange_max_top_user_share=midrange_max_top_user_share,
+        midrange_min_median_tokens=midrange_min_median_tokens,
+    )
     print("\n\nFinal results:")
     print(json.dumps(results, indent=2, default=str))
