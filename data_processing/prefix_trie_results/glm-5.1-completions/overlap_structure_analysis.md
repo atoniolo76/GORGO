@@ -375,33 +375,36 @@ exists; on real data the magnitudes are unknown (that is the experiment). Produc
 JSONs are saved for eyeballing under the session scratchpad
 `.../scratchpad/sample_glm/overlap_structure/`.
 
-### How to run (once `alessio-dev` is reachable)
+### How to run (portable — any device, any setup)
+
+Use the portable runner; it derives all paths relative to itself (no hardcoded home
+dir / worktree) and is configured purely by env vars. Full guide:
+[`data_processing/OVERLAP_ANALYSIS_README.md`](../../OVERLAP_ANALYSIS_README.md).
 
 ```bash
-# Case A — original data, env alessio-dev (Rome / Alessio):
-source /home/rome/.venv/bin/activate
-MODAL_PROFILE=<profile-that-can-see-alessio-dev> modal config set-environment alessio-dev
-cd /home/rome/gt/gorgo/crew/hypatia_glm_wt
-modal run data_processing/analyze_overlap_structure.py::analyze_all     # both stages
+# 0. install only what this analysis needs (not the whole GORGO stack)
+pip install -r data_processing/requirements-overlap.txt
 
-# Case B — data copied into a reachable env (e.g. GORGO under arcadia-research):
-export OVERLAP_MODAL_ENV=GORGO
-MODAL_PROFILE=arcadia-research modal config set-environment GORGO
-cd /home/rome/gt/gorgo/crew/hypatia_glm_wt
-modal run data_processing/analyze_overlap_structure.py::analyze_all
+# 1. prove it works on THIS machine — sample data, NO Modal account, NO spend
+./data_processing/run_overlap.sh verify
 
-# Individual stages / knobs (Modal lowercases flags; no single-letter names):
-modal run data_processing/analyze_overlap_structure.py::block_sweep --block-sizes 16,64,256,512,1024
-modal run data_processing/analyze_overlap_structure.py::ngram_structure --window 64 --stride 16
-# If size-16 sweep or n-gram pass-1 OOMs at 64 GiB: run size 16 alone, or raise --stride.
+# 2. real run, in the env that holds the tokenized data (default alessio-dev; BILLS that account)
+OVERLAP_MODAL_ENV=alessio-dev MODAL_PROFILE=<profile-with-alessio-dev> \
+  ./data_processing/run_overlap.sh run
 
-# Local E2E on sample data (NO Modal, NO spend) — what was used to de-risk:
-.venv/bin/python -m pytest data_processing/tests/ -q      # needs duckdb+pyarrow (worktree .venv)
+# knobs (passed through to analyze_all); raise --stride / split size 16 if 64 GiB OOMs:
+./data_processing/run_overlap.sh run --block-sizes 16,64,256,512,1024 --stride 16
 ```
 
-After the run: pull the JSONs to verify (trust the artifact, not the logs) and confirm
-teardown — `modal volume get GORGO-glm5-completions overlap_structure/blocksize_sweep.json /tmp/`,
-then `modal app list` and `modal app stop` anything left running.
+`run_overlap.sh run` echoes the verify + teardown commands when it finishes. Pull the
+JSONs to confirm success (trust the artifact, not the logs) and check `modal app list`
+shows nothing `running`.
+
+**Validation status:** the full Modal path (deploy → mount volume → read → aggregate →
+write+commit → teardown) was smoke-tested end-to-end in a reachable env (`GORGO`) over
+the sample parquets — outputs matched the offline E2E and teardown was clean. The smoke
+caught and fixed a real env-coupling bug (`from app import …` forced resolution of the
+hardcoded `alessio-dev` env); the driver is now standalone and env-portable.
 
 ### Schema assumptions to verify against the real data before running
 1. **Tokenized parquet columns** `token_hash` (string) and `prompt_ids` (list<uint32>)

@@ -1,0 +1,13 @@
+# Minimal dependencies to run JUST the GLM-5.1 overlap-structure analysis on
+# another machine -- you do NOT need the full GORGO stack.
+#
+#   pip install -r data_processing/requirements-overlap.txt
+#   modal setup        # authenticate the Modal client (one time, for the real run)
+#
+# For the REAL Modal run, only `modal` is needed locally (the Modal image installs
+# duckdb itself in-container). duckdb/pyarrow/pytest are for the offline `verify`
+# path (the sample-data E2E that runs the function bodies locally via .local()).
+modal>=1.4.0
+duckdb>=1.5.2
+pyarrow>=15.0.0
+pytest>=8.0.0
