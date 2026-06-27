@@ -313,3 +313,79 @@ This is the literal picture Rome asked for.
 Together these convert "we only know the prefix is 55%" into a quantified answer for the
 overall/middle question, on the same dataset, directly comparable to the 55% trie
 baseline.
+
+---
+
+## 7. Status: script built & unit-tested — run pending `alessio-dev` access
+
+The analysis is **implemented and locally unit-tested**; only the (data-gated) Modal
+run remains. Rome approved the analysis, but there is a **hard access blocker**: the
+GLM-5.1 tokenized data lives only in Modal environment **`alessio-dev`**
+(`app.py:3`, `ENVIRONMENT_NAME="alessio-dev"`), which this box's profiles cannot reach
+(`research-exp` → main/interp/rome; `arcadia-research` → main/GORGO). The same-named
+`GORGO-glm5-completions` volume in the reachable `GORGO` env is **empty** (Modal volume
+names are per-environment). **Whoever runs this needs `alessio-dev` access (Rome or
+Alessio).** No Modal job has been run.
+
+**Files added** (this branch):
+- `data_processing/overlap_metrics.py` — pure, stdlib-only metric logic (block
+  digests content vs prefix-chained; rolling n-grams; positional buckets; shared-run
+  merge; segment histogram). No Modal/duckdb/numpy, so it is unit-testable offline.
+- `data_processing/analyze_overlap_structure.py` — Modal driver. Reuses the pipeline
+  `app`, streams the SAME tokenized parquets the trie used
+  (`/data/tokenized_<FILE_PREFIX>/*.tokenized.parquet`, cols `token_hash`,
+  `prompt_ids`), `@app.function`s at module scope (`block_sweep`, `ngram_structure`)
+  with the volume mounted on each, writes JSON under `/data/overlap_structure/` and
+  `vol.commit()`s. CPU-only, 64 GiB / 8 CPU / 3 h timeout. **Streams off-disk** — never
+  materializes the 8.65B-token corpus. Environment is **overridable** via
+  `OVERLAP_MODAL_ENV` (defaults to `app.py`'s `alessio-dev`).
+- `data_processing/tests/test_overlap_structure.py` — 6 local pytest cases on
+  hand-built sequences with known overlap. **All pass** (`6 passed in 0.04s`). Key
+  assertions: identical-middle-chunk → `content_block_reuse > 0` while
+  `chained_block_reuse == 0` (the prefix-vs-content discriminator); many-small-segments
+  → small-block reuse > large-block reuse and many short off-prefix runs; shared-prefix
+  → content reuse == chained reuse and only on-prefix runs.
+
+### How to run (once `alessio-dev` is reachable)
+
+```bash
+# Case A — original data, env alessio-dev (Rome / Alessio):
+source /home/rome/.venv/bin/activate
+MODAL_PROFILE=<profile-that-can-see-alessio-dev> modal config set-environment alessio-dev
+cd /home/rome/gt/gorgo/crew/hypatia_glm_wt
+modal run data_processing/analyze_overlap_structure.py::analyze_all     # both stages
+
+# Case B — data copied into a reachable env (e.g. GORGO under arcadia-research):
+export OVERLAP_MODAL_ENV=GORGO
+MODAL_PROFILE=arcadia-research modal config set-environment GORGO
+cd /home/rome/gt/gorgo/crew/hypatia_glm_wt
+modal run data_processing/analyze_overlap_structure.py::analyze_all
+
+# Individual stages / knobs (Modal lowercases flags; no single-letter names):
+modal run data_processing/analyze_overlap_structure.py::block_sweep --block-sizes 16,64,256,512,1024
+modal run data_processing/analyze_overlap_structure.py::ngram_structure --window 64 --stride 16
+# If size-16 sweep or n-gram pass-1 OOMs at 64 GiB: run size 16 alone, or raise --stride.
+```
+
+After the run: pull the JSONs to verify (trust the artifact, not the logs) and confirm
+teardown — `modal volume get GORGO-glm5-completions overlap_structure/blocksize_sweep.json /tmp/`,
+then `modal app list` and `modal app stop` anything left running.
+
+### Schema assumptions to verify against the real data before running
+1. **Tokenized parquet columns** `token_hash` (string) and `prompt_ids` (list<uint32>)
+   exist and `prompt_ids` is the flat per-session prompt token-id stream
+   (`build_eval_dataset.py:245-253`; read identically to `build_prefix_trie.py:137-156`).
+   *If the cache was rebuilt with a different schema, adjust the `SELECT`.*
+2. **File set / window:** raw parquets matching `FILE_PREFIX="llm_responses_202604"`
+   and `< FILE_CUTOFF="llm_responses_20260408"` each have a `*.tokenized.parquet`
+   sibling (`tokenized_path_for`). The driver skips missing ones and errors if none
+   exist — confirm the 336-file / 411,169-session cache is present in `alessio-dev`
+   (it produced the 55% trie, so it should be).
+3. **Same unit as the trie:** `prompt_ids` is the *longest* conversation per session
+   (`build_eval_dataset.py:90-113`), so these results are directly comparable to the
+   `global_savings_pct=55.30` baseline. If a per-request (non-maximal) cache is used
+   instead, the comparison shifts — note it.
+4. **Memory:** at `stride=16` the n-gram pass-1 Counter and the size-16 block set are
+   the heavy structures; 64 GiB is the planned envelope but is unverified against the
+   real token volume — be ready to raise `--stride` / split the size-16 sweep / bump
+   container memory if the first run OOMs.
