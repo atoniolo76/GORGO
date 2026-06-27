@@ -35,7 +35,7 @@ MODAL_PROFILE=<profile-with-alessio-dev>   # the profile that can see alessio-de
 modal config set-environment alessio-dev
 cd /home/rome/gt/gorgo/crew/hypatia_glm_wt
 modal run data_processing/analyze_overlap_structure.py::analyze_all
-# (defaults: OVERLAP_MODAL_ENV unset -> alessio-dev, read from app.py)
+# (defaults: OVERLAP_MODAL_ENV unset -> alessio-dev)
 
 # --- Case B: data copied into a reachable env (e.g. `GORGO`) ---
 # First copy the tokenized dir into the GORGO-env volume of the same name, then:
@@ -74,23 +74,34 @@ import os
 
 import modal
 
-# Reuse the pipeline's App + path helpers. ENVIRONMENT_NAME defaults to app.py's
-# value (alessio-dev) but is overridable so the job can run wherever the data
-# actually lives (Modal volume names are per-environment).
-from app import ENVIRONMENT_NAME as _DEFAULT_ENV, app
-from build_eval_dataset import FILE_PREFIX
+# Standalone App + config. We deliberately do NOT `from app import ...` /
+# `from build_eval_dataset import ...`: app.py binds module-level Modal objects
+# (Dicts/Volumes) to a HARDCODED environment (alessio-dev), so importing it makes
+# Modal resolve that environment at run time and crashes any run targeting a
+# different env (e.g. NotFoundError: Environment 'alessio-dev' not found). The
+# only things we need from those modules are two constants, mirrored here, which
+# keeps this driver env-portable (overridable via OVERLAP_MODAL_ENV).
+_DEFAULT_ENV = "alessio-dev"  # mirrors app.py ENVIRONMENT_NAME
+FILE_PREFIX = "llm_responses_202604"  # mirrors build_eval_dataset.FILE_PREFIX
 
 ENVIRONMENT_NAME = os.environ.get("OVERLAP_MODAL_ENV", _DEFAULT_ENV)
 
-# Re-declared (not imported from app.py) so the environment is overridable.
+app = modal.App("GORGO-overlap-structure")
 completions_volume = modal.Volume.from_name(
     "GORGO-glm5-completions", environment_name=ENVIRONMENT_NAME
 )
 
+# Mount only the (stdlib-only) metric logic; app.py / build_eval_dataset.py are
+# intentionally NOT mounted (unused at runtime and env-poisoned, see above).
 image = (
     modal.Image.debian_slim()
     .pip_install("duckdb")
-    .add_local_python_source("app", "build_eval_dataset", "overlap_metrics")
+    # Propagate the resolved target env INTO the container so the in-container
+    # module load matches this run's env (not the alessio-dev default): keeps the
+    # output JSON "environment" label and the vol.commit() handle env-correct for
+    # cross-env runs. (Build steps must precede add_local_*; see Modal invariants.)
+    .env({"OVERLAP_MODAL_ENV": ENVIRONMENT_NAME})
+    .add_local_python_source("overlap_metrics")
 )
 
 OUTPUT_DIR = "/data/overlap_structure"
