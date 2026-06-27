@@ -319,6 +319,13 @@ here for reproducibility. A duplicate mention of the 1/5-success rule in the
 same sentence pair was removed.} This variant treats the dimensionless weights as
 black-box knobs: it finds whatever values produce the best p95 TTFT under the
 current arrival distribution, with no offline profiling.
+\rev{The two adaptive variants are complementary rather than the same method at
+different granularity: \texttt{gorgo-autotune} fits the two \emph{physical} rates
+\emph{per replica} by median-of-rates regression with the weights frozen at $1$,
+whereas \texttt{gorgo-hillclimb} searches the three \emph{dimensionless} weights
+\emph{globally} (one shared vector across replicas) by evolution strategy with
+the rates frozen. They adapt disjoint parameter subsets by different mechanisms;
+in particular \texttt{gorgo-autotune} is not a per-replica \texttt{gorgo-hillclimb}.}
 
 % -----------------------------------------------------------------------
 \section{Experimental Setup}
