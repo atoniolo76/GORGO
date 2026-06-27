@@ -17,9 +17,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from overlap_metrics import (  # noqa: E402
+    RadixTrie,
     block_reuse_stats,
     content_block_digests,
     dedup_whole_prompts,
+    percentiles,
     positional_collision_profile,
     prefix_chained_block_digests,
     segment_length_histogram,
@@ -179,6 +181,52 @@ def test_whole_prompt_dedup():
     )
     assert prof_raw["num_sequences"] == 3
     assert prof_raw["overall_shared_pct"] > 0.0
+
+
+# --------------------------------------------------------------------------- #
+# RadixTrie (cross-conversation prefix savings) + percentiles
+# --------------------------------------------------------------------------- #
+def test_radixtrie_unique_and_shared_prefix():
+    # Two sequences sharing the prefix [1,2], then diverging.
+    s1 = [1, 2, 3, 4]
+    s2 = [1, 2, 9]
+    t = RadixTrie()
+    t.insert(s1)
+    t.insert(s2)
+    # unique footprint = shared [1,2] counted once + tails [3,4] + [9] = 2+2+1 = 5
+    assert t.unique_token_count() == 5
+    # each sequence shares exactly its 2-token prefix with the other
+    assert t.shared_prefix_length(s1) == 2
+    assert t.shared_prefix_length(s2) == 2
+    # a single-sequence trie shares nothing
+    solo = RadixTrie()
+    solo.insert(s1)
+    assert solo.shared_prefix_length(s1) == 0
+    assert solo.unique_token_count() == 4
+
+
+def test_radixtrie_savings_matches_intra_user_definition():
+    # 3 conversations sharing a 4-token prefix, distinct 4-token tails.
+    convs = [[1, 2, 3, 4] + [10 + i * 10 + j for j in range(4)] for i in range(3)]
+    t = RadixTrie()
+    for c in convs:
+        t.insert(c)
+    total = sum(len(c) for c in convs)  # 24
+    unique = t.unique_token_count()  # 4 (prefix) + 3*4 (tails) = 16
+    assert unique == 16
+    savings_pct = 100.0 * (total - unique) / total
+    assert abs(savings_pct - 100.0 * 8 / 24) < 1e-9  # 8 saved of 24
+
+
+def test_percentiles():
+    p = percentiles([0, 10, 20, 30, 40], ps=(25, 50, 75))
+    assert p["p50"] == 20
+    assert p["p25"] == 10
+    assert p["p75"] == 30
+    assert p["mean"] == 20
+    assert p["n"] == 5
+    empty = percentiles([], ps=(50,))
+    assert empty["p50"] is None and empty["mean"] is None and empty["n"] == 0
 
 
 if __name__ == "__main__":  # allow plain `python3 test_overlap_structure.py`

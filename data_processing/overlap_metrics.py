@@ -369,3 +369,147 @@ def segment_length_histogram(
         "on_prefix": on,
         "off_prefix": off,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Minimal path-compressed radix trie (for cross-conversation PREFIX savings)
+# --------------------------------------------------------------------------- #
+# A trimmed, dependency-free equivalent of utils/radix_trie.RadixTrie (drops the
+# replica-endpoint bookkeeping, adds ``shared_prefix_length``). Kept here so the
+# user-reuse driver mounts ONLY overlap_metrics. ``insert`` / ``unique_token_count``
+# mirror utils/radix_trie.py:74-145,229-238 exactly (same savings semantics as
+# build_prefix_trie.py), so a per-user trie's (T - unique) reproduces the existing
+# intra-user A definition.
+
+from array import array as _array  # noqa: E402
+
+
+class _RNode:
+    __slots__ = ("edge", "children", "count")
+
+    def __init__(self, edge=None):
+        self.edge = edge if edge is not None else _array("I")
+        self.children: dict[int, _RNode] = {}
+        self.count = 0  # number of inserted sequences traversing this node
+
+
+class RadixTrie:
+    """Path-compressed radix trie over token-id sequences. ``count`` per node lets
+    ``shared_prefix_length`` report the longest prefix a sequence shares with at
+    least one OTHER inserted sequence (count >= 2)."""
+
+    __slots__ = ("root", "total_tokens", "num_sequences")
+
+    def __init__(self):
+        self.root = _RNode()
+        self.total_tokens = 0
+        self.num_sequences = 0
+
+    def insert(self, seq) -> None:
+        n = len(seq)
+        self.total_tokens += n
+        self.num_sequences += 1
+        node = self.root
+        node.count += 1
+        i = 0
+        while True:
+            if i == n:
+                return
+            first = seq[i]
+            child = node.children.get(first)
+            if child is None:
+                leaf = _RNode(edge=_array("I", seq[i:]))
+                leaf.count = 1
+                node.children[first] = leaf
+                return
+            edge = child.edge
+            elen = len(edge)
+            remaining = n - i
+            cap = elen if elen < remaining else remaining
+            j = 1  # seq[i] == edge[0] by first-char dispatch
+            while j < cap and edge[j] == seq[i + j]:
+                j += 1
+            if j == elen:
+                child.count += 1
+                node = child
+                i += j
+                continue
+            split = _RNode(edge=edge[:j])
+            split.count = child.count + 1
+            child.edge = edge[j:]
+            split.children[child.edge[0]] = child
+            node.children[first] = split
+            i += j
+            if i == n:
+                return
+            leaf = _RNode(edge=_array("I", seq[i:]))
+            leaf.count = 1
+            split.children[seq[i]] = leaf
+            return
+
+    def unique_token_count(self) -> int:
+        """Sum of compressed edge lengths = footprint after perfect prefix sharing."""
+        total = 0
+        stack = [self.root]
+        while stack:
+            nd = stack.pop()
+            total += len(nd.edge)
+            stack.extend(nd.children.values())
+        return total
+
+    def shared_prefix_length(self, seq) -> int:
+        """Longest prefix of ``seq`` shared with >= 1 other inserted sequence.
+
+        Walks ``seq``; a node with ``count >= 2`` means another inserted sequence
+        also traverses it (``seq`` itself contributes 1 to the count). Returns the
+        deepest such matched position. 0 if no other sequence shares any prefix.
+        """
+        n = len(seq)
+        if n == 0:
+            return 0
+        node = self.root
+        i = 0
+        shared = 0
+        while i < n:
+            child = node.children.get(seq[i])
+            if child is None:
+                break
+            edge = child.edge
+            elen = len(edge)
+            remaining = n - i
+            cap = elen if elen < remaining else remaining
+            j = 1
+            while j < cap and edge[j] == seq[i + j]:
+                j += 1
+            if child.count >= 2:
+                shared = i + j  # these matched tokens are shared with >= 1 sibling
+            else:
+                break  # this stretch is unique to seq
+            if j < elen:
+                break  # diverged mid-edge; no deeper shared descent
+            node = child
+            i += j
+        return shared
+
+
+def percentiles(values: list[float], ps=(10, 25, 50, 75, 90)) -> dict:
+    """Linear-interpolated percentiles + mean over ``values`` (keys 'p10'.. , 'mean', 'n')."""
+    out: dict = {"n": len(values)}
+    if not values:
+        for p in ps:
+            out[f"p{p}"] = None
+        out["mean"] = None
+        return out
+    s = sorted(values)
+    n = len(s)
+    for p in ps:
+        if n == 1:
+            out[f"p{p}"] = s[0]
+            continue
+        rank = (p / 100.0) * (n - 1)
+        lo = int(rank)
+        frac = rank - lo
+        hi = min(lo + 1, n - 1)
+        out[f"p{p}"] = s[lo] + (s[hi] - s[lo]) * frac
+    out["mean"] = sum(s) / n
+    return out

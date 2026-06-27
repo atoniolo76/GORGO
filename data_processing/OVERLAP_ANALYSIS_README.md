@@ -83,6 +83,44 @@ signal) catch exact shared runs **≥ `--window` tokens (default 64)**, placed t
 the nearest prompt-quarter; the block sweep reaches down to `--block-sizes 16`
 but is alignment-fragile. It is exact-match only (no fuzzy/near-dup).
 
+## Measurement (A): across-conversation within-user reuse
+
+A second analysis (`analyze_user_reuse.py`) quantifies the reuse a
+**session-affinity / per-user cache** can exploit *across a user's distinct
+conversations* (user = `token_hash`, conversation = `session_id`), **excluding**
+trivial within-conversation growth. It reuses the SAME tokenized cache (no
+re-tokenize), groups by `token_hash` (one user at a time, peak RAM ~ the single
+largest user), and reports two notions:
+
+- **PREFIX** — a per-user radix trie; `savings = tokens − unique_trie_tokens`
+  (shared system/tools head a prefix cache captures). Pooled prefix == the
+  existing intra-user **A = 53.67%** by construction (a built-in cross-check).
+- **CONTENT** — per-user content-hashed (prefix-independent) blocks, swept over
+  `{16,64,256,512,1024}`: the fraction of a user's tokens appearing in **≥2** of
+  their conversations. `content − prefix` = cross-conversation **middle** reuse
+  (shared tool defs / RAG context / persona that aren't a clean prefix).
+
+Plus **per-conversation attribution** ("how much of each new conversation is
+already warm from the user's others"), a per-user percentile **distribution**,
+and an activity-**tier** breakdown (whales vs light users).
+
+```bash
+# offline E2E (already covered by `verify`; multi-conversation-per-user sample):
+./data_processing/run_overlap.sh verify
+# real run (BILLS the env that holds the data; defaults to alessio-dev):
+OVERLAP_MODAL_ENV=alessio-dev MODAL_PROFILE=<your-profile> \
+  ./data_processing/run_overlap.sh user-reuse
+# single function / knobs:
+<PY> -m modal run data_processing/analyze_user_reuse.py::user_reuse \
+     --block-sizes 16,64,256,512,1024 --attribution-block-size 512
+```
+
+Output: `/data/user_reuse/user_reuse.json` (pooled prefix vs content by block
+size, per-user distribution percentiles, tier breakdown, top users, and the
+A = 53.67% reconciliation). Note: the block-content metric is alignment-limited,
+so a user whose only sharing is a *sub-block* prefix can read **below** the exact
+trie prefix at large block sizes — which is exactly why both are reported.
+
 ## Troubleshooting
 
 - **`Environment '…' not found`** → your `MODAL_PROFILE` can't see

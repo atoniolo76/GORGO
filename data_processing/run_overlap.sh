@@ -4,8 +4,9 @@
 # nothing is hardcoded to a particular home dir or worktree.
 #
 # USAGE
-#   ./data_processing/run_overlap.sh verify         # offline E2E on sample data (NO Modal account, NO spend)
-#   ./data_processing/run_overlap.sh run [args...]  # the real analysis, dispatched to Modal
+#   ./data_processing/run_overlap.sh verify             # offline E2E on sample data (NO Modal account, NO spend)
+#   ./data_processing/run_overlap.sh run [args...]      # measurement: prefix-vs-content overlap structure, to Modal
+#   ./data_processing/run_overlap.sh user-reuse [args]  # measurement (A): across-conversation within-user reuse, to Modal
 #   ./data_processing/run_overlap.sh help
 #
 # CONFIG (all optional env vars; sensible defaults)
@@ -37,7 +38,7 @@ pick_python() {
 }
 PY="$(pick_python)"
 
-usage() { sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 require_modal() {
   if ! "$PY" -c 'import modal' >/dev/null 2>&1; then
@@ -66,6 +67,19 @@ case "$cmd" in
     "$PY" -m modal run data_processing/analyze_overlap_structure.py::analyze_all "$@"
     echo ">> Done. Verify the artifacts (trust the file, not the logs):"
     echo "     $PY -m modal volume get GORGO-glm5-completions overlap_structure /tmp/overlap_out"
+    echo ">> Confirm teardown (nothing should be 'running'):"
+    echo "     $PY -m modal app list"
+    ;;
+  user-reuse)
+    require_modal
+    : "${OVERLAP_MODAL_ENV:=}"
+    [[ -n "$OVERLAP_MODAL_ENV" ]] && export MODAL_ENVIRONMENT="$OVERLAP_MODAL_ENV"
+    export OVERLAP_MODAL_ENV
+    echo ">> python=$PY  profile=${MODAL_PROFILE:-<active>}  modal_env=${MODAL_ENVIRONMENT:-<profile default>}  overlap_env=${OVERLAP_MODAL_ENV:-<driver default: alessio-dev>}"
+    echo ">> Measurement (A): across-conversation within-user reuse. Dispatching to Modal -- this BILLS the target env."
+    "$PY" -m modal run data_processing/analyze_user_reuse.py::user_reuse "$@"
+    echo ">> Done. Verify the artifact (trust the file, not the logs):"
+    echo "     $PY -m modal volume get GORGO-glm5-completions user_reuse /tmp/user_reuse_out"
     echo ">> Confirm teardown (nothing should be 'running'):"
     echo "     $PY -m modal app list"
     ;;
