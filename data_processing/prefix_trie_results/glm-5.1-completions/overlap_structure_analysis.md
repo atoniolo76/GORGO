@@ -345,6 +345,35 @@ Alessio).** No Modal job has been run.
   `chained_block_reuse == 0` (the prefix-vs-content discriminator); many-small-segments
   → small-block reuse > large-block reuse and many short off-prefix runs; shared-prefix
   → content reuse == chained reuse and only on-prefix runs.
+- `data_processing/tests/make_sample_overlap_data.py` — deterministic generator
+  (stdlib + pyarrow) writing schema-matching sample tokenized parquets (180 sessions,
+  4 files) with KNOWN overlap: a shared-prefix cluster, an identical-middle-chunk
+  cluster, a many-small-segments cluster, a whale of exact-duplicate prompts, and
+  unique noise (incl. some sub-window lengths).
+- `data_processing/tests/test_overlap_e2e.py` — exercises the **real data path**
+  (parquet → duckdb read → streaming aggregation → JSON) by running the Modal function
+  bodies via `.local()` against the sample data, then validating outputs against the
+  embedded ground truth. (Skips gracefully if duckdb is absent.)
+
+**E2E validation (real path, run locally — no Modal, no spend):** the read/write paths
+were parameterized (`data_dir`, `tokenized_glob`, `output_dir`, `commit_volume`) so the
+function bodies run unchanged under `.local()`. On the 180-session sample, every
+ground-truth check held (`15 passed` in the worktree venv; on an interpreter without
+duckdb the e2e file skips and the 6 pure tests pass). Observed sample numbers:
+
+| measurement | result | confirms |
+|---|---|---|
+| block sweep `content_token_reuse` | bs64 **46.7%** > bs256/512/1024 **41.6%** | small-block > large-block ⇒ small scattered segments detected only at small blocks |
+| block sweep `content − chained` | **+15.3pp** (bs64), **+10.2pp** (bs≥256) | content-hash captures the middle chunk that prefix-chained misses |
+| `chained_token_reuse` | **31.4%** flat across sizes | chained only sees the shared prefix + exact-dup whale (size-invariant), as designed |
+| positional profile (post-dedup) | head **44%**, mid **47%/46%**, tail **8.5%** | genuine middle overlap, not just a prefix |
+| whole-prompt dedup | **29 dropped**, 143 kept; no-dedup `overall_shared` strictly higher | dedup factors out the exact-dup whale |
+| segment histogram | on-prefix **40** long runs (≤4096 bin); off-prefix **320** short (≤64) + **40** long (≤1024) | BOTH a long middle-chunk tail and many small off-prefix segments |
+
+This is the directional behavior the real GLM-5.1 run should produce *if* such structure
+exists; on real data the magnitudes are unknown (that is the experiment). Produced sample
+JSONs are saved for eyeballing under the session scratchpad
+`.../scratchpad/sample_glm/overlap_structure/`.
 
 ### How to run (once `alessio-dev` is reachable)
 
@@ -365,6 +394,9 @@ modal run data_processing/analyze_overlap_structure.py::analyze_all
 modal run data_processing/analyze_overlap_structure.py::block_sweep --block-sizes 16,64,256,512,1024
 modal run data_processing/analyze_overlap_structure.py::ngram_structure --window 64 --stride 16
 # If size-16 sweep or n-gram pass-1 OOMs at 64 GiB: run size 16 alone, or raise --stride.
+
+# Local E2E on sample data (NO Modal, NO spend) — what was used to de-risk:
+.venv/bin/python -m pytest data_processing/tests/ -q      # needs duckdb+pyarrow (worktree .venv)
 ```
 
 After the run: pull the JSONs to verify (trust the artifact, not the logs) and confirm

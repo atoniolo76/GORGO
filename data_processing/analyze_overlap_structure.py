@@ -60,8 +60,16 @@ Outputs (written under the volume + returned + vol.commit()'d):
 Verify after the run by pulling them off the volume (trust the artifact, not
 the logs): ``modal volume get GORGO-glm5-completions overlap_structure/... /tmp/``
 and confirm no app is left running: ``modal app list`` / ``modal app stop``.
+
+LOCAL E2E (no Modal, no spend): the read/write paths are parameterized
+(``data_dir``, ``tokenized_glob``, ``output_dir``, ``commit_volume``) so the
+function bodies run unchanged via ``.local()`` against sample parquets, e.g.:
+    block_sweep.local(block_sizes="64,256,512,1024", data_dir="<sample>",
+                      output_dir="<out>", commit_volume=False)
+See data_processing/tests/make_sample_overlap_data.py and test_overlap_e2e.py.
 """
 
+import glob as _glob
 import os
 
 import modal
@@ -70,7 +78,7 @@ import modal
 # value (alessio-dev) but is overridable so the job can run wherever the data
 # actually lives (Modal volume names are per-environment).
 from app import ENVIRONMENT_NAME as _DEFAULT_ENV, app
-from build_eval_dataset import FILE_CUTOFF, FILE_PREFIX, tokenized_dir, tokenized_path_for
+from build_eval_dataset import FILE_PREFIX
 
 ENVIRONMENT_NAME = os.environ.get("OVERLAP_MODAL_ENV", _DEFAULT_ENV)
 
@@ -89,30 +97,30 @@ OUTPUT_DIR = "/data/overlap_structure"
 DEFAULT_BLOCK_SIZES = "16,64,256,512,1024"
 
 
-def _tokenized_files() -> list[str]:
-    """The exact tokenized parquet set the radix trie ran on (April week-1).
+def _tokenized_files(data_dir: str = "/data", tokenized_glob: str | None = None) -> list[str]:
+    """Resolve the tokenized parquet set to analyze.
 
-    Mirrors build_prefix_trie.py: enumerate raw parquets in the date window,
-    map each to its tokenized cache path, keep those that exist.
+    ``data_dir`` defaults to the Modal volume mount ``/data`` (production) but can
+    point at any local directory so the function bodies run unchanged under
+    ``.local()`` against sample data. ``tokenized_glob`` overrides the pattern
+    (absolute, or relative to ``data_dir``); by default it globs the tokenized
+    cache dir ``<data_dir>/tokenized_<FILE_PREFIX>/*.tokenized.parquet`` -- the
+    same in-window set the radix trie ran on (the cache only ever contains files
+    matching FILE_PREFIX within the date window; see build_eval_dataset.py).
     """
-    raw = sorted(
-        f
-        for f in os.listdir("/data")
-        if f.endswith(".parquet") and FILE_PREFIX in f and f < FILE_CUTOFF
-    )
-    files, missing = [], 0
-    for f in raw:
-        p = tokenized_path_for(f, file_prefix=FILE_PREFIX)
-        if os.path.exists(p):
-            files.append(p)
-        else:
-            missing += 1
-    if missing:
-        print(f"WARNING: {missing} raw parquets have no tokenized cache (skipped)")
+    if tokenized_glob:
+        pattern = (
+            tokenized_glob
+            if os.path.isabs(tokenized_glob)
+            else os.path.join(data_dir, tokenized_glob)
+        )
+    else:
+        pattern = os.path.join(data_dir, f"tokenized_{FILE_PREFIX}", "*.tokenized.parquet")
+    files = sorted(_glob.glob(pattern))
     if not files:
         raise RuntimeError(
-            f"No tokenized parquets under {tokenized_dir(FILE_PREFIX)}. "
-            f"Run build_eval_dataset.py::tokenize_main first (env={ENVIRONMENT_NAME})."
+            f"No tokenized parquets matching {pattern} (env={ENVIRONMENT_NAME}). "
+            f"For production, run build_eval_dataset.py::tokenize_main first."
         )
     return files
 
@@ -138,16 +146,19 @@ def _iter_sequences(files: list[str], min_sequence_len: int):
         con.close()
 
 
-def _write(name: str, payload: dict) -> str:
+def _write(
+    name: str, payload: dict, output_dir: str = OUTPUT_DIR, commit_volume: bool = True
+) -> str:
     import json
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    path = os.path.join(OUTPUT_DIR, name)
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, name)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(payload, f, indent=2)
     os.replace(tmp, path)
-    completions_volume.commit()  # REQUIRED: writes vanish on exit otherwise
+    if commit_volume:
+        completions_volume.commit()  # REQUIRED in-container: writes vanish on exit otherwise
     print(f"wrote {path}")
     return path
 
@@ -158,16 +169,28 @@ def _write(name: str, payload: dict) -> str:
 @app.function(
     image=image, memory=1024 * 64, cpu=8.0, timeout=10800, volumes={"/data": completions_volume}
 )
-def block_sweep(block_sizes: str = DEFAULT_BLOCK_SIZES, min_sequence_len: int = 1) -> dict:
+def block_sweep(
+    block_sizes: str = DEFAULT_BLOCK_SIZES,
+    min_sequence_len: int = 1,
+    data_dir: str = "/data",
+    tokenized_glob: str = "",
+    output_dir: str = "",
+    commit_volume: bool = True,
+) -> dict:
     """One streaming pass; for each block size keeps a content accumulator and a
     prefix-chained accumulator. Memory is dominated by the SMALLEST block size
-    (most distinct blocks). If it OOMs, run smaller sizes in separate jobs."""
+    (most distinct blocks). If it OOMs, run smaller sizes in separate jobs.
+
+    ``data_dir``/``tokenized_glob`` parameterize the read path so this body runs
+    unchanged via ``.local()`` against sample data; ``output_dir`` (default
+    ``OUTPUT_DIR``) and ``commit_volume`` likewise let it write locally."""
     import time
 
     from overlap_metrics import BlockReuseAccumulator
 
     sizes = [int(s) for s in block_sizes.split(",") if s.strip()]
-    files = _tokenized_files()
+    files = _tokenized_files(data_dir, tokenized_glob or None)
+    out_dir = output_dir or OUTPUT_DIR
     print(f"block_sweep: sizes={sizes} over {len(files)} files (env={ENVIRONMENT_NAME})")
 
     accs = {(bs, ch): BlockReuseAccumulator(bs, ch) for bs in sizes for ch in (False, True)}
@@ -214,7 +237,7 @@ def block_sweep(block_sizes: str = DEFAULT_BLOCK_SIZES, min_sequence_len: int = 
         ),
         "sweep": rows,
     }
-    _write("blocksize_sweep.json", payload)
+    _write("blocksize_sweep.json", payload, out_dir, commit_volume)
     return payload
 
 
@@ -230,6 +253,10 @@ def ngram_structure(
     n_buckets: int = 4,
     drop_whole_prompt_dupes: bool = True,
     min_sequence_len: int = 64,
+    data_dir: str = "/data",
+    tokenized_glob: str = "",
+    output_dir: str = "",
+    commit_volume: bool = True,
 ) -> dict:
     """Streaming two-pass over the tokenized cache, using the same primitives as
     ``overlap_metrics.positional_collision_profile`` / ``segment_length_histogram``
@@ -256,7 +283,8 @@ def ngram_structure(
         whole_prompt_key,
     )
 
-    files = _tokenized_files()
+    files = _tokenized_files(data_dir, tokenized_glob or None)
+    out_dir = output_dir or OUTPUT_DIR
     print(
         f"ngram_structure: w={window} stride={stride} over {len(files)} files (env={ENVIRONMENT_NAME})"
     )
@@ -358,8 +386,8 @@ def ngram_structure(
         "on_prefix": on,
         "off_prefix": off,
     }
-    _write("position_bucket_profile.json", profile)
-    _write("segment_length_histogram.json", histogram)
+    _write("position_bucket_profile.json", profile, out_dir, commit_volume)
+    _write("segment_length_histogram.json", histogram, out_dir, commit_volume)
     return {"profile": profile, "histogram": histogram}
 
 
@@ -370,10 +398,14 @@ def analyze_all(
     stride: int = 16,
     n_buckets: int = 4,
     drop_whole_prompt_dupes: bool = True,
+    data_dir: str = "/data",
+    tokenized_glob: str = "",
 ):
     print(f"GLM-5.1 overlap-structure analysis (env={ENVIRONMENT_NAME})")
     print("Stage 1/2: block-size sweep ...")
-    sweep = block_sweep.remote(block_sizes=block_sizes)
+    sweep = block_sweep.remote(
+        block_sizes=block_sizes, data_dir=data_dir, tokenized_glob=tokenized_glob
+    )
     for r in sweep["sweep"]:
         print(
             f"  bs={r['block_size']:>4}: content_tok={r['content_token_reuse_pct']:6.2f}% "
@@ -386,6 +418,8 @@ def analyze_all(
         stride=stride,
         n_buckets=n_buckets,
         drop_whole_prompt_dupes=drop_whole_prompt_dupes,
+        data_dir=data_dir,
+        tokenized_glob=tokenized_glob,
     )
     for b in ng["profile"]["buckets"]:
         print(
