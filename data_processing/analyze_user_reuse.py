@@ -112,11 +112,21 @@ def _iter_users(files: list[str], min_sequence_len: int, duckdb_memory_limit: st
     set is available, but only one user is buffered at once.
     """
     import duckdb
+    import re
 
     con = duckdb.connect()
     try:
         if duckdb_memory_limit:
-            con.execute(f"PRAGMA memory_limit='{duckdb_memory_limit}'")
+            # PRAGMA can't take a bind parameter, so the value is interpolated;
+            # validate it to a strict size literal first (defense-in-depth — the
+            # value is operator config, never untrusted input).
+            if not re.fullmatch(
+                r"\d+(\.\d+)?\s*[KMGT]?B", duckdb_memory_limit.strip(), re.IGNORECASE
+            ):
+                raise ValueError(
+                    f"invalid duckdb_memory_limit: {duckdb_memory_limit!r} (e.g. '48GB')"
+                )
+            con.execute(f"PRAGMA memory_limit='{duckdb_memory_limit.strip()}'")
         cur = con.execute(
             "SELECT token_hash, session_id, prompt_ids FROM read_parquet(?) ORDER BY token_hash",
             [files],
