@@ -121,6 +121,24 @@ A = 53.67% reconciliation). Note: the block-content metric is alignment-limited,
 so a user whose only sharing is a *sub-block* prefix can read **below** the exact
 trie prefix at large block sizes — which is exactly why both are reported.
 
+### Why this also answers "post-compaction KV reuse"
+
+Compaction is **not directly observable** in the trace: when a client compacts a
+conversation (a summary replaces the history) and continues, the server just sees
+a *new* conversation (new `session_id`) from the same `token_hash`. So "how much
+of the held KV survives a compaction" is, in the data, exactly the
+**across-conversation non-prefix overlap** measured here — the `content − prefix`
+gap is the KV a content-addressed cache could reuse across a user's conversations
+that strict-prefix caching misses.
+
+Honesty note: exact-token blocks are reused, not paraphrased summaries. A
+compaction *summary* is reworded, so it won't block-match the original it
+summarizes. What recurs verbatim across a user's conversations — and therefore
+shows up here — is the genuinely KV-reusable content: tool/function definitions
+(often after a varying preamble, i.e. **non-prefix**), retrieved-doc / RAG
+chunks, persona and repeated-instruction blocks. That is precisely the reusable
+part of the "held KV cache," which is what matters for routing.
+
 ## Troubleshooting
 
 - **`Environment '…' not found`** → your `MODAL_PROFILE` can't see
