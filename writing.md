@@ -1,5 +1,17 @@
 # Introduction
 
+Modern LLM inference services proxy client requests to engine replicas spanning inter-continental regions.
+Load-balancing policies must jointly account for factors including KV-cache locality, replica load, and variable network latency.
+However, existing systems only evaluate a subset of these metrics in their cost model, leading to uneven concentrations of load and
+KV-cache across replicas. We present GORGO, a proxy architecture that holistically factors for network latency, prefill cost, and queueing delay
+using tunable parameters. Since Open-source chat datasets such as LMSYS-Chat-1M and WildChat-4.8M lack
+long-context, high prefix-reuse data, we fabricate a synthetic dataset, ART-Chat-411K, from long-context production metadata.
+On a tuning window from ART-Chat-411K, evolutionary strategies guide the GORGO policy's parameters to directly optimize P95 TTFT by X%
+over simple session affinity. During held-out evaluation windows, we fix parameter values learned from tuning and
+notice a downstream improvement of E2E latency by Y%, imputed to the balanced request concentration of GORGO's cost model.
+
+
+
 In LLM serving systems, perceived latency to the user is dominated by the time-to-first-token (TTFT). On a single replica, TTFT is dominated by three costs: prefill time, round trip time (RTT) from client (proxy) to replica, and queueing delay behind in-flight requests. Prefix-caching, which is enabled in modern inference engines SGLang and vLLLM, eliminates the prefill cost of previous turns in a multi-turn conversation (cite sglang and vllm). As LLM context windows increase in length, the time saved by prefix caching 90% of a prompt with 100,000 tokens reduces the prefill cost to 10,000 tokens and decreases TTFT substantially.
 
 Since modern LLM deployments proxy requests to inference engines across regions, the cost savings of prefix-caching depend on choosing a replica with the request session's prefix. Popular routing policies such as consistent hashing and prefix reuse aim to distribute load evenly while creating affinity between a session's requests and replica(s) to maximize KV-cache reuse (Skywalker paper citation, other citations for consistent hashing in llm load balancing). In compute-constrained regimes, bursty workloads can saturate a high-affinity replica, causing head-of-line (HOL) queueing delays from decode memory contention and negating cost savings from prefix-cache reuse. Routing policies that holistically evaluate all costs related to TTFT can maintain high prefix-cache reuse while minimizing the negative effects of load saturation and heterogenuous network latency. 
@@ -35,5 +47,6 @@ to values in the hyperparameter range $[lo_k, hi_k]$ where lo_k > 0 and hi_k > 0
 
 $ \x_k' = clip(exp(ln(x_t,k) + \sigma_t * z_k), [lo_k, hi_k]) $
 
-When an "offspring" weight \x' beats the parent weight \x_t on the objective metric, the incumbent weight \x_t+1 is updated to \x', and \sigma is adjusted to maintain Rechenburg's 1/5 success
+When \x' beats the parent weight \x_t on the objective metric, the incumbent weight \x_t+1 is updated to \x', and \sigma is adjusted to maintain Rechenburg's 1/5 success
 rate of 1 accepted offspring for every 5 offspring. 
+

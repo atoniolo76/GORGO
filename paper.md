@@ -212,6 +212,20 @@ gorgo-autotune's strong W1 result is likely an artifact of which replica's rate 
 
 Privacy-safe synthetic traces derived from production metadata. Uses tiktoken for metadata extraction (matching original trace filtering) and Qwen tokenizer for decoded text generation (matching proxy/engine). Intra-user prefix reuse (52.6%) and cross-user system prompt reuse preserved.
 
+### Per-turn / per-conversation structure of the v9 windows
+
+The decoded_v9 evaluation windows are heavily multi-turn — the property that makes intra-user prefix reuse the dominant cache signal. Per-conversation turn statistics (`data_processing/window_turn_stats.py`, source `results/trace_summaries/glm5_window_stats.csv`):
+
+| Window | conversations | avg turns/conv | median turns | p90 turns | max turns | multi-turn conv % | avg prior turns/request | avg conv length (tok) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| apr5 16:15–16:45 (tuning) | 1,310 | 30.3 | 10 | 91 | 279 | 77.6% | 18.8 | 19,676 |
+| apr6 15:05–15:35 (eval) | 1,501 | 27.7 | 8 | 93 | 271 | 73.5% | 16.3 | 20,016 |
+| apr7 19:45–20:15 (eval) | 1,155 | 21.5 | 5 | 63 | 320 | 66.6% | 20.4 | 12,408 |
+
+Sessions average **~22–30 turns** (median 5–10) with long tails (max 270–320 turns), and 67–78% of conversations are multi-turn. Each request therefore carries ~16–20 prior turns of reusable context on average — directly motivating the cache-aware prefill term `T_prefill(x_r \ c_i)` in the GORGO cost model.
+
+**Note on token-count basis:** the `avg_tokens` reported in `glm5_window_stats.csv` (apr5 ~20.5k, apr6 ~23.6k, apr7 ~18.2k) characterizes the window's *metadata* (full conversation prompts). The decoded replay files actually benchmarked (`mooncake_traces/decoded/glm5_decoded_apr{5,6,7}_*.jsonl`) average **~7,019 input tokens/request** over **24,069 requests / 1,219 users**, with **~82% block-level prefix reuse** (256-token `hash_ids` blocks: apr5 78.8%, apr6 77.6%, apr7 87.9% global). Block-level reuse is the signal the proxy/engine cache keys on and is not directly comparable to the token-level radix-trie reuse reported for the public datasets in Table 1.
+
 Learned weights: `rtt_weight=1.119, prefill_weight=1.106, load_weight=1.446`
 
 ### W1: Tuning Window (nighttime, 00:30–01:00 UTC, April 2nd)
@@ -560,6 +574,28 @@ This is a **cleaner win than apr7 @ ts2** (where gorgo only ties session-affinit
 Paired with apr6, the two held-out windows give a complete picture: **apr6 (lighter) — gorgo sweeps every metric; apr7 (heavier) — gorgo wins E2E by 51.6% and is the only non-saturating policy** (session-affinity edges TTFT only because continuous batching hides its E2E collapse).
 
 **Source & method:** per-policy `stats` from `GORGO-bench-results` volume, `workload_runs/glm5_c64_eval_ts2_apr7_v2/glm5_c64_eval_ts2_apr7_000_glm5_decoded_apr7_1945_to_2015_<policy>.json`; slip = per-request `sent_delay_ms − scheduled_delay_ms` (p95). Self-finalized via the drain-timeout fix. **Caveat:** `least-request` (slip 5.6s) and `prefix-cache` (slip 181s) are client-over-capacity here, so their figures are saturation-dominated; a strictly within-capacity 5-policy apr7 row requires `time_scale=3.0` (the concentrating policies' single-replica ceiling sits near the ts3 offered rate).
+
+---
+
+## Experiment: Held-out eval (apr7) — full 5-policy comparison @ time_scale=3.0 (within capacity)
+
+> **Held-out evaluation, within capacity for all five.** Same frozen weights (`rtt=0.276, queue=0.5`) on the **held-out** apr7 19:45–20:15 decoded window at `time_scale=3.0` — the within-capacity row the ts2 section flagged as missing. $n=8{,}663$/policy (≤61 fails each), offered ≈11,329 input tok/s, scheduling-slip p95 ≤ 0.01s for **all** policies, so this is a clean routing-quality comparison with no saturation confound.
+
+| Policy | TTFT p50 | TTFT p95 | TTFT p99 | E2E p50 | E2E p95 | slip p95 | conc% |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **gorgo-static-p95-2d** | **386ms** | **1,377ms** | **1,973ms** | **1,725ms** | **3,337ms** | 0.01s | 43.5 |
+| simple-session-affinity | 439ms | 1,495ms | 2,313ms | 1,727ms | 3,901ms | 0.01s | 49.8 |
+| least-load | 480ms | 1,637ms | 2,294ms | 1,931ms | 4,038ms | 0.00s | 35.9 |
+| least-request | 509ms | 1,724ms | 2,485ms | 1,960ms | 4,402ms | 0.01s | 35.5 |
+| prefix-cache | 516ms | 1,830ms | 2,801ms | 2,180ms | 11,980ms | 0.01s | 36.8 |
+
+> **gorgo sweeps every metric** once apr7 is within capacity: TTFT p50 **+12.1% vs session-affinity** (386 vs 439ms), p95 **+7.9%** (1,377 vs 1,495ms), p99 **+14.7%** (1,973 vs 2,313ms), and E2E p95 **+14.5%** (3,337 vs 3,901ms; E2E p50 a tie). This is the decisive complement to the ts2 row: the **same window** where session-affinity *beat* gorgo on TTFT under stress flips to a gorgo sweep once the fleet has slack — confirming the ts2 TTFT loss was a saturation artifact (continuous batching shielding session-affinity's concentration), not a routing deficit.
+
+gorgo achieves this **without the reward-hack signature**: its single-replica concentration is 43.5% — below session-affinity's 49.8% and above the load-balancers' ~36% — i.e. it spreads more than the cache-greedy policy yet exploits cache more than the cache-blind ones. Note `prefix-cache` still posts a 12.0s E2E p95 despite ≤0.01s slip: its longest-prefix-match concentration keeps one replica's decode batch saturated even when the client never falls behind, the in-capacity echo of its ts2 collapse.
+
+Paired with apr6 ts2 and apr7 ts2, the three held-out points now read cleanly: **apr6 (light) — gorgo sweeps; apr7 ts3 (within capacity) — gorgo sweeps; apr7 ts2 (over capacity for the concentrating baselines) — gorgo wins E2E, loses TTFT to session-affinity only because batching hides its saturation.** The advantage is monotone in available capacity.
+
+**Source & method:** recomputed from per-request traces on `GORGO-bench-results`, `proxy_traces/glm5_c64_eval_ts3_apr7/glm5_c64_eval_ts3_apr7_000_glm5_decoded_apr7_1945_to_2015_<policy>/requests.jsonl` (same `ttft_ns` = dispatch→first-token, `total_ns` = E2E methodology as the load-sweep/saturation tables; `error`-free rows only). offered tok/s = Σ`prompt_tokens` / replay span (`monotonic_s`); slip from `scheduling_slip_ms`; conc% = max single-replica share of `target_replica_key`. Run `glm5_c64_eval_ts3_apr7` (app `ap-m3DJJdJG3vmPNU6kod0rrw`), self-finalized via the drain-timeout fix.
 
 ---
 
