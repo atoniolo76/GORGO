@@ -78,7 +78,7 @@ TTFT \rev{can be decomposed into} three different costs: network latency, prefil
 \label{eq:ttft}
 \end{equation}
 
-Theoretically, $T_{\texttt{network}}$ and $T_{\texttt{queue}}$ correspond with round trip time from a client to server and the duration of request processing ahead of the incoming request $r$. However, modern inference engines support batching requests continuously in order to minimize waiting for completion of previous request processing \citep{orca}. While continuous batching allows admission of a new request into the currently running batch, the batch size is still bounded by a maximum number of concurrent requests and the available KV-cache budget, a critical knob that governs how much load a replica can admit before further requests wait in a queue \citep{vllm2023}.
+Theoretically, $T_{\texttt{network}}$ and $T_{\texttt{queue}}$ correspond with \rev{round trip time (RTT)} from a client to server and the duration of request processing ahead of the incoming request $r$. However, modern inference engines support batching requests continuously in order to minimize waiting for completion of previous request processing \citep{orca}. While continuous batching allows admission of a new request into the currently running batch, the batch size is still bounded by a maximum number of concurrent requests and the available KV-cache budget, a critical knob that governs how much load a replica can admit before further requests wait in a queue \citep{vllm2023}.
 
 In a distributed system, the temporal delay of retrieving queueing metrics from an engine replica makes cost evaluation challenging. We represent the input to $T_{\texttt{queue}}$ as the total number of tokens of requests without a completion event on the client proxy. $T_{\texttt{network}}$ is measured trivially as the exponential weighted moving average of a ping's round trip time from client proxy to server.
 \begin{equation}
@@ -101,7 +101,7 @@ Each parent weight $x_{t,k}$ is perturbed multiplicatively in log-space by a nor
 x_k' = \mathrm{clip}\left(\exp(\ln(x_{t,k}) + \sigma_t * z_k), [lo_k, hi_k]\right)
 \end{equation}
 
-When $x'$ beats the parent weight $x_t$ on the objective metric, the incumbent weight $x_{t+1}$ is updated to $x'$, and $\sigma$ is adjusted to maintain Rechenburg's 1/5 success rate of 1 accepted offspring for every 5 offspring.
+When $x'$ beats the parent weight $x_t$ on the objective metric, the incumbent weight $x_{t+1}$ is updated to $x'$, and $\sigma$ is adjusted to maintain \rev{Rechenberg's} 1/5 success rate of 1 accepted offspring for every 5 offspring \rev{\citep{rechenberg1973}}.
 
 % -----------------------------------------------------------------------
 \section{Workload Characterization}
@@ -117,7 +117,7 @@ request length, conversational structure, and token-weighted prefix reuse.
 \textbf{LMSYS-Chat-1M} \citep{lmsys2024} is a dataset of one million chatbot conversations from a publicly hosted demo of a Vicuna model and the ChatbotArena website. \textbf{WildChat-4.8M} \citep{wildchat2024} is a corpus
 of 3.2M ChatGPT-proxy conversations grouped by client IP. Our \textbf{ARTChat-411k
 trace} contains chat completion requests from a production
-GLM 5.1 model endpoint hosted by an industry company\citep{glm2024}. It contains 411{,}169 requests across 4{,}984 distinct
+GLM 5.1 model endpoint hosted by an industry company~\citep{glm2024}. It contains 411{,}169 requests across 4{,}984 distinct
 users, yielding $\sim$82 requests per user on average. We used the request metadata for real-world timestamps and tokenized request bodies for reuse calculation.
 
 We measure prefix reuse with a token-weighted prefix trie that ingests each
@@ -152,8 +152,7 @@ WildChat. At typical rates, prefill on a 21{,}000-token uncached prompt takes on
 
 \textit{User concentration}: ARTChat-411k has 82 requests per user on
 average; WildChat has 1.7; LMSYS does not carry user identifiers, so intra-user
-statistics cannot be computed. Intra-user reuse depends
-on returning users, which the public sets simply do not have. \textit{Reuse
+statistics cannot be computed. \textit{Reuse
 magnitude}: 53.7\% of ARTChat-411k tokens are part of a prefix seen earlier from the
 same user (5.3\% for WildChat, essentially zero for LMSYS). The bulk of
 WildChat's 34.4\% global reuse comes from cross-user shared structure (chat
@@ -229,7 +228,12 @@ Figure~\ref{fig:rtt} shows the full RTT time series over the tuning window.
 \paragraph{Baselines, policies, and windows.}
 We compare the three GORGO variants of \S\ref{sec:method}
 (\texttt{gorgo-static}, \texttt{gorgo-autotune}, \texttt{gorgo-hillclimb})
-against five baseline policies. \texttt{random} samples a replica uniformly per
+against five baseline policies.
+\cmt{Confirmed: we are moving away from \texttt{gorgo-autotune}. It does not
+appear in the main 2D results (Table~\ref{tab:results}); it survives only in the
+WildChat appendix (Table~\ref{tab:wildchat}), where it was the unstable
+rate-inversion variant. If dropping it, remove it here and from
+Appendix~\ref{app:wildchat}.} \texttt{random} samples a replica uniformly per
 request and serves as the lower bound. \texttt{least-request} routes to the
 replica with the fewest in-flight requests, taking the larger of the proxy's
 in-flight view and SGLang's scraped running-request count to bridge the
@@ -322,21 +326,8 @@ at third load, each within capacity for all five policies---GORGO
 30.8\% better (3.29 vs.\ 4.75\,s); on Apr~7, TTFT p95 is 7.9\% better
 (1{,}377 vs.\ 1{,}495\,ms) and E2E p95 is 14.5\% better (3.34 vs.\ 3.90\,s).
 The weights, learned once on Apr~5, transfer to later days and times of day
-without re-tuning. Figure~\ref{fig:ttft_multibar} visualizes the TTFT p95
-comparison across the three windows, and Figure~\ref{fig:es_convergence} shows
-the tuning run that produced the weights.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{ttft_multibar.png}
-\caption{\rev{TTFT p95 across the three load-sweep windows
-  (Table~\ref{tab:results}), GORGO (gold) vs.\ baselines under the frozen 2D
-  weights. At full load (Apr~5, saturated) GORGO is within 3.5\% of the best
-  baseline; as load backs off to half (Apr~6) and a third (Apr~7) of capacity,
-  GORGO becomes the lowest-p95 policy in every window, the advantage widening as
-  the fleet gains slack.}}
-\label{fig:ttft_multibar}
-\end{figure}
+without re-tuning. Figure~\ref{fig:es_convergence} shows the tuning run that
+produced the weights.
 
 \begin{figure}[t]
 \centering
@@ -398,14 +389,6 @@ different operating point from the p95 run. \texttt{gorgo-hillclimb} achieves
 traffic on the nearest replica, degrading E2E: p95 E2E is 2.40\,s, 14.1\%
 worse than \texttt{least-request} (2.10\,s). This tradeoff---better median TTFT
 at the cost of E2E---is the mirror image of the p95 policy, which wins both.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{ttft_bars_p50_w1.png}
-\caption{W1 TTFT with p50 objective. \texttt{gorgo-hillclimb} (gold outline)
-  achieves the best p50 (0.163\,s) by prioritizing RTT over cache.}
-\label{fig:ttft_bars_p50}
-\end{figure}
 
 \paragraph{Held-out evaluation.}
 
@@ -524,7 +507,7 @@ Running the $(1{+}1)$-ES live can produce a heavy-tailed p99 excursion
 because the negative-p95 objective does not penalize a single
 bad-minute proposal fast enough. The freeze-for-production recommendation in
 \S\ref{sec:results:p95} is therefore a safety property, not just a
-convenience. Decode dynamics such as the effect of variable length decode and high memory consumption on load may impact live-tuning instability; exploring the impact of higher output token limits would be a direction for future work.
+convenience. Decode dynamics such as the effect of variable length decode and high memory consumption on load may impact live-tuning instability; exploring the impact of higher output token limits\rev{, or more sophisticated online or machine learning algorithms,} would be a direction for future work.
 
 % -----------------------------------------------------------------------
 \section{Related Work}
