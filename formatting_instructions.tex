@@ -27,16 +27,16 @@
 \maketitle
 
 \begin{abstract}
-Modern LLM inference services proxy client requests to engine replicas spanning
-inter-continental regions. Load-balancing policies must jointly account for
+Increasingly, LLM inference services proxy client requests to engine replicas distributed globally.
+Load-balancing policies must jointly account for
 factors including KV-cache locality, replica load, and variable network latency when
 optimizing for metrics like latency and TTFT.
-However, existing systems only evaluate a subset of these metrics in their cost
+However, existing systems only evaluate a subset of these factors in their cost
 model, leading to uneven concentrations of load and KV-cache across replicas. We
 present GORGO, a proxy architecture that holistically factors network latency,
 prefill cost, and queueing delay using tunable parameters. Since open-source chat
 datasets such as LMSYS-Chat-1M and WildChat-4.8M lack long-context, high
-prefix-reuse data, we fabricate a synthetic dataset, ART-Chat-411K, from
+prefix-reuse data, we release a synthetic dataset, ART-Chat-411K, from
 long-context production metadata. On a tuning window from ART-Chat-411K,
 evolutionary strategies guide the GORGO policy's parameters to directly optimize
 p95 TTFT. During held-out evaluation windows, we fix the parameter values learned
