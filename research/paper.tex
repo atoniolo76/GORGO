@@ -119,6 +119,12 @@ replica saturates. Reporting only one percentile hides this trade-off.
   (Table~\ref{tab:p95_all}) and \texttt{least-request} the best W2a p99
   (Table~\ref{tab:p95_all}). Claim narrowed to match the data --- a reviewer checking
   the tables against the abstract would flag this immediately.}
+\item \rev{An identifiable two-parameter specialization of the cost model and a
+  controlled load sweep (\S\ref{sec:results:2d}) showing that GORGO's advantage
+  over baselines scales inversely with fleet saturation, and that optimizing TTFT
+  alone reward-hacks toward single-replica concentration that wins the first token
+  but inflates end-to-end latency --- so E2E is the honest objective on a
+  saturating fleet.}
 \end{itemize}
 
 % \item Workload characterization (\S\ref{sec:characterization}): ARTChat-411k has
@@ -273,6 +279,26 @@ reported KV-cache occupancy. The score has two physical rate parameters---per-to
 prefill rate $t_{\mathrm{prefill}}$ and per-token load coefficient $\alpha$---and
 three dimensionless weights $w_{\mathrm{rtt}},w_{\mathrm{prefill}},w_{\mathrm{load}}$
 that scale each term. The three variants below differ in how these five scalars are set.
+
+\rev{\paragraph{A two-parameter specialization.}
+Equation~\ref{eq:score} has a flat direction: only the ratios
+$w_{\mathrm{rtt}}/w_{\mathrm{prefill}}$ and $w_{\mathrm{load}}/w_{\mathrm{prefill}}$
+change which replica minimizes the score, so the global scale
+$w_{\mathrm{prefill}}$ is unidentifiable and an unconstrained search wanders along
+it. We therefore also study a \emph{two-parameter} form that fixes the own-prefill
+term as the unit of the score ($w_{\mathrm{prefill}}{\equiv}1$, with the per-token
+rate folded in) and leaves only the RTT and queue weights free:
+\begin{equation}
+\mathrm{score}_{\mathrm{2D}}(u,r) = w_{\mathrm{rtt}}\cdot\mathrm{rtt}_u
+  + \bigl(|x_r| - |x_r \cap c_u|\bigr)
+  + w_{\mathrm{queue}}\cdot \mathrm{queued\_tokens}_u .
+\label{eq:score2d}
+\end{equation}
+Fixing the unit removes the flat direction and makes the search identifiable; using
+\emph{raw} $\mathrm{queued\_tokens}$ (rather than only the cache-miss fraction)
+keeps queued cache-hit work --- which still consumes batch slots and decode
+compute --- visible to the load term. We evaluate this form, and its sensitivity
+to fleet saturation, in \S\ref{sec:results:2d}.}
 
 \subsection{Three Variants of Weight Selection}
 
@@ -617,6 +643,107 @@ The p50-tuned policy achieves 0.163\,s p50 TTFT (vs.\ 0.180\,s for p95-tuned),
 a 9\% improvement on the metric it optimizes.
 
 % -----------------------------------------------------------------------
+\subsection{\rev{2D Cost Model and Load Sensitivity}}
+\label{sec:results:2d}
+
+\rev{The 3-weight cost model is non-identifiable: only the ratios
+$w_{\mathrm{rtt}}/w_{\mathrm{prefill}}$ and $w_{\mathrm{load}}/w_{\mathrm{prefill}}$
+affect routing, leaving a flat direction along which the ES can trade
+$w_{\mathrm{prefill}}$ against the calibrated rates without changing any score. We
+collapse it by fixing own uncached prefill as the unit ($w_{\mathrm{prefill}}{\equiv}1$,
+Equation~\ref{eq:score2d}), which leaves exactly two identifiable free parameters,
+$w_{\mathrm{rtt}}$ and $w_{\mathrm{queue}}$. The load term uses raw
+\texttt{queued\_tokens} rather than only cache-miss tokens, so a replica whose
+queue is full of cache-hit work stays visible to the router and load
+concentration cannot hide behind a high cache-hit rate.}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrrrr}
+\toprule
+Policy & TTFT p50 & TTFT p95 & TTFT p99 & E2E p95 \\
+\midrule
+\texttt{gorgo-hillclimb-2d}      & \textbf{0.673} & 2.514          & 4.473          & \textbf{8.91} \\
+\texttt{simple-session-affinity} & 0.712          & \textbf{2.428} & 5.190          & 18.27 \\
+\texttt{least-load}              & 0.763          & 2.447          & \textbf{4.349} & 13.69 \\
+\texttt{least-request}           & 0.968          & 3.970          & 7.012          & 16.62 \\
+\texttt{prefix-cache}            & 1.477          & 6.784          & 9.613          & 22.63 \\
+\bottomrule
+\end{tabular}
+\caption{\rev{2D cost model on the high-diversity decoded Apr~5 16:15--16:45 window
+  ($n{=}7{,}195$/policy, $c{=}64$, ${\sim}3.4\times$ heavier than W1). Latencies in
+  seconds; best (min) per column in bold. The ES converged to
+  $w_{\mathrm{rtt}}{=}0.276$, $w_{\mathrm{queue}}{=}0.500$, with $w_{\mathrm{queue}}$
+  railed to its ceiling (maximum load avoidance).}}
+\label{tab:2d_apr5}
+\end{table}
+
+\rev{On this window (Table~\ref{tab:2d_apr5}) the 2D GORGO policy wins E2E p95 by
+34.9\% (8.91\,s vs.\ least-load's 13.69\,s) and wins TTFT p50, while landing
+within ${\sim}3.5\%$ of the best TTFT p95 (2.514\,s vs.\ session-affinity's
+2.428\,s). It trades a hair of TTFT tail for a decisive E2E win by spreading load:
+railing $w_{\mathrm{queue}}$ to its ceiling pushes traffic off the cache-warm
+replica before its decode backlog dilates --- exactly the lever the 3-weight model
+could not isolate. The convergence of the two identifiable weights is shown in
+Figure~\ref{fig:es_convergence_2d}.}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{tune_convergence_2d_v9.png}
+\caption{\rev{$(1{+}1)$-ES convergence of the 2D cost model on the decoded Apr~5
+  tuning window. The two identifiable weights settle quickly
+  ($w_{\mathrm{rtt}}{\to}0.28$, $w_{\mathrm{queue}}$ railing to its $0.5$ ceiling),
+  the Rechenberg step size rises then decays, and the objective (negative p95
+  TTFT) climbs to convergence as the $1/5$ success rate falls to zero.}}
+\label{fig:es_convergence_2d}
+\end{figure}
+
+\rev{To isolate load from routing quality, we run a controlled load sweep: the
+\emph{same} apr7 19:45--20:15 high-diversity window is replayed at three arrival
+rates via \texttt{time\_scale}, which stretches inter-arrival gaps while holding
+the requests, their order, the prompts, and the cache structure fixed --- so
+arrival rate is the only variable. The three rates are full
+($\texttt{time\_scale}{=}1.0$, ${\sim}4.8$\,rps), half ($2.0$, ${\sim}2.4$\,rps),
+and third ($3.0$, ${\sim}1.6$\,rps). Weights are frozen at the 2D values
+($w_{\mathrm{rtt}}{=}0.276$, $w_{\mathrm{queue}}{=}0.5$), comparing
+\texttt{gorgo-static-2d} against \texttt{simple-session-affinity} and
+\texttt{least-request}.}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrrrrr}
+\toprule
+Policy & TTFT p50 & TTFT p95 & TTFT p99 & E2E p50 & E2E p95 \\
+\midrule
+\texttt{gorgo-static-2d}         & \textbf{0.392} & \textbf{1.378} & \textbf{2.124} & \textbf{1.665} & \textbf{3.248} \\
+\texttt{simple-session-affinity} & 0.455          & 1.556          & 4.589          & 1.757          & 4.041 \\
+\texttt{least-request}           & 0.546          & 1.805          & 2.623          & 2.100          & 4.917 \\
+\bottomrule
+\end{tabular}
+\caption{\rev{Load sweep at third load ($\texttt{time\_scale}{=}3.0$,
+  ${\sim}1.6$\,rps), the deepest below-saturation point ($n{=}8{,}663$/policy,
+  100\% success). Latencies in seconds; best per column in bold. Below saturation
+  GORGO sweeps all six metrics; the largest margin is TTFT p99 ($+53.7\%$ vs.\
+  session-affinity), whose single-replica concentration damages its own tail once
+  the fleet has spare capacity.}}
+\label{tab:loadsweep_ts3}
+\end{table}
+
+\rev{The load sweep (Table~\ref{tab:loadsweep_ts3}) tells a clean story about
+saturation. At full load the 3-replica fleet is over capacity for \emph{every}
+policy --- the open-loop replay backs up by minutes waiting for concurrency slots,
+so that point is scheduling-slip-dominated and marks the saturation ceiling rather
+than a routing result. As load backs off, GORGO's standing improves
+monotonically: at half load it is within ${\sim}7\%$ of session-affinity on TTFT
+p95 while winning E2E p95 ${\sim}2.7\times$ (5.6\,s vs.\ 15.5\,s), and at third
+load it wins every metric. The advantage scales inversely with saturation ---
+session-affinity's cache-greedy concentration is only ``less bad'' when there is
+zero spare capacity, and once the fleet has slack that same concentration hurts
+even its own TTFT tail.}
+
+% -----------------------------------------------------------------------
 \subsection{\rev{When does GORGO win?}}
 \label{sec:results:discussion}
 
@@ -642,6 +769,44 @@ therefore not that GORGO dominates everywhere, but that \emph{where reuse and lo
 co-occur} --- the production regime practitioners actually pay for --- jointly
 cost-aware routing beats every single-signal baseline, and degrades gracefully to
 baseline where they do not.}
+
+\rev{\textbf{TTFT-only optimization reward-hacks toward concentration.} The load
+sweep (\S\ref{sec:results:2d}) shows \emph{why} the load term must be present.
+Under continuous batching a saturated replica still admits a new request's prefill
+and emits its first token roughly on time --- TTFT is largely load-insensitive ---
+while the decode backlog dilutes the running batch so every decode step crawls and
+end-to-end (E2E) latency explodes. A policy that optimizes TTFT alone therefore
+sees no penalty for herding traffic onto one cache-warm replica, and the
+degenerate ``concentrate to win TTFT'' solution silently destroys E2E. On the
+half-load apr7 window, session-affinity routes into a replica carrying ${\sim}6\times$
+the least-loaded replica's queued tokens yet still posts a competitive TTFT p95
+while its E2E p95 blows up to 15.5\,s; the 2D GORGO policy holds its chosen queue
+near the fleet minimum and wins E2E by ${\sim}2.7\times$. The load term is the
+brake that prices the decode backlog TTFT cannot see --- which is also why an
+unconstrained search drives it to a boundary when allowed to.}
+
+\rev{\textbf{E2E is the honest objective once the fleet saturates.} Replaying one
+window at three arrival rates separates load from routing quality: at the capacity
+ceiling every policy is over-subscribed and cache-greedy concentration is merely
+\emph{less bad} (with zero slack, minimizing total prefill work beats spreading
+load); below the ceiling, where there is slack to exploit, load-aware routing wins
+outright, and at one-third load GORGO sweeps every metric. GORGO's advantage is
+thus largest in the regime operators actually provision for (some headroom), and
+TTFT should never be optimized alone on a saturating fleet --- the percentile that
+looks best is exactly the one blind to the decode backlog.}
+
+\rev{\textbf{Prefill/decode disaggregation should dissolve the tension (future
+work).} The TTFT-vs-E2E tradeoff is an artifact of co-locating prefill and decode
+on one replica: the replica that wins the first token then decodes the request.
+Under PD-disaggregation \citep{distserve2024,splitwise2024}, a request prefills on
+a prefill-pool worker and decodes elsewhere, so the decode-batch dilution that
+destroys E2E is decoupled from the prefill routing decision GORGO makes. The
+router would then score only TTFT-relevant terms --- RTT, uncached prefill, and
+\emph{prefill-pool} queueing --- and concentrating prefill onto a cache-warm
+worker would no longer blow up decode E2E, defusing the reward hack; the load
+signal the load term must supply by hand today would instead come directly from
+the prefill-pool queue. We do not evaluate a disaggregated fleet here; this is a
+hypothesis consistent with the saturation mechanism the load sweep isolates.}
 
 % -----------------------------------------------------------------------
 
