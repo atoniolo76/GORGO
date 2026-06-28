@@ -30,6 +30,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from paper_style import apply_paper_style
 
 
 def _load_tune_events(path: Path) -> list[dict]:
@@ -54,18 +55,18 @@ def _plot_hillclimb(events: list[dict], title: str, out_dir: Path) -> None:
     steps = [e["step"] for e in events]
     samples = [e.get("total_samples", i) for i, e in enumerate(events)]
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
     fig.suptitle(title, fontsize=14, fontweight="bold")
 
-    ax = axes[0, 0]
+    ax = axes[0]
     # Key-driven so this works for both the 3-weight model
     # (prefill_weight/load_weight/rtt_weight) and the 2D model
     # (rtt_weight/queue_weight). Only plot params actually present.
     colors = {
-        "prefill_weight": "tab:blue",
-        "load_weight": "tab:orange",
-        "queue_weight": "tab:red",
-        "rtt_weight": "tab:green",
+        "rtt_weight": "#1b3a5c",
+        "queue_weight": "#4a86c7",
+        "prefill_weight": "#a8cce8",
+        "load_weight": "#6a9fd8",
     }
     param_keys = [k for k in colors if any(k in (e.get("best_params") or {}) for e in events)]
     for k in param_keys:
@@ -90,43 +91,22 @@ def _plot_hillclimb(events: list[dict], title: str, out_dir: Path) -> None:
     ax.set_ylabel("Hyperparameter value")
     ax.set_title("Hyperparameter Trajectories")
     ax.legend(fontsize=9)
-    ax.grid(True, alpha=0.3)
+    apply_paper_style(ax)
 
-    ax = axes[0, 1]
-    sigma = [e["sigma"] for e in events]
-    ax.plot(samples, sigma, color="tab:green")
-    ax.set_xlabel("Total samples")
-    ax.set_ylabel("Sigma")
-    ax.set_title("Mutation Step Size (Sigma)")
-    ax.grid(True, alpha=0.3)
-
-    ax = axes[1, 0]
+    ax = axes[1]
     scores = [e["score"] for e in events]
     best_scores = [e["best_score"] for e in events]
-    ax.plot(samples, scores, label="Window score", alpha=0.6, color="tab:red")
-    ax.plot(samples, best_scores, label="Best score", color="tab:purple", linewidth=2)
+    ax.plot(samples, scores, label="Window score", alpha=0.55, color="#6a9fd8")
+    ax.plot(samples, best_scores, label="Best score", color="#1b3a5c", linewidth=2.5)
     ax.set_xlabel("Total samples")
     ax.set_ylabel(f"Score ({events[0].get('objective_metric', 'neg_p95_ttft')})")
     ax.set_title("Objective Score")
     ax.legend(fontsize=9)
-    ax.grid(True, alpha=0.3)
-
-    ax = axes[1, 1]
-    rates = [e.get("success_rate") for e in events]
-    valid = [(s, r) for s, r in zip(samples, rates) if r is not None]
-    if valid:
-        ax.plot([v[0] for v in valid], [v[1] for v in valid], color="tab:brown")
-        ax.axhline(y=0.2, color="gray", linestyle="--", alpha=0.5, label="1/5 target")
-        ax.legend(fontsize=9)
-    ax.set_xlabel("Total samples")
-    ax.set_ylabel("Success rate")
-    ax.set_title("Rechenberg 1/5 Success Rate")
-    ax.set_ylim(-0.05, 1.05)
-    ax.grid(True, alpha=0.3)
+    apply_paper_style(ax)
 
     plt.tight_layout()
     out_path = out_dir / "tune_convergence_hillclimb.png"
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=200, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"  Hillclimb convergence: {out_path}")
 

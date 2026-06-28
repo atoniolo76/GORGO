@@ -46,6 +46,16 @@ def _log(message: str) -> None:
 # can also contain a zone like 1.
 REGION = os.getenv("REGION", "us-east-1")
 
+# After the last request is dispatched, the replay drains the in-flight
+# requests still owned by the workers. A single dead/wedged in-flight
+# request (e.g. a stream that never closes) would otherwise block the
+# final ``gather`` forever -- the recurring "eval drain-hang" that strands
+# a whole policy's results. We bound that drain: workers that haven't
+# finished within this many seconds past the last send are cancelled and
+# the run finalizes with whatever completed (matching the manual
+# ``POST /workload/stop`` salvage). Generous default; tunable via env.
+WORKLOAD_DRAIN_TIMEOUT_SECONDS = float(os.getenv("WORKLOAD_DRAIN_TIMEOUT_SECONDS", "180"))
+
 # Safety margin between the pre-filter token count and the model's
 # context window. With the model's own tokenizer the count is exact,
 # but apply_chat_template adds framing tokens (~4 per message) that
@@ -1006,9 +1016,15 @@ async def run_replay_async(
         f"offset={offset} limit={num_requests if num_requests is not None else 'all'}"
     )
 
-    timeout = httpx.Timeout(
-        connect=15.0, read=None, write=30.0, pool=10.0
-    )  # read=None so longer requests don't timeout
+    # read=None (default) means an individual stream never times out, so
+    # long legitimate requests aren't killed -- but a wedged stream then
+    # pins its worker until the bounded drain cancels it. Set
+    # WORKLOAD_READ_TIMEOUT_SECONDS to bound the gap between chunks
+    # (catches dead streams fast) when running in a regime where TTFT and
+    # inter-token gaps stay well under that value.
+    _read_to_env = os.getenv("WORKLOAD_READ_TIMEOUT_SECONDS")
+    read_timeout = float(_read_to_env) if _read_to_env else None
+    timeout = httpx.Timeout(connect=15.0, read=read_timeout, write=30.0, pool=10.0)
     limits = httpx.Limits(
         max_connections=concurrency
         * 2,  # double the maximum concurrency so requests will never queue for connections
@@ -1206,7 +1222,28 @@ async def run_replay_async(
         finally:
             for _ in range(concurrency):
                 await queue.put(None)
-            await asyncio.gather(*workers)
+            # Bounded drain: wait for in-flight requests to finish, but
+            # don't let a single wedged request block the run forever.
+            # On timeout, cancel the stragglers and finalize with whatever
+            # completed -- the run still saves its results instead of
+            # hanging until the app is killed.
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*workers),
+                    timeout=WORKLOAD_DRAIN_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                stranded = sum(1 for w in workers if not w.done())
+                _log(
+                    f"  drain timeout after {WORKLOAD_DRAIN_TIMEOUT_SECONDS:.0f}s: "
+                    f"cancelling {stranded} stuck worker(s); finalizing with "
+                    f"{len(results)} completed of {sent} sent "
+                    f"({sent - len(results)} in-flight abandoned)"
+                )
+                for w in workers:
+                    if not w.done():
+                        w.cancel()
+                await asyncio.gather(*workers, return_exceptions=True)
 
     elapsed = max(time.perf_counter() - t_start, 1e-9)
     ok_results = [r for r in results if 200 <= r["status"] < 300]

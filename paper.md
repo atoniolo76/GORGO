@@ -521,6 +521,48 @@ Calibrated rates reused from v14 (`prefill_rate=0.057`, `queue_rate=0.008`, fixe
 
 ---
 
+## Experiment: Held-out eval (apr6) — full 5-policy comparison @ time_scale=2.0
+
+> **Held-out evaluation.** Frozen gorgo weights from the decoded_v9 apr5 16:15–16:45 hillclimb tuning (`rtt=0.276, queue=0.5`; non-physical-rate 2D, `score = rtt*rtt_ms + uncached + queue*queued`), deployed on the **held-out** apr6 15:05–15:35 high-diversity decoded window at `time_scale=2.0`. $n=7{,}630$/policy, 100% success, all policies within capacity (scheduling-slip p95 ≤ 8 ms — clean comparison).
+
+| Policy | TTFT p50 | TTFT p95 | TTFT p99 | E2E p50 | E2E p95 | ITL avg | decode tok/s |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **gorgo-static-p95-2d** | **491ms** | **1,584ms** | **2,222ms** | **1,797ms** | **3,285ms** | **10.8** | **105** |
+| simple-session-affinity | 627ms | 1,875ms | 3,056ms | 2,008ms | 4,747ms | 13.0 | 94 |
+| least-request | 634ms | 1,852ms | 2,484ms | 2,078ms | 3,991ms | 13.0 | 95 |
+| least-load | 616ms | 1,818ms | 2,885ms | 2,166ms | 4,059ms | 12.9 | 92 |
+| prefix-cache | 574ms | 1,798ms | 2,750ms | 2,068ms | 4,947ms | 14.4 | 91 |
+
+> **gorgo sweeps every metric** on the held-out window: TTFT p95 **+15.5% vs session-affinity** (1,584 vs 1,875ms), E2E p95 **+30.8%** (3,285 vs 4,747ms), plus best p50/p99, ITL, and decode throughput. This is the cleanest headline result: held-out window, frozen weights, validated within-capacity load, beating all four baselines including session-affinity.
+
+This is a **cleaner win than apr7 @ ts2** (where gorgo only ties session-affinity on TTFT), most likely because apr6 has the **longer median context** (median ~9.8k input tokens vs apr7's ~4.5k) → more prefill recoverable via cache-aware routing, so gorgo's lever is larger. The advantage tracks prompt length / recoverable prefill, consistent with the cost model.
+
+**Source & method:** per-policy stats from `GORGO-bench-results` volume, `workload_runs/glm5_c64_eval_ts2_apr6_v2/glm5_c64_eval_ts2_apr6_000_glm5_decoded_apr6_1505_to_1535_<policy>.json` (the `stats` block: `ttft_seconds`, `request_e2e_seconds`, `itl_ms`, `decode_tokens_per_second`). Slip computed from per-request `sent_delay_ms − scheduled_delay_ms`. Run executed with the bounded drain-timeout fix (`WORKLOAD_DRAIN_TIMEOUT_SECONDS`), so all 5 policies self-finalized; the aggregated `sweep_matrix.json` was not written, stats taken from the per-policy `workload_runs` JSON.
+
+---
+
+## Experiment: Held-out eval (apr7) — full 5-policy comparison @ time_scale=2.0
+
+> **Held-out evaluation, heavier window.** Same frozen weights (`rtt=0.276, queue=0.5`) deployed on the **held-out** apr7 19:45–20:15 decoded window at `time_scale=2.0`. $n=8{,}663$/policy, 100% success. Unlike apr6, this window sits **past the saturation knee for the concentrating/cache-blind baselines** at ts2 (see slip column), so it is the complementary "under stress" result.
+
+| Policy | TTFT p50 | TTFT p95 | TTFT p99 | E2E p50 | E2E p95 | slip p95 |
+|---|---:|---:|---:|---:|---:|---:|
+| **gorgo-static-p95-2d** | 586ms | 1,891ms | 3,431ms | **2,383ms** | **7,102ms** | 0.04s |
+| simple-session-affinity | **512ms** | **1,684ms** | **2,455ms** | 2,195ms | 14,664ms | 0.01s |
+| least-request | 915ms | 4,806ms | 7,114ms | 3,769ms | 17,271ms | 5.6s |
+| least-load | 633ms | 2,158ms | 3,753ms | 2,692ms | 10,391ms | 0.02s |
+| prefix-cache | 1,474ms | 8,243ms | 12,167ms | 7,673ms | 22,141ms | 181s |
+
+> **session-affinity wins TTFT p95 (−12.3% for gorgo) but gorgo wins E2E p95 by +51.6%** (7,102 vs 14,664ms) and has the **best E2E of all five**. This is the "E2E is the honest objective on saturating windows" result made concrete: TTFT actively *misleads* (continuous batching shields session-affinity's single-replica concentration on first-token), while E2E exposes that the concentrating replica is saturated.
+
+**Per-policy saturation at this load** (the key story): only **gorgo, session-affinity, and least-load keep the client on schedule** (slip ≤ 0.04s), but by E2E only **gorgo is not melting** (7.1s vs 10–22s). The cache-greedy/cache-blind baselines fall over: `least-request` is client-over-capacity (slip 5.6s) and `prefix-cache` catastrophically so (**slip 181s**, E2E 22.1s) — its longest-prefix-match concentration saturates one replica so hard the open-loop generator backs up ~3 minutes. **There is no single `time_scale` at which all five policies are simultaneously within capacity at meaningful load**, because effective capacity is policy-dependent: balanced routing (gorgo, least-load) tolerates a higher offered rate before any replica saturates than concentrating routing (session-affinity, prefix-cache). "Saturated at the same offered load" is itself the result.
+
+Paired with apr6, the two held-out windows give a complete picture: **apr6 (lighter) — gorgo sweeps every metric; apr7 (heavier) — gorgo wins E2E by 51.6% and is the only non-saturating policy** (session-affinity edges TTFT only because continuous batching hides its E2E collapse).
+
+**Source & method:** per-policy `stats` from `GORGO-bench-results` volume, `workload_runs/glm5_c64_eval_ts2_apr7_v2/glm5_c64_eval_ts2_apr7_000_glm5_decoded_apr7_1945_to_2015_<policy>.json`; slip = per-request `sent_delay_ms − scheduled_delay_ms` (p95). Self-finalized via the drain-timeout fix. **Caveat:** `least-request` (slip 5.6s) and `prefix-cache` (slip 181s) are client-over-capacity here, so their figures are saturation-dominated; a strictly within-capacity 5-policy apr7 row requires `time_scale=3.0` (the concentrating policies' single-replica ceiling sits near the ts3 offered rate).
+
+---
+
 ## Experiment: Load Sweep (apr7) — saturation is what hurts gorgo's TTFT, not routing quality
 
 > **Controlled experiment.** Replay the same apr7 19:45–20:15 high-diversity window at three arrival rates via `time_scale` (stretches inter-arrival times; identical requests/order/prompts/cache structure, only the rate varies). Fixed non-physical-rate 2D weights from the decoded_v9 tuning (`rtt_weight=0.276, queue_weight=0.5`; `prefill_rate=queue_rate=1.0` collapse the score to `rtt*rtt_ms + uncached + queue_weight*queued`), so load is the only variable. Trimmed to `gorgo-static-p95-2d` vs `simple-session-affinity` vs `least-request`.
@@ -571,3 +613,39 @@ gorgo's slightly-worse TTFT is mostly **lost cache locality**, not RTT: it route
 The TTFT-vs-E2E tension above is an artifact of co-locating prefill and decode on one replica. Under PD-disaggregation \[DistServe, Splitwise, Mooncake], a request prefills on a prefill-pool worker (producing KV) and decodes on a separate decode-pool worker. The decode-batch dilution that destroys E2E is then handled by the decode scheduler, **decoupled from the prefill routing decision**. The prefill router GORGO implements would then score only the TTFT-relevant terms — RTT, uncached prefill (cache locality on the prefill pool), and **prefill-pool** queueing — while a separate, simpler decode load-balancer handles decode placement.
 
 Crucially this should also **defuse the reward hack**: concentrating prefill onto a cache-warm worker no longer blows up decode E2E (decode is elsewhere), so the degenerate "concentrate to win TTFT" solution stops being globally harmful. The residual tradeoff moves *inside* TTFT — sending every request to one cache-warm prefill worker eventually causes **prefill-queue contention** at high saturation, which TTFT itself sees and prices. The objective becomes self-correcting: the load term that must be hand-constrained in the aggregated regime is one the prefill-pool queue signal now supplies directly. We do not evaluate a PD-disaggregated fleet here; this is a hypothesis for future work, consistent with the saturation mechanism the load sweep isolates.
+
+---
+
+## Saturation diagnostic: how to tell a run is over capacity (apr7 load sweep)
+
+The apr7 `time_scale` sweep is also a clean reference for *diagnosing saturation*, because it places the same window/policies at three offered loads. The table below contrasts the four signals; the lesson is that **only E2E p95 and scheduling-slip discriminate saturation reliably** — TTFT and throughput mislead.
+
+| run / policy | offered in tok/s | slip p95 | TTFT p95 | E2E p95 | saturated? |
+|---|--:|--:|--:|--:|:--:|
+| ts1 gorgo | 34,064 | 448s | 8,260 | 15,759 | yes |
+| ts1 session-affinity | 34,035 | 243s | 1,835 | 17,940 | yes |
+| ts1 least-request | 34,030 | 491s | 6,138 | 18,615 | yes |
+| ts2 gorgo | 17,003 | 0.08s | 1,822 | 5,648 | no |
+| ts2 session-affinity | 16,999 | 0.02s | 1,707 | 15,504 | yes |
+| ts2 least-request | 16,999 | 7.2s | 4,361 | 16,847 | yes |
+| ts3 gorgo | 11,327 | 0.01s | 1,378 | 3,248 | no |
+| ts3 session-affinity | 11,326 | 0.01s | 1,556 | 4,041 | no |
+| ts3 least-request | 11,326 | 0.01s | 1,805 | 4,917 | no |
+
+(TTFT/E2E columns in ms.) **How to read it:**
+
+- **E2E p95 is the primary saturation signal** (server-side). A saturated replica's decode batch dilutes, so E2E inflates to ~15–18s vs an unsaturated floor of ~3–5s. By this measure: ts1 saturated for all; **ts2 saturated for session-affinity and least-request but *not* gorgo** (gorgo's load-spreading de-saturates the fleet at a load where the concentrating/cache-blind baselines still melt); ts3 unsaturated for all.
+- **Scheduling slip is the client-side signal** — `slip = sent_delay_ms − scheduled_delay_ms`, i.e. how late the open-loop generator fired a request vs its scheduled arrival (it can only fall behind). Slip blows up when the in-flight pipeline (64 workers + 128-slot queue) can't drain fast enough. ts1: minutes for all (offered ≈ drain ceiling). ts2: gorgo/SSA ~ms but least-request 7.2s (its slow requests exhaust the worker pool). ts3: ms for all.
+- **TTFT p95 is misleading — do not use alone.** ts1 session-affinity shows TTFT p95 **1,835ms** (looks healthy) while its E2E is **17,940ms** (fully saturated): continuous batching admits the first token on time even on a melting replica, so a concentrating policy looks fine on TTFT while E2E is on fire.
+- **Offered tok/s is not a saturation signal here** — it just tracks the offered rate (34k : 17k : 11k ≈ 1 : ½ : ⅓ with `time_scale`); wall-clock ran 1.00× the scheduled span in all cases, so aggregate token throughput "kept up" regardless of per-replica saturation.
+
+Note the two signals measure *different axes*: **slip = is the client keeping up; E2E = is a replica saturated.** ts2 session-affinity has slip ≈ 0.02s (client fine) yet E2E 15.5s (replica saturated) — at that offered rate 64 workers absorb the slow requests without the queue filling, so the client never falls behind even though the replica is melting. Use both.
+
+### Data sources and method (for reproducibility)
+
+- **Source:** per-request traces on the Modal volume `GORGO-bench-results`, path `proxy_traces/glm5_c64_loadsweep_apr7_ts{1,2,3}_v2/glm5_c64_loadsweep_apr7_ts{N}_000_glm5_decoded_apr7_1945_to_2015_<policy>/requests.jsonl` (one JSON object per request, `kind=="request"`). Window: decoded apr7 19:45–20:15; fleet: 3 replicas (ap-seoul-1, eu-frankfurt-1, us-ashburn-1), 2×L40S each; concurrency 64; max_tokens 128; gorgo weights `rtt=0.276, queue=0.5` (decoded_v9). The aggregated `sweep_matrix.json` did not harvest for these v2 runs, so all figures were recomputed from `requests.jsonl` (status==200 only).
+- **offered in tok/s** = Σ`request_tokens` ÷ wall-span, where wall-span = max(`monotonic_s` + `total_ns`/1e9) − min(`monotonic_s`).
+- **slip p95** = p95 of `scheduling_slip_ms` (= `sent_delay_ms` − `scheduled_delay_ms`; both recorded per request).
+- **TTFT p95** = p95 of `ttft_ns`/1e6; **E2E p95** = p95 of `total_ns`/1e6.
+- **saturated?** = heuristic on E2E p95 (≳ ~3× the unsaturated decode floor of ~3–5s ⇒ saturated), corroborated by slip.
+- Percentiles use linear interpolation between order statistics. The `ts1` figures are the over-capacity regime and exclude client-side slip from TTFT/E2E (those are dispatch→first/last-token); true user-perceived latency at ts1 is slip-dominated (minutes).

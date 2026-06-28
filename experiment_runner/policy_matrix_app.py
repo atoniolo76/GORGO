@@ -1188,6 +1188,7 @@ async def _respawn_proxy(policy_spec: dict, timeout_s: float = 120.0) -> str:
     key = policy_spec["_proxy_key"]
     label = policy_spec.get("label") or policy_spec.get("name")
     replica_urls = policy_spec["_replica_urls"]
+    replica_entries = policy_spec.get("_replica_entries")
 
     print(f"[respawn] spawning new proxy for {label!r} (key={key})", flush=True)
     await proxy_runner.spawn.aio(key)
@@ -1195,7 +1196,7 @@ async def _respawn_proxy(policy_spec: dict, timeout_s: float = 120.0) -> str:
     new_url = new_urls[key]
     print(f"[respawn] new proxy URL: {new_url}", flush=True)
 
-    await _post_json(new_url, "/replicas", {"replicas": replica_urls})
+    await _post_json(new_url, "/replicas", {"replicas": replica_entries or replica_urls})
     return new_url
 
 
@@ -1562,9 +1563,17 @@ async def _run_policy_matrix_experiment_inner(
         label = _label(policy)
         policy_replica_keys = [f"{fleet_key_prefix}-{label}-{region}" for region in regions]
         policy_replica_urls = [replica_urls[k] for k in policy_replica_keys]
+        policy_replica_entries = [
+            {
+                "url": u,
+                "replica_key": k,
+                "replica_region": r,
+            }
+            for k, r, u in zip(policy_replica_keys, regions, policy_replica_urls)
+        ]
         proxy_key = f"{fleet_key_prefix}-{label}"
         proxy_url = proxy_urls[proxy_key]
-        await _post_json(proxy_url, "/replicas", {"replicas": policy_replica_urls})
+        await _post_json(proxy_url, "/replicas", {"replicas": policy_replica_entries})
         await _post_json(proxy_url, "/policy", {"policy": policy["name"]})
         if policy.get("hyperparameters"):
             await _post_json(proxy_url, "/hyperparameters", policy["hyperparameters"])
@@ -1572,6 +1581,7 @@ async def _run_policy_matrix_experiment_inner(
         p["proxy_url"] = proxy_url
         p["_proxy_key"] = proxy_key
         p["_replica_urls"] = policy_replica_urls
+        p["_replica_entries"] = policy_replica_entries
         launched_spec["policies"].append(p)
         fleet_manifest["fleets"].append(
             {

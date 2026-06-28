@@ -116,6 +116,38 @@ METRICS_FETCH_TIMEOUT_SECONDS = 2.0
 # SGLang may wait until idle; allow a generous read window for POST /flush_cache.
 FLUSH_UPSTREAM_TIMEOUT_SECONDS = 120.0
 
+# Known engine regions used across single-proxy and matrix runs. We use this
+# to derive ``replica_region`` from ``replicas`` registry keys when possible.
+KNOWN_REPLICA_REGIONS: tuple[str, ...] = (
+    "ap-seoul-1",
+    "eu-frankfurt-1",
+    "us-ashburn-1",
+    "CANADA-2",
+    "sines-2",
+    "us-west4",
+    "centralus",
+    "northeurope",
+    "malaysiawest",
+    "us-east",
+)
+
+
+def _infer_replica_region_from_key(registry_key: str) -> str | None:
+    """Best-effort region extraction from a replica registry key.
+
+    Keys are either plain regions (e.g. ``ap-seoul-1``) or experiment-scoped
+    names ending in a region suffix (e.g. ``<prefix>-<policy>-ap-seoul-1``).
+    """
+    key = (registry_key or "").strip()
+    if not key:
+        return None
+    if key in KNOWN_REPLICA_REGIONS:
+        return key
+    for region in sorted(KNOWN_REPLICA_REGIONS, key=len, reverse=True):
+        if key.endswith(f"-{region}"):
+            return region
+    return None
+
 
 HYPERPARAM_RANGES: dict[str, tuple[float, float]] = {
     "prefill_weight": (1e-5, 5.0),
@@ -471,6 +503,10 @@ def proxy(registry_key: str = ""):
     import uvicorn
 
     replica_urls: list[str] = []
+    # Stable per-replica identity metadata keyed by URL. ``replica_key`` is the
+    # registration key (when known); ``replica_region`` is the actual engine
+    # region for that URL.
+    replica_url_meta: dict[str, dict[str, str | None]] = {}
 
     # Routing state. Kept in a dict so the asgi_app closure can mutate it in
     # place from the /policy handler; uvicorn is single-process / single-loop
@@ -689,10 +725,13 @@ def proxy(registry_key: str = ""):
             registry[key] = value if isinstance(value, str) else ""
         return registry
 
-    def _active_urls_from_registry(registry: dict[str, str]) -> list[str]:
+    def _active_urls_from_registry(
+        registry: dict[str, str],
+    ) -> tuple[list[str], dict[str, dict[str, str | None]]]:
         seen: set[str] = set()
         normalized: list[str] = []
-        for url in registry.values():
+        url_meta: dict[str, dict[str, str | None]] = {}
+        for key, url in registry.items():
             url = url.strip().rstrip("/")
             if not url or not (url.startswith("http://") or url.startswith("https://")):
                 continue
@@ -700,40 +739,61 @@ def proxy(registry_key: str = ""):
                 continue
             seen.add(url)
             normalized.append(url)
-        return normalized
+            url_meta[url] = {
+                "replica_key": key,
+                "replica_region": _infer_replica_region_from_key(key),
+            }
+        return normalized, url_meta
 
-    def _replace_replica_urls(normalized: list[str], *, source: str) -> tuple[list[str], list[str]]:
+    def _replace_replica_urls(
+        normalized: list[str],
+        *,
+        source: str,
+        url_metadata: dict[str, dict[str, str | None]] | None = None,
+    ) -> tuple[list[str], list[str]]:
         old = set(replica_urls)
         new = set(normalized)
         added = sorted(new - old)
         removed = sorted(old - new)
-        if not added and not removed and list(replica_urls) == normalized:
-            return added, removed
+        changed_urls = bool(added or removed or list(replica_urls) != normalized)
 
-        replica_urls.clear()
-        replica_urls.extend(normalized)
-        for url in added:
-            endpoints_queued_tokens[url] = 0
-            endpoints_queued_uncached_tokens[url] = 0
-            endpoints_inflight_requests[url] = 0
-        for url in removed:
-            endpoints_queued_tokens.pop(url, None)
-            endpoints_queued_uncached_tokens.pop(url, None)
-            endpoints_inflight_requests.pop(url, None)
-            live_metrics.pop(url, None)
-            metrics_meta["last_refresh_errors"].pop(url, None)
-        prune_per_target(state["hyperparameters"], set(replica_urls))
-        _log(
-            f"replicas synced from {source}: "
-            f"+{len(added)} -{len(removed)} (total={len(replica_urls)})"
-        )
+        if changed_urls:
+            replica_urls.clear()
+            replica_urls.extend(normalized)
+            for url in added:
+                endpoints_queued_tokens[url] = 0
+                endpoints_queued_uncached_tokens[url] = 0
+                endpoints_inflight_requests[url] = 0
+            for url in removed:
+                endpoints_queued_tokens.pop(url, None)
+                endpoints_queued_uncached_tokens.pop(url, None)
+                endpoints_inflight_requests.pop(url, None)
+                live_metrics.pop(url, None)
+                metrics_meta["last_refresh_errors"].pop(url, None)
+                replica_url_meta.pop(url, None)
+            prune_per_target(state["hyperparameters"], set(replica_urls))
+            _log(
+                f"replicas synced from {source}: "
+                f"+{len(added)} -{len(removed)} (total={len(replica_urls)})"
+            )
+
+        incoming_meta = url_metadata or {}
+        for url in normalized:
+            prev = dict(replica_url_meta.get(url) or {})
+            cur = incoming_meta.get(url) or {}
+            # Preserve old identity when no new value is provided.
+            key = cur.get("replica_key") or prev.get("replica_key")
+            region = cur.get("replica_region") or prev.get("replica_region")
+            replica_url_meta[url] = {"replica_key": key, "replica_region": region}
         return added, removed
 
     def _sync_replicas_from_modal_dict() -> tuple[dict[str, str], list[str], list[str]]:
         registry = _registry_from_items(replicas.items())
+        urls, url_meta = _active_urls_from_registry(registry)
         added, removed = _replace_replica_urls(
-            _active_urls_from_registry(registry),
+            urls,
             source="modal dict",
+            url_metadata=url_meta,
         )
         return registry, added, removed
 
@@ -754,16 +814,23 @@ def proxy(registry_key: str = ""):
 
     async def _sync_replicas_from_modal_dict_async() -> tuple[dict[str, str], list[str], list[str]]:
         registry = await _read_registry_async()
+        urls, url_meta = _active_urls_from_registry(registry)
         added, removed = _replace_replica_urls(
-            _active_urls_from_registry(registry),
+            urls,
             source="modal dict",
+            url_metadata=url_meta,
         )
         return registry, added, removed
 
-    def _sync_replicas_from_manual_urls(normalized: list[str]) -> tuple[list[str], list[str]]:
+    def _sync_replicas_from_manual_urls(
+        normalized: list[str],
+        *,
+        url_metadata: dict[str, dict[str, str | None]] | None = None,
+    ) -> tuple[list[str], list[str]]:
         return _replace_replica_urls(
             normalized,
             source="/replicas",
+            url_metadata=url_metadata,
         )
 
     # Experiment proxies are configured explicitly by the controller with
@@ -1057,6 +1124,8 @@ def proxy(registry_key: str = ""):
                 )
             latency = time.monotonic() - t0
             metrics_meta["last_refresh_errors"][url] = repr(e)
+            replica_meta = replica_url_meta.get(url) or {}
+            replica_region = replica_meta.get("replica_region")
             _trace_append(
                 "metrics",
                 {
@@ -1066,7 +1135,10 @@ def proxy(registry_key: str = ""):
                     "wall_ts": wall_ts,
                     "monotonic_s": t0,
                     "replica_url": url,
-                    "region": REGION,
+                    "replica_key": replica_meta.get("replica_key"),
+                    "replica_region": replica_region,
+                    "proxy_region": REGION,
+                    "region": replica_region or REGION,
                     "scrape_latency_seconds": latency,
                     "network_rtt_seconds": network_rtt_ewma.get(url),
                     "ok": False,
@@ -1103,6 +1175,8 @@ def proxy(registry_key: str = ""):
         )
         live_metrics[url] = snap
         metrics_meta["last_refresh_errors"].pop(url, None)
+        replica_meta = replica_url_meta.get(url) or {}
+        replica_region = replica_meta.get("replica_region")
         _trace_append(
             "metrics",
             {
@@ -1112,7 +1186,10 @@ def proxy(registry_key: str = ""):
                 "wall_ts": wall_ts,
                 "monotonic_s": t0,
                 "replica_url": url,
-                "region": REGION,
+                "replica_key": replica_meta.get("replica_key"),
+                "replica_region": replica_region,
+                "proxy_region": REGION,
+                "region": replica_region or REGION,
                 "scrape_latency_seconds": latency,
                 "network_rtt_seconds": snap.network_rtt,
                 "ok": True,
@@ -1483,6 +1560,7 @@ def proxy(registry_key: str = ""):
         return 200, {
             "replicas": list(replica_urls),
             "count": len(replica_urls),
+            "replica_metadata": {u: replica_url_meta.get(u, {}) for u in replica_urls},
             "registry": registry,
         }
 
@@ -1493,10 +1571,10 @@ def proxy(registry_key: str = ""):
             raw = data.get("replicas") or data.get("endpoints")
         else:
             raw = None
-        if not isinstance(raw, list) or not all(isinstance(u, str) for u in raw):
+        if not isinstance(raw, list):
             return 400, {
                 "error": (
-                    "body must be a JSON array of endpoint URLs "
+                    "body must be a JSON array of endpoint URLs/objects "
                     'or an object like {"replicas": [...]}'
                 )
             }
@@ -1504,7 +1582,33 @@ def proxy(registry_key: str = ""):
         seen: set[str] = set()
         normalized: list[str] = []
         invalid: list[str] = []
-        for u in raw:
+        url_metadata: dict[str, dict[str, str | None]] = {}
+        for entry in raw:
+            replica_key: str | None = None
+            replica_region: str | None = None
+            if isinstance(entry, str):
+                u = entry
+            elif isinstance(entry, dict):
+                u = (
+                    entry.get("url")
+                    or entry.get("replica_url")
+                    or entry.get("endpoint")
+                    or entry.get("target")
+                )
+                replica_key = entry.get("replica_key") or entry.get("key")
+                replica_region = entry.get("replica_region") or entry.get("region")
+                if replica_key is not None and not isinstance(replica_key, str):
+                    invalid.append(str(entry))
+                    continue
+                if replica_region is not None and not isinstance(replica_region, str):
+                    invalid.append(str(entry))
+                    continue
+            else:
+                invalid.append(str(entry))
+                continue
+            if not isinstance(u, str):
+                invalid.append(str(entry))
+                continue
             u = u.strip().rstrip("/")
             if not u:
                 continue
@@ -1514,6 +1618,11 @@ def proxy(registry_key: str = ""):
             if u not in seen:
                 seen.add(u)
                 normalized.append(u)
+            if replica_key or replica_region:
+                url_metadata[u] = {
+                    "replica_key": replica_key or None,
+                    "replica_region": replica_region or None,
+                }
         if invalid:
             return 400, {
                 "error": "all endpoints must start with http:// or https://",
@@ -1529,13 +1638,14 @@ def proxy(registry_key: str = ""):
         # subsequently re-synced (via the now-fixed GET /replicas)
         # would adopt whichever URLs the last writer left -- collapsing
         # all N policies onto the same 3 backends.
-        added, removed = _sync_replicas_from_manual_urls(normalized)
+        added, removed = _sync_replicas_from_manual_urls(normalized, url_metadata=url_metadata)
         registry = await _read_registry_async()
 
         _log(f"replicas updated: +{len(added)} -{len(removed)} (total={len(replica_urls)})")
         return 200, {
             "replicas": list(replica_urls),
             "count": len(replica_urls),
+            "replica_metadata": {u: replica_url_meta.get(u, {}) for u in replica_urls},
             "registry": registry,
             "added": added,
             "removed": removed,
@@ -1574,6 +1684,9 @@ def proxy(registry_key: str = ""):
             "errors": metrics_meta["last_refresh_errors"],
             "metrics": {
                 url: {
+                    "replica_key": (replica_url_meta.get(url) or {}).get("replica_key"),
+                    "replica_region": (replica_url_meta.get(url) or {}).get("replica_region"),
+                    "proxy_region": REGION,
                     "num_running_reqs": m.num_running_reqs,
                     "num_queue_reqs": m.num_queue_reqs,
                     "num_used_tokens": m.num_used_tokens,
@@ -2777,7 +2890,10 @@ def proxy(registry_key: str = ""):
             candidate_snapshot = {}
             for u in replica_urls:
                 snap = live_metrics.get(u)
+                replica_meta = replica_url_meta.get(u) or {}
                 candidate_snapshot[u] = {
+                    "replica_key": replica_meta.get("replica_key"),
+                    "replica_region": replica_meta.get("replica_region"),
                     "latency_seconds": snap.latency if snap else None,
                     "num_running_reqs": snap.num_running_reqs if snap else None,
                     "num_queue_reqs": snap.num_queue_reqs if snap else None,
@@ -2833,6 +2949,8 @@ def proxy(registry_key: str = ""):
             "policy": configured_policy,
             "effective_policy": effective_policy,
             "target": target,
+            "target_replica_key": (replica_url_meta.get(target) or {}).get("replica_key"),
+            "target_replica_region": (replica_url_meta.get(target) or {}).get("replica_region"),
             "request_tokens": request_tokens,
             "cached_tokens_at_dispatch": cached_for_target,
             "metrics_seq_at_decision": metrics_seq_at_decision,

@@ -22,7 +22,18 @@ Theoretically, T_network and T_queue correspond with round trip time from a clie
 duration of request processing ahead of the incoming request r. However, modern inference engines supports batching requests continuously in order to minimize waiting for completion of previous request processing (Orca, sglang again?). While continous batching allows admission of a new request into the currently running batch, the batch size is still limited by the maximum number of concurrent requests. Without this knob, HBM thrashes with the KV-cache from all running requests. In a distributed system, the temporal delay of retrieving queueing metrics from an engine replica
 make cost evaluation challenging. We represent the input to T_queue as the total number of tokens
 of requests without a completion event on the client proxy. T_network is measured more trivially as the exponential weighted moving average of a ping's round trip time from client proxy to server. 
-
 $ TTFT = T_network(RTT_i) + T_queue(i, \summation over j to n_r of x_j) + T_prefill(x_r \set_difference c_i) $
 
-# GORG Routing Policy
+# GORGO Proxy Design
+The GORGO proxy routes client requests to the engine replica with the minimum calculated cost from equation [insert equation from above], parameterized by weights $W_rtt$, $W_prefill$, and $W_queue$. These parameters weight the inputs $T_network$, $T_queue$, and T_prefill, which unfairly mixes the units of time and tokens, to normalize the correlated costs of latency, prefill cost, and queueing time on TTFT. The weight of T_prefill is fixed to 1 because GORGO proxy makes routing decisions based on relative replica cost: only the ratio of weights matter in this design.
+
+$ TTFT = W_rtt * T_network(RTT_i) + W_queue * T_queue(i, \summation over j to n_r of x_j) + T_prefill(x_r \set_difference c_i) $
+
+GORGO proxy uses a simple (1+1) evolutionary strategy to tune weights $W_rtt$ and $W_queue$ on the objective function, P95 TTFT.
+Each parent weight \x_t,k is perturbed multiplicatively in log-space by a normal random variable \z_k times step size \sigma, and the new offspring weight x_k' is clamped
+to values in the hyperparameter range $[lo_k, hi_k]$ where lo_k > 0 and hi_k > 0. 
+
+$ \x_k' = clip(exp(ln(x_t,k) + \sigma_t * z_k), [lo_k, hi_k]) $
+
+When an "offspring" weight \x' beats the parent weight \x_t on the objective metric, the incumbent weight \x_t+1 is updated to \x', and \sigma is adjusted to maintain Rechenburg's 1/5 success
+rate of 1 accepted offspring for every 5 offspring. 
