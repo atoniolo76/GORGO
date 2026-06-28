@@ -4,7 +4,7 @@ Left: Vertical stacked bars showing intra-user, cross-user, and unique
       token composition per dataset.
 Right: Radar chart with 6 axes comparing dataset characteristics.
 
-The production dataset is labelled ``ArtChat-411K`` (411,169 requests). Stats
+The production dataset is labelled ``ARTChat-411k`` (411,169 requests). Stats
 JSON inputs live under ``research/data/dataset_stats/`` so this figure is
 reproducible from the rome branch without the proprietary trace.
 
@@ -25,13 +25,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 STATS_DIR = REPO_ROOT / "research" / "data" / "dataset_stats"
 
 DATASETS_CFG = [
-    ("ArtChat-411K", STATS_DIR / "artchat-411k.json"),
+    ("ARTChat-411k", STATS_DIR / "artchat-411k.json"),
     ("LMSYS-Chat-1M", STATS_DIR / "lmsys-chat-1m.json"),
     ("WildChat-4.8M", STATS_DIR / "wildchat.json"),
 ]
 
 COLORS = {
-    "ArtChat-411K": "#1b3a5c",
+    "ARTChat-411k": "#1b3a5c",
     "LMSYS-Chat-1M": "#6a9fd8",
     "WildChat-4.8M": "#a8cce8",
 }
