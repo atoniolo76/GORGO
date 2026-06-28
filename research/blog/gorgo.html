@@ -1,0 +1,1494 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GORGO: Routing LLM Requests by Jointly Pricing Cache, Load, and Network</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&display=swap">
+<style>
+/* =============================================================
+   Carbon · canonical (v1.0)
+   One substrate. Research density, with skim-friendly affordances.
+
+   Hierarchy is carried by typography, not by size jumps.
+   Single accent. Hairlines. No shadows, no radii.
+   Two widths: text body (--col) and image body (--col-wide).
+   Page-width view exists only inside the figure-expand modal.
+   ============================================================= */
+
+:root {
+  /* Perfect-Fourth scale, anchored at 17px body */
+  --t-11:  0.6875rem;   /* mono labels, captions, fig-ID */
+  --t-14:  0.875rem;    /* secondary mono, table cells */
+  --t-17:  1.0625rem;   /* body */
+  --t-21:  1.3333rem;   /* lede, TL;DR, h3 inline */
+  --t-28:  1.7777rem;   /* h2 / section title */
+  --t-37:  2.3703rem;   /* h1 / page title */
+  --t-50:  3.1604rem;   /* drop cap glyph */
+
+  --ff-sans:  "IBM Plex Sans", system-ui, sans-serif;
+  --ff-mono:  "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+  --ff-serif: "Source Serif 4", "Source Serif Pro", Georgia, serif;
+
+  --bg:      oklch(0.992 0.003 248);
+  --ink:     oklch(0.17 0.008 250);
+  --ink-2:   oklch(0.36 0.008 250);
+  --ink-3:   oklch(0.55 0.008 250);
+  --rule:    oklch(0.86 0.006 248);
+  --rule-2:  oklch(0.93 0.005 248);
+  --accent:  oklch(0.50 0.17 254);
+  --accent-tint: oklch(0.96 0.04 254 / 0.5);
+
+  --col:       720px;   /* text-body width */
+  --col-wide:  960px;   /* image-body width */
+  --col-full:  1240px;  /* used only inside fig-expand modal */
+  --col-meta:  1080px;  /* masthead, endmatter outer */
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+html, body { background: var(--bg); color: var(--ink); }
+/* Headroom so jumped-to anchors don't hug the top */
+[id^="ref-"], [id^="fn-"], [id^="fnref-"], section.sect, section.endmatter {
+  scroll-margin-top: 48px;
+}
+body {
+  font-family: var(--ff-sans);
+  font-size: var(--t-17);
+  line-height: 1.55;
+  font-feature-settings: "ss01","kern","liga";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  margin: 0;
+  padding: 0 48px 200px;
+}
+
+/* ── Top reading progress hairline ──────────────────────────── */
+.read-progress {
+  position: fixed; inset: 0 0 auto 0; height: 2px;
+  z-index: 60; pointer-events: none;
+}
+.read-progress__bar {
+  height: 100%; background: var(--accent); width: 0%;
+}
+
+/* ── Corner page markers ────────────────────────────────────── */
+.corner {
+  position: fixed; z-index: 10;
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--ink-3); pointer-events: none; line-height: 1.4;
+}
+.corner b { color: var(--ink); font-weight: 500; }
+.corner--tl { top: 20px; left: 24px; }
+.corner--tr { top: 20px; right: 24px; text-align: right; }
+.corner--br { bottom: 20px; right: 24px; text-align: right; }
+@media (max-width: 900px) { .corner { display: none; } }
+
+/* ── Side TOC ───────────────────────────────────────────────── */
+.toc {
+  position: fixed; left: 24px; top: 50%;
+  transform: translateY(-50%);
+  z-index: 40;
+  padding: 18px 22px 18px 18px;
+  display: flex; flex-direction: column; gap: 14px;
+  background: transparent;
+  transition: background-color 220ms ease, box-shadow 220ms ease;
+}
+.toc:hover, .toc:focus-within {
+  background: oklch(0.985 0.003 248 / 0.92);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 0 0 1px var(--rule-2);
+}
+.toc::before {
+  content: ""; position: absolute; inset: -30px -40px -30px -24px;
+}
+.toc__item {
+  position: relative;
+  display: grid; grid-template-columns: 32px max-content;
+  align-items: center; gap: 14px;
+  text-decoration: none; border: none; color: var(--ink-3);
+}
+.toc__tick {
+  height: 1px; width: 12px; background: var(--ink-3);
+  justify-self: start;
+  transition: width 220ms ease, background-color 220ms ease;
+}
+.toc__label {
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--ink-3); white-space: nowrap;
+  opacity: 0; transform: translateX(-6px);
+  transition: opacity 220ms ease, transform 220ms ease, color 220ms ease;
+  pointer-events: none;
+}
+.toc:hover .toc__label, .toc:focus-within .toc__label {
+  opacity: 1; transform: translateX(0);
+}
+.toc:hover .toc__tick { width: 20px; }
+.toc__item:hover .toc__label, .toc__item:focus .toc__label { color: var(--ink); }
+.toc__item[data-current="true"] .toc__tick {
+  background: var(--accent); width: 28px;
+}
+.toc__item[data-current="true"] .toc__label { color: var(--ink); }
+@media (max-width: 1100px) { .toc { display: none; } }
+
+/* ── Masthead ───────────────────────────────────────────────── */
+.masthead {
+  max-width: var(--col-meta);
+  margin: 120px auto 0;
+}
+.masthead__top {
+  display: grid;
+  grid-template-columns: max-content 1fr max-content;
+  align-items: baseline; gap: 32px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--ink);
+}
+.masthead__series {
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--ink); font-weight: 500;
+}
+.masthead__rule { border-top: 1px solid var(--rule); height: 1px; align-self: center; }
+.masthead__nav {
+  display: flex; gap: 18px;
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.14em;
+}
+.masthead__nav a {
+  color: var(--ink-3); text-decoration: none;
+  border-bottom: 1px solid transparent; padding-bottom: 2px;
+}
+.masthead__nav a:hover { color: var(--ink); border-bottom-color: var(--ink); }
+.masthead__ext {
+  display: flex; flex-direction: row;
+  align-items: center; justify-content: flex-end;
+  gap: 18px;
+  padding-top: 12px;
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.14em;
+}
+.masthead__ext a {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--ink-3); text-decoration: none;
+  border-bottom: 1px solid transparent;
+  padding-bottom: 2px;
+  transition: color 200ms ease, border-color 200ms ease;
+}
+.masthead__ext a:hover { color: var(--ink); border-bottom-color: var(--ink); }
+.masthead__ext svg { width: 12px; height: 12px; }
+
+/* ── Title block ────────────────────────────────────────────── */
+.title-block {
+  max-width: var(--col-meta);
+  margin: 28px auto 56px;
+}
+.title-block__inner { max-width: 1000px; }
+
+h1.title {
+  font-family: var(--ff-serif); font-weight: 500;
+  font-size: var(--t-37); line-height: 1.05;
+  letter-spacing: -0.012em;
+  margin: 14px 0 16px;
+  text-wrap: balance;
+}
+.subtitle {
+  font-family: var(--ff-serif); font-style: italic; font-weight: 400;
+  font-size: var(--t-21); line-height: 1.3;
+  color: var(--ink-2);
+  margin: 0 0 40px;
+  text-wrap: balance;
+  max-width: 68ch;
+}
+.byline {
+  max-width: var(--col-meta);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  column-gap: 48px; row-gap: 6px;
+  padding: 18px 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.10em;
+  color: var(--ink-3);
+}
+.byline > div { display: flex; flex-direction: column; gap: 6px; }
+.byline .value { color: var(--ink); font-weight: 500; letter-spacing: 0.06em; }
+
+/* ── Featured (hero) image ──────────────────────────────────── */
+.hero {
+  max-width: var(--col-meta);
+  margin: 56px auto 0;
+}
+.hero__slot {
+  width: 100%; height: auto; aspect-ratio: 21 / 9;
+  display: block;
+  background: repeating-linear-gradient(135deg, transparent 0 13px, var(--rule-2) 13px 14px);
+  --is-bg: transparent;
+  --is-radius: 0;
+  --is-border: none;
+  border-top: 1px solid var(--ink);
+}
+.hero__caption {
+  padding-top: 12px;
+  font-size: var(--t-14);
+  color: var(--ink-2);
+  line-height: 1.5;
+  text-wrap: pretty;
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+}
+.hero__caption .fig-id {
+  font-family: var(--ff-mono);
+  font-size: var(--t-11);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.hero__caption .credit {
+  font-family: var(--ff-mono);
+  font-size: var(--t-11);
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--ink-3);
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+.hero__caption .body {
+  flex: 1;
+  max-width: 56ch;
+}
+
+/* ── Article column ─────────────────────────────────────────── */
+.doc { max-width: var(--col); margin: 0 auto; }
+
+/* ── Lede ───────────────────────────────────────────────────── */
+.lede {
+  max-width: var(--col);
+  font-size: var(--t-21); line-height: 1.42;
+  color: var(--ink);
+  margin: 56px auto 36px;
+  text-wrap: pretty;
+}
+.lede__cap {
+  font-family: var(--ff-serif); font-weight: 600;
+  font-size: 2.6em; line-height: 0.88;
+  float: left;
+  color: var(--accent);
+  padding: 0.10em 0.12em 0 0;
+  margin-bottom: -0.02em;
+}
+
+/* ── Sections ───────────────────────────────────────────────── */
+section.sect {
+  max-width: var(--col);
+  margin: 96px auto 0;
+  position: relative;
+}
+.sect__head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 16px;
+  margin-bottom: 18px;
+  font-family: var(--ff-mono);
+  font-size: var(--t-11);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+}
+.sect__num {
+  color: var(--ink);
+  font-weight: 500;
+}
+.sect__num .accent { color: var(--accent);
+  margin-right: 6px; display: block }
+.sect__counter {
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+@media (min-width: 1240px) {
+  .sect__head { display: contents; }
+  .sect__num {
+    position: absolute;
+    left: -156px;
+    top: 0.5em;
+    width: 128px;
+    text-align: right;
+  }
+  .sect__counter {
+    position: absolute;
+    right: -156px;
+    top: 0.5em;
+    width: 128px;
+    text-align: left;
+  }
+}
+.sect__title {
+  font-family: var(--ff-serif); font-weight: 500;
+  font-size: var(--t-28); line-height: 1.12;
+  letter-spacing: -0.008em;
+  margin: 0 0 16px;
+  text-wrap: balance;
+  color: var(--ink);
+}
+.sect__tldr {
+  font-family: var(--ff-sans); font-weight: 500;
+  font-size: var(--t-17); line-height: 1.45;
+  color: var(--ink);
+  padding-left: 14px;
+  border-left: 2px solid var(--accent);
+  margin: 0 0 32px;
+  max-width: 56ch;
+  text-wrap: pretty;
+}
+.sect__tldr .lbl {
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--ink-3);
+  font-weight: 500;
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* h3 subsection */
+.sect h3 {
+  font-family: var(--ff-mono); font-weight: 500;
+  font-size: var(--t-11); line-height: 1.3;
+  text-transform: uppercase; letter-spacing: 0.16em;
+  color: var(--ink);
+  margin: 48px 0 14px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* ── Body prose ─────────────────────────────────────────────── */
+.sect p, .lede p {
+  margin: 0 0 18px;
+  text-wrap: pretty;
+  hyphens: auto;
+}
+.sect a, .lede a {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule);
+  transition: border-color 120ms;
+}
+.sect a:hover, .lede a:hover { border-bottom-color: var(--ink); }
+em { font-style: italic; }
+strong { font-weight: 600; color: var(--ink); }
+code, .mono {
+  font-family: var(--ff-mono);
+  font-size: 0.92em;
+  color: var(--ink);
+}
+
+/* ── Citations & footnotes ──────────────────────────────────── */
+.cite, .fn-ref {
+  font-family: var(--ff-mono); font-size: 0.78em;
+  vertical-align: super; line-height: 0;
+  text-decoration: none; border: none; font-weight: 500;
+  padding: 0 1px;
+}
+.cite::before, .fn-ref::before { content: "["; }
+.cite::after,  .fn-ref::after  { content: "]"; }
+.cite { color: var(--ink-2); }
+.fn-ref { color: var(--accent); }
+.cite:hover, .fn-ref:hover { color: var(--ink); }
+
+/* ── Math ───────────────────────────────────────────────────── */
+.math, .math-block { font-family: var(--ff-serif); font-style: italic; }
+.math sub, .math sup, .math-block sub, .math-block sup {
+  font-style: normal; font-family: var(--ff-serif);
+}
+
+/* ── Interactive equations ──────────────────────────────────── */
+.eq-block {
+  max-width: var(--col); margin: 36px auto;
+  padding: 8px 0;
+}
+.math-block {
+  text-align: center;
+  font-size: var(--t-28);
+  margin: 0;
+  color: var(--ink);
+}
+.math-block .eq-num {
+  float: right;
+  font-family: var(--ff-mono); font-style: normal;
+  font-size: var(--t-11);
+  color: var(--ink-3);
+  margin-top: 10px;
+  letter-spacing: 0.10em;
+}
+.eq-term {
+  cursor: pointer; padding: 1px 3px;
+  border-bottom: 1px dotted var(--rule);
+  transition: background-color 220ms ease, border-color 220ms ease, color 220ms ease;
+}
+.eq-term:hover { border-bottom-color: var(--ink); }
+.eq-term[data-active="true"] {
+  background: var(--accent-tint);
+  border-bottom: 1px solid var(--accent);
+}
+.eq-gloss {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+  display: grid; grid-template-columns: max-content 1fr;
+  gap: 20px; align-items: baseline;
+  font-size: var(--t-14); line-height: 1.55;
+  color: var(--ink-2);
+  overflow: hidden;
+  animation: glossIn 240ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes glossIn {
+  from { opacity: 0; transform: translateY(-4px); max-height: 0; padding-top: 0; margin-top: 0; }
+  to   { opacity: 1; transform: translateY(0);    max-height: 400px; padding-top: 14px; margin-top: 22px; }
+}
+.eq-gloss[hidden] { display: none; }
+.eq-gloss__id {
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--ink); font-weight: 500; white-space: nowrap;
+}
+.eq-gloss__body b { color: var(--ink); font-weight: 600; }
+.eq-hint {
+  display: block; text-align: right; margin-top: 10px;
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--ink-3);
+  transition: opacity 200ms;
+}
+
+/* ── Figures ────────────────────────────────────────────────── */
+figure {
+  margin: 56px auto;
+  max-width: var(--col-wide);
+  position: relative;
+}
+figure.figure--full { max-width: var(--col-meta); }
+
+.figure-frame {
+  padding: 0;
+  background: transparent;
+}
+.figure-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+/* Vertical figure variant — image is taller than wide; constrain width */
+figure.figure--vert {
+  max-width: 520px;
+}
+figure.figure--vert .figure-frame img {
+  max-height: 80vh;
+  object-fit: contain;
+  margin: 0 auto;
+}
+figcaption {
+  margin-top: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--t-14);
+  color: var(--ink-2);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+figcaption b { color: var(--ink); font-weight: 600; }
+
+/* Fig-ID inline at start of caption with weight contrast. */
+.fig-id {
+  font-family: var(--ff-mono);
+  font-size: var(--t-11);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink);
+  font-weight: 600;
+  margin-right: 10px;
+  white-space: nowrap;
+}
+
+/* Expand icon — floats right inside the caption, text wraps around */
+/* Expand affordance — naked icon, no box, no hover label. */
+.fig-expand {
+  float: right;
+  margin: 2px 0 6px 16px;
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: var(--ink-3);
+  cursor: pointer;
+  padding: 4px;
+  line-height: 0;
+  transition: color 200ms ease;
+}
+.fig-expand:hover { color: var(--ink); }
+.fig-expand .label { display: none; }
+.fig-expand .sr-only { display: none; }
+
+/* ── Pull-quote — quiet single line ─────────────────────────── */
+.pq {
+  max-width: var(--col); margin: 48px auto;
+  padding: 20px 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+.pq__body {
+  font-family: var(--ff-serif); font-style: italic; font-weight: 400;
+  font-size: var(--t-21); line-height: 1.35;
+  color: var(--ink);
+  text-wrap: pretty;
+  margin: 0;
+}
+.pq__cite {
+  display: block;
+  margin-top: 8px;
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--ink-3);
+}
+.pq__cite b { color: var(--ink); font-weight: 500; }
+
+/* ── Stats row (optional, body-width) ───────────────────────── */
+.stats {
+  max-width: var(--col); margin: 48px auto;
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--rule);
+}
+.stat {
+  padding: 20px 16px;
+  border-right: 1px solid var(--rule);
+}
+.stat:last-child { border-right: none; }
+.stat__n {
+  font-family: var(--ff-serif); font-weight: 500;
+  font-size: var(--t-37); line-height: 1;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.stat__n--accent { color: var(--accent); }
+.stat__n .unit {
+  font-family: var(--ff-mono); font-size: var(--t-14);
+  font-weight: 400; color: var(--ink-3);
+  margin-left: 4px;
+}
+.stat__label {
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--ink-3); font-weight: 500;
+  margin-top: 10px;
+}
+.stat__body {
+  font-size: var(--t-14);
+  color: var(--ink-2); line-height: 1.45;
+  margin-top: 6px;
+}
+@media (max-width: 720px) {
+  .stats { grid-template-columns: 1fr; }
+  .stat { border-right: none; border-bottom: 1px solid var(--rule); }
+  .stat:last-child { border-bottom: none; }
+}
+
+/* ── Tables ─────────────────────────────────────────────────── */
+.tbl-wrap { max-width: var(--col); margin: 36px auto; }
+table {
+  width: 100%; border-collapse: collapse;
+  font-size: var(--t-14);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+thead th {
+  text-align: left;
+  font-family: var(--ff-mono); font-weight: 500;
+  font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--ink-3);
+  padding: 10px 12px 8px;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+}
+tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--rule-2);
+  color: var(--ink);
+  vertical-align: top;
+}
+tbody tr:last-child td { border-bottom: 1px solid var(--rule); }
+tbody td:first-child { font-family: var(--ff-mono); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── Code block ─────────────────────────────────────────────── */
+pre {
+  max-width: var(--col); margin: 28px auto;
+  font-family: var(--ff-mono);
+  font-size: var(--t-14); line-height: 1.55;
+  color: var(--ink);
+  background: transparent;
+  padding: 16px 0;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--rule);
+  overflow-x: auto;
+  white-space: pre;
+  position: relative;
+}
+pre::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: -1px; right: 0;
+  transform: translateY(-100%);
+  padding: 4px 0 6px 8px;
+  font-family: var(--ff-mono);
+  font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.10em;
+  color: var(--ink-3);
+  background: var(--bg);
+}
+pre .kw { color: var(--ink); font-weight: 600; }
+pre .cm { color: var(--ink-3); font-style: italic; }
+pre .ac { color: var(--accent); }
+
+/* ── Endmatter ──────────────────────────────────────────────── */
+.endmatter {
+  max-width: var(--col-meta);
+  margin: 120px auto 0;
+  padding-top: 24px;
+  border-top: 1px solid var(--ink);
+  display: grid; grid-template-columns: 220px 1fr; gap: 48px;
+}
+.endmatter h2 {
+  font-family: var(--ff-mono);
+  font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--ink); font-weight: 500;
+  margin: 0;
+}
+.endmatter__meta {
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.10em;
+  color: var(--ink-3); line-height: 1.6;
+  margin-top: 12px; max-width: 200px;
+}
+.endmatter ol {
+  list-style: none; padding: 0; margin: 0;
+  columns: 2; column-gap: 48px;
+  column-rule: 1px solid var(--rule);
+}
+.endmatter li {
+  display: grid; grid-template-columns: 36px 1fr; gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule-2);
+  break-inside: avoid;
+  font-size: var(--t-14); line-height: 1.55;
+  color: var(--ink-2);
+}
+.endmatter li:first-child { padding-top: 0; }
+.endmatter li:last-child { border-bottom: none; }
+.endmatter li[data-clickable="true"] { cursor: pointer; transition: background-color 200ms ease; }
+.endmatter li[data-clickable="true"]:hover { background: var(--accent-tint); }
+.endmatter .back {
+  font-family: var(--ff-mono);
+  font-size: var(--t-11);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-3);
+  text-decoration: none;
+  border: none;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  opacity: 0;
+  transition: opacity 200ms ease, color 200ms ease;
+}
+.endmatter li:hover .back { opacity: 1; }
+.endmatter .back:hover { color: var(--ink); }
+.endmatter .back .arr { font-family: var(--ff-mono); }
+.endmatter .marker {
+  font-family: var(--ff-mono);
+  font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.10em;
+  color: var(--ink-3);
+  padding-top: 3px;
+}
+.endmatter cite { font-style: normal; color: var(--ink); }
+.endmatter .ref-title { color: var(--ink); }
+.endmatter .ref-venue { font-style: italic; color: var(--ink-2); }
+@media (max-width: 900px) {
+  .endmatter { grid-template-columns: 1fr; gap: 24px; }
+  .endmatter ol { columns: 1; }
+}
+
+/* ── Colophon ───────────────────────────────────────────────── */
+.colophon {
+  max-width: var(--col-meta);
+  margin: 96px auto 0;
+  padding: 24px 0;
+  border-top: 1px solid var(--rule);
+  display: grid; grid-template-columns: 220px 1fr 1fr;
+  gap: 48px;
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.10em;
+  color: var(--ink-3);
+}
+.colophon b { color: var(--ink); font-weight: 500; }
+.colophon__label { color: var(--ink); letter-spacing: 0.14em; }
+@media (max-width: 900px) {
+  .colophon { grid-template-columns: 1fr; gap: 16px; }
+}
+
+/* ── Figure expand modal ────────────────────────────────────── */
+.fig-modal {
+  position: fixed; inset: 0; z-index: 200;
+  background: oklch(0.985 0.003 248);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  padding: 0;
+  animation: modalIn 280ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.fig-modal[hidden] { display: none; }
+.fig-modal__body > * {
+  animation: modalFigIn 360ms 80ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes modalIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modalFigIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fig-modal, .fig-modal__body > *, .eq-gloss { animation: none; }
+}
+.fig-modal__head {
+  padding: 18px 32px;
+  border-bottom: 1px solid var(--rule);
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-family: var(--ff-mono);
+  font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--ink-3);
+}
+.fig-modal__title b { color: var(--ink); font-weight: 500; }
+.fig-modal__close {
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.fig-modal__close:hover { color: var(--accent); }
+.fig-modal__body {
+  display: flex; align-items: center; justify-content: center;
+  padding: clamp(32px, 6vh, 80px) clamp(32px, 8vw, 160px);
+  overflow: auto;
+  min-height: 0;
+}
+.fig-modal__body > * {
+  width: 100%;
+  max-width: 1400px;
+  max-height: 76vh;
+}
+.fig-modal__body svg {
+  width: 100%; height: auto;
+  max-height: 76vh;
+}
+.fig-modal__body img {
+  display: block;
+  width: 100%; height: auto;
+  max-height: 76vh;
+  object-fit: contain;
+}
+.fig-modal__body .figure-frame {
+  border: none;
+}
+.fig-modal__caption {
+  padding: 18px 32px 28px;
+  font-size: var(--t-14);
+  color: var(--ink-2);
+  line-height: 1.55;
+  max-width: 80ch;
+  margin: 0 auto;
+}
+.fig-modal__caption b { color: var(--ink); font-weight: 600; }
+
+/* ── Figure tip ─────────────────────────────────────────────── */
+.fig-tip {
+  position: fixed; pointer-events: none;
+  background: var(--ink); color: var(--bg);
+  font-family: var(--ff-mono); font-size: var(--t-11);
+  letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 6px 10px; z-index: 150;
+  white-space: nowrap;
+  opacity: 0; transition: opacity 120ms;
+  transform: translate(-50%, -130%);
+}
+.fig-tip[data-show="true"] { opacity: 1; }
+
+/* ── Fig 1.1 internals ──────────────────────────────────────── */
+.fig1-svg { display: block; width: 100%; height: auto; }
+.fig1-svg .axis     { stroke: var(--ink); stroke-width: 1; }
+.fig1-svg .gridline { stroke: var(--rule); stroke-width: 1; }
+.fig1-svg .trace    { fill: none; stroke: var(--ink); stroke-width: 1.25; }
+.fig1-svg .trace-2  { fill: none; stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 3; }
+.fig1-svg .point    { fill: var(--bg); stroke: var(--ink); stroke-width: 1; cursor: crosshair; }
+.fig1-svg .point:hover { stroke-width: 2; }
+.fig1-svg .point-accent { fill: var(--accent); stroke: var(--accent); }
+.fig1-svg text { font-family: var(--ff-mono); font-size: 13px; fill: var(--ink-3); letter-spacing: 0.04em; }
+.fig1-svg .label-strong { fill: var(--ink); }
+
+/* ── Responsive ─────────────────────────────────────────────── */
+@media (max-width: 760px) {
+  :root {
+    --t-37: 1.7rem;
+    --t-28: 1.4rem;
+    --t-21: 1.15rem;
+  }
+  body { padding: 0 20px 96px; }
+  .masthead { margin-top: 56px; }
+  .masthead__top { grid-template-columns: 1fr; gap: 12px; }
+  .masthead__rule { display: none; }
+  .masthead__ext { align-items: flex-start; padding-top: 16px; }
+  .byline { grid-template-columns: 1fr 1fr; }
+  .hero__caption { flex-direction: column; gap: 6px; }
+}
+
+  /* === Lithograph defaults (v1.0, 2026-05-14) ===
+     - sect__tldr and sect__counter are NOT emitted by default
+       (set display:none in case they sneak in from a template author who copies the sample)
+     - section-num kicker bumped from --t-11 to --t-17 for read-at-a-glance scan */
+  .sect__tldr   { display: none; }
+  .sect__counter { display: none; }
+  /* Section header hierarchy v5 (Rome 2026-05-15 — title dominates, kicker label recedes) */
+  .sect__num            { font-size: var(--t-21); color: var(--ink-3); font-weight: 400; line-height: 1.2; }
+  .sect__num .accent    { font-size: var(--t-28); display: block; line-height: 1.12; font-weight: 500; margin-bottom: 8px; }
+  .sect__title          { font-size: var(--t-37); font-weight: 600; line-height: 1.08; margin-bottom: 24px; }
+  @media (min-width: 1240px) {
+    .sect__num { top: 0.32em; width: 220px; left: -256px; }
+    .sect__title { margin-top: 0; }
+  }
+</style>
+</head>
+<body>
+
+
+<!-- Top progress bar -->
+<div class="read-progress"><div class="read-progress__bar"></div></div>
+
+
+<!-- Corner markers -->
+<div class="corner corner--tl"><b>LLM Serving</b><br>Systems &amp; Working Papers</div>
+<div class="corner corner--tr"><b>2026.06</b></div>
+<div class="corner corner--br">v0.1 · draft</div>
+
+<!-- Side TOC -->
+<nav class="toc" aria-label="Table of contents">
+  <a class="toc__item" href="#sec-1" data-section="sec-1">
+    <span class="toc__tick"></span>
+    <span class="toc__label">§ 1 · Frame</span>
+  </a>
+  <a class="toc__item" href="#sec-2" data-section="sec-2">
+    <span class="toc__tick"></span>
+    <span class="toc__label">§ 2 · Workload</span>
+  </a>
+  <a class="toc__item" href="#sec-3" data-section="sec-3">
+    <span class="toc__tick"></span>
+    <span class="toc__label">§ 3 · Method</span>
+  </a>
+  <a class="toc__item" href="#sec-4" data-section="sec-4">
+    <span class="toc__tick"></span>
+    <span class="toc__label">§ 4 · Result</span>
+  </a>
+  <a class="toc__item" href="#sec-5" data-section="sec-5">
+    <span class="toc__tick"></span>
+    <span class="toc__label">§ 5 · Twist</span>
+  </a>
+  <a class="toc__item" href="#notes" data-section="notes">
+    <span class="toc__tick"></span>
+    <span class="toc__label">Notes</span>
+  </a>
+  <a class="toc__item" href="#refs" data-section="refs">
+    <span class="toc__tick"></span>
+    <span class="toc__label">References</span>
+  </a>
+</nav>
+
+<header class="masthead">
+  <div class="masthead__top">
+    <div class="masthead__series">Systems · Working Papers</div>
+    <div class="masthead__rule" aria-hidden="true"></div>
+    <nav class="masthead__nav" aria-label="Document">
+      <a href="#sec-1">Read</a>
+      <a href="#notes">Notes</a>
+      <a href="#refs">Refs</a>
+    </nav>
+  </div>
+  <div class="masthead__ext" aria-label="External links">
+    <a href="https://anonymous.4open.science/r/GORGO-D25A" target="_blank" rel="noopener">
+      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <path d="M8 0.2C3.6 0.2 0 3.8 0 8.2c0 3.5 2.3 6.5 5.5 7.6.4.1.5-.2.5-.4v-1.4c-2.2.5-2.7-1.1-2.7-1.1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.2 1.9.9 2.4.6.1-.5.3-.9.5-1.1-1.8-.2-3.7-.9-3.7-4 0-.9.3-1.6.8-2.2-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8.6-.2 1.3-.3 2-.3.7 0 1.4.1 2 .3 1.5-1 2.2-.8 2.2-.8.4 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.2 0 3.1-1.9 3.8-3.7 4 .3.3.6.8.6 1.5v2.3c0 .2.1.5.5.4 3.2-1.1 5.5-4.1 5.5-7.6 0-4.4-3.6-8-8-8z"></path>
+      </svg>
+      Code
+    </a>
+    <a href="https://arxiv.org/" target="_blank" rel="noopener">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" aria-hidden="true">
+        <path d="M2 4 L8 12 L14 4 M5 4 L11 12"></path>
+      </svg>
+      arXiv
+    </a>
+  </div>
+</header>
+
+<section class="title-block">
+  <div class="title-block__inner">
+    <h1 class="title">GORGO: Routing LLM Requests by Jointly Pricing Cache, Load, and Network</h1>
+    <p class="subtitle">Why optimizing time-to-first-token alone quietly wrecks end-to-end latency — and how to route around it.</p>
+  </div>
+
+  <div class="byline">
+    <div><span>Author</span><span class="value">GORGO Team</span></div>
+    <div><span>Filed</span><span class="value">June 2026</span></div>
+    <div><span>Reading</span><span class="value">~9 min</span></div>
+    <div><span>Status</span><span class="value">Working draft</span></div>
+  </div>
+</section>
+
+<!-- Featured hero -->
+<figure class="hero">
+  <img class="hero__slot" src="assets/dataset_combined.png" alt="Left: token-composition bars for three chat datasets. Right: a six-axis radar chart on which ARTChat-411k dominates every routing-relevant axis." style="object-fit: cover;">
+  <figcaption class="hero__caption">
+    <span class="fig-id">Fig 1</span>
+    <span class="body">Three chat datasets on the same axes. <b>Left:</b> token composition — ARTChat-411k's reuse is overwhelmingly intra-user (multi-turn dialogue); WildChat's is cross-user boilerplate; LMSYS has almost none. <b>Right:</b> a six-axis radar in which the production trace dominates on prompt length, multi-turn density, user concentration, and intra-user prefix reuse.</span>
+    <span class="credit">GORGO Team</span>
+  </figcaption>
+</figure>
+
+<!-- Lede with drop cap -->
+<section class="lede doc">
+  <p><span class="lede__cap">I</span>n an interactive LLM chat service, the number a user actually feels is time-to-first-token. Throughput, GPU utilization, dollars per million tokens — those are the operator's problems. TTFT is the user's. And on any single replica it is a sum of exactly three things: the network round-trip to that replica, the time the request waits queued behind others, and the prefill of its own prompt.</p>
+</section>
+
+<!-- ── § 1 ─────────────────────────────────────────────────── -->
+<section class="sect" id="sec-1">
+  <header class="sect__head">
+    <span class="sect__num"><span class="accent">§ 01</span> Frame</span>
+  </header>
+  <h2 class="sect__title">The first token has three landlords</h2>
+
+  <p>Modern inference engines — SGLang<a class="cite" href="#ref-1">1</a>, vLLM<a class="cite" href="#ref-2">2</a> — expose a radix-tree prefix cache. An incoming request can skip prefill for any token prefix already resident on the replica that handles it. When prompts are long and prefixes recur, that saving dominates everything else: a 20,000-token prompt that lands on a replica holding a 90% prefix match has only about 2,000 tokens left to prefill — an order-of-magnitude cut to TTFT.</p>
+
+  <p>But the discount is entirely contingent on <em>where the request is routed</em>. Send it to a replica that has never seen the prefix and the saving is forfeit. Pile every request onto the one warm replica and it becomes a queueing bottleneck — the cache hit stops paying for itself. And the warm replica might be a region away: in our cluster, proxy-to-replica RTT ranges from 26 ms to 466 ms, an 18× spread, easily enough to swallow whatever the cache hit was supposed to save.</p>
+
+  <p>So the routing layer has to price three signals at once — cache locality, replica load, and network distance — and the standard heuristics each see exactly one. <code>least-load</code> watches the queue and ignores the cache. Prefix-aware routing<a class="cite" href="#ref-5">5</a> chases the warmest cache and ignores the queue it builds. <code>session-affinity</code> hashes a user to a fixed replica: maximal reuse, zero load escape. Each is correct about its own axis and blind to the other two. On short, low-reuse traffic that blindness is cheap. On long-context multi-turn traffic it is not.</p>
+</section>
+
+<!-- ── § 2 ─────────────────────────────────────────────────── -->
+<section class="sect" id="sec-2">
+  <header class="sect__head">
+    <span class="sect__num"><span class="accent">§ 02</span> Workload</span>
+  </header>
+  <h2 class="sect__title">The benchmark that hides the problem</h2>
+
+  <p>The public chat datasets the serving literature leans on quietly understate this regime. LMSYS-Chat-1M<a class="cite" href="#ref-3">3</a> and WildChat-4.8M<a class="cite" href="#ref-4">4</a> average roughly 470 and 2,925 input tokens per request, with intra-user prefix reuse below 10%. Most of WildChat's apparent reuse is cross-user boilerplate — shared chat templates, viral prompts — not a returning user extending a conversation. For a prefix-aware router, there is simply very little to win.</p>
+
+  <p>Our production trace tells a different story. ARTChat-411k is 411,169 chat-completion requests from 4,984 distinct users against a production GLM endpoint — about 82 requests per user. The average request carries 21,043 input tokens (45× LMSYS, 7× WildChat), and 53.7% of all tokens belong to a prefix the same user sent earlier.<a class="fn-ref" href="#fn-1" id="fnref-1">1</a> This is the regime where the joint cache / network / queue tradeoff actually decides TTFT — where landing a user on the replica that already holds their conversation saves more than half the prefill, and where getting it wrong costs whole seconds.</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Dataset</th>
+          <th class="num">Requests</th>
+          <th class="num">Users</th>
+          <th class="num">Avg input tok</th>
+          <th class="num">Intra-user reuse</th>
+          <th class="num">Global reuse</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>LMSYS-Chat-1M</td>
+          <td class="num">1,000,000</td>
+          <td class="num">—</td>
+          <td class="num">467</td>
+          <td class="num">—</td>
+          <td class="num">9.0%</td>
+        </tr>
+        <tr>
+          <td>WildChat-4.8M</td>
+          <td class="num">3,199,860</td>
+          <td class="num">1,833,730</td>
+          <td class="num">2,925</td>
+          <td class="num">5.3%</td>
+          <td class="num">34.4%</td>
+        </tr>
+        <tr>
+          <td>ARTChat-411k</td>
+          <td class="num">411,169</td>
+          <td class="num">4,984</td>
+          <td class="num">21,043</td>
+          <td class="num">53.7%</td>
+          <td class="num">55.3%</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Figure 1 (the hero above) places the three datasets on the same axes. ARTChat-411k dominates every routing-relevant dimension — prompt length, multi-turn density, user concentration, intra-user reuse. It is not a harder version of the public benchmarks; it is a different operating point, and policies tuned on the public sets are graded on a problem that barely exists there.</p>
+</section>
+
+<div class="stats">
+  <div class="stat">
+    <span class="stat__n stat__n--accent">21,043<span class="unit">tok</span></span>
+    <span class="stat__label">Avg input · ARTChat-411k</span>
+    <span class="stat__body">45× LMSYS, 7× WildChat. Prefill on an uncached prompt this long runs in seconds, not milliseconds.</span>
+  </div>
+  <div class="stat">
+    <span class="stat__n">53.7<span class="unit">%</span></span>
+    <span class="stat__label">Intra-user prefix reuse</span>
+    <span class="stat__body">Tokens already sent earlier by the same user — the cache locality a router can actually exploit.</span>
+  </div>
+  <div class="stat">
+    <span class="stat__n">18<span class="unit">×</span></span>
+    <span class="stat__label">Cross-region RTT spread</span>
+    <span class="stat__body">26 ms to the local replica, up to 466 ms across regions — enough to erase a cache hit on its own.</span>
+  </div>
+</div>
+
+<!-- ── § 3 ─────────────────────────────────────────────────── -->
+<section class="sect" id="sec-3">
+  <header class="sect__head">
+    <span class="sect__num"><span class="accent">§ 03</span> Method</span>
+  </header>
+  <h2 class="sect__title">Price the signals, then learn the prices</h2>
+
+  <p>GORGO scores every replica with a single additive cost and routes to the minimum. The three controllable terms of TTFT map directly onto three terms in the score: network round-trip, the prefill cost of the request's uncached tokens, and the decode cost of whatever is already queued on the replica. Tap any term below to unfold it.</p>
+
+  <div class="eq-block" data-eq="eq-1">
+    <div class="math-block" id="eq-1">
+      <span class="eq-term" data-eq-id="lhs">score(u, r)</span> =
+      <span class="eq-term" data-eq-id="rtt">w<sub>rtt</sub> · rtt<sub>u</sub></span> +
+      <span class="eq-term" data-eq-id="prefill">( |x<sub>r</sub>| − |x<sub>r</sub> ∩ c<sub>u</sub>| )</span> +
+      <span class="eq-term" data-eq-id="queue">w<sub>queue</sub> · queued_tokens<sub>u</sub></span>
+      <span class="eq-num">(1)</span>
+    </div>
+    <div class="eq-gloss" hidden="">
+      <span class="eq-gloss__id"></span>
+      <span class="eq-gloss__body"></span>
+    </div>
+    <span class="eq-hint">Tap any term →</span>
+  </div>
+  <script type="application/json" id="eq-1-glosses">
+  {
+    "lhs":     { "id": "score(u, r) · Replica score", "body": "The proxy routes request <b>r</b> to the replica <b>u</b> that minimizes this. There is no global tuning constant: own uncached prefill is fixed as the unit, leaving exactly two identifiable free weights, <b>w_rtt</b> and <b>w_queue</b>." },
+    "rtt":     { "id": "w_rtt · rtt_u · Network term", "body": "<b>rtt_u</b> is an EWMA of a lightweight probe to replica u, decoupled from the metrics scrape. 26 ms to the local replica, up to 466 ms across regions." },
+    "prefill": { "id": "|x_r| − |x_r ∩ c_u| · Uncached prefill", "body": "Input length minus the prefix already in u's radix cache — the tokens that must <b>actually</b> be prefilled. Fixed as the unit of the score, which removes the model's flat direction." },
+    "queue":   { "id": "w_queue · queued_tokens_u · Load term", "body": "<b>Raw</b> queued tokens, including queued cache-hit work that still burns batch slots — so a busy warm replica cannot hide behind a high hit-rate." }
+  }
+  </script>
+
+  <p>The weights are not hand-tuned. There are no operator-chosen constants and no offline profiling pass; GORGO learns them online from live TTFT feedback. Three variants set the scalars three ways. <code>gorgo-static</code> freezes them. <code>gorgo-autotune</code> re-fits the two physical rate parameters — per-token prefill and decode rates — per replica from a trailing window.<a class="fn-ref" href="#fn-2" id="fnref-2">2</a> <code>gorgo-hillclimb</code> runs a Gaussian (1+1) evolution strategy over the weights in log-space, with the negative p95 <code>TTFT</code> of the rolling 64-request window as its objective: it accepts or rejects a candidate every 16 samples and adapts its step size by Rechenberg's 1/5-success rule.</p>
+
+  <p>One subtlety keeps the search honest. The three-weight form has a flat direction — only the ratios between weights change which replica wins, so an unconstrained search wanders along the overall scale. We collapse it by pinning own uncached prefill as the unit (<code>w_prefill ≡ 1</code>), leaving the two identifiable parameters <code>w_rtt</code> and <code>w_queue</code>. And the load term deliberately uses raw <code>queued_tokens</code> rather than only the cache-miss fraction — so a replica whose queue is full of cheap-to-prefill cache hits stays visible to the router instead of disappearing behind its own hit rate.</p>
+</section>
+
+<!-- ── § 4 ─────────────────────────────────────────────────── -->
+<section class="sect" id="sec-4">
+  <header class="sect__head">
+    <span class="sect__num"><span class="accent">§ 04</span> Result</span>
+  </header>
+  <h2 class="sect__title">It wins — and not for the reason you'd expect</h2>
+
+  <p>Across three 30-minute production windows — a nighttime tuning window, a nighttime held-out window, and a heavier midday window — the GORGO family posts the lowest TTFT at both p50 and p95 against five baselines: <code>random</code>, <code>least-request</code>, <code>least-load</code>, <code>prefix-cache</code>, and <code>session-affinity</code>.<a class="fn-ref" href="#fn-3" id="fnref-3">3</a> It is <code>gorgo-hillclimb</code> during tuning, then <code>gorgo-static</code> — deploying the frozen learned weights — on both held-out windows.</p>
+
+  <p>The interesting part is that the margin <em>widens with load</em> — from about 9% on the held-out nighttime window to roughly 12–25% at midday. The evolution strategy converged on a large load weight (<code>w_load ≈ 6.38</code>, against <code>w_rtt ≈ 0.39</code>), and that learned aggression toward load avoidance is exactly what rebalances the midday traffic a hash-based <code>session-affinity</code> policy cannot move. GORGO's p95 degrades only ~27% from night to midday; <code>session-affinity</code>'s degrades 55%.</p>
+
+  <figure id="fig-result">
+    <div class="figure-frame">
+      <img src="assets/ttft_multibar.png" alt="Grouped bar chart of TTFT p95 across three windows; the gold GORGO bar is lowest in every window and its margin over the best baseline grows at midday." loading="lazy">
+    </div>
+    <figcaption>
+      <button class="fig-expand" type="button" data-fig-expand="fig-result" data-fig-title="Fig 2 · TTFT p95 across windows" aria-label="Expand figure">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="square" aria-hidden="true">
+          <path d="M2 6 V2 H6 M3 3 L7 7 M14 6 V2 H10 M13 3 L9 7 M2 10 V14 H6 M3 13 L7 9 M14 10 V14 H10 M13 13 L9 9"></path>
+        </svg>
+        <span class="label">Expand</span>
+      </button>
+      <span class="fig-id">Fig 2</span><b>TTFT p95 across the three windows.</b> GORGO (gold) is lowest in every window, and its margin over the best baseline widens from the held-out nighttime window to the heavier midday window — the learned load weight rebalancing traffic that single-signal policies cannot.
+    </figcaption>
+  </figure>
+
+  <p>Here is the result that surprised us. GORGO does not win by getting a <em>higher</em> cache-hit rate. <code>session-affinity</code> gets the highest cache-hit rate of any policy — it pins every session to one replica, so the cache could hardly be warmer — and yet it posts among the <em>worst</em> p95 latencies, because that same pinning has no way to escape the load it concentrates. GORGO keeps most of that cache locality while staying balanced: it concentrates only moderately on warm replicas and prices the queueing that prefix-only routing refuses to see.</p>
+
+  <figure id="fig-mech">
+    <div class="figure-frame">
+      <img src="assets/cache_and_concentration.png" alt="Left: scatter of cache-hit rate versus p95 TTFT, with GORGO in the ideal bottom-right and session-affinity high-cache but high-latency. Right: routing concentration bars against a uniform 33% line." loading="lazy">
+    </div>
+    <figcaption>
+      <button class="fig-expand" type="button" data-fig-expand="fig-mech" data-fig-title="Fig 3 · Cache hit vs latency, and routing concentration" aria-label="Expand figure">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="square" aria-hidden="true">
+          <path d="M2 6 V2 H6 M3 3 L7 7 M14 6 V2 H10 M13 3 L9 7 M2 10 V14 H6 M3 13 L7 9 M14 10 V14 H10 M13 13 L9 9"></path>
+        </svg>
+        <span class="label">Expand</span>
+      </button>
+      <span class="fig-id">Fig 3</span><b>Cache locality is not the bottleneck — load is.</b> <i>Left:</i> cache-hit rate vs p95 TTFT; bottom-right is ideal. GORGO sits there; <code>session-affinity</code> earns the highest hit rate but the worst p95. <i>Right:</i> routing concentration (share on the most-used replica) against the uniform 33% line. GORGO concentrates moderately on warm replicas without the pathological imbalance of hash-based pinning.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ── § 5 ─────────────────────────────────────────────────── -->
+<section class="sect" id="sec-5">
+  <header class="sect__head">
+    <span class="sect__num"><span class="accent">§ 05</span> Twist</span>
+  </header>
+  <h2 class="sect__title">TTFT is the metric that lies</h2>
+
+  <p>Push on that mechanism and a deeper, more uncomfortable result falls out: <strong>optimizing TTFT alone reward-hacks toward single-replica concentration.</strong> The reason is continuous batching. A saturated replica still admits a new request's prefill and emits its first token roughly on schedule — TTFT is largely insensitive to how loaded the replica already is. What suffers is everything <em>after</em> the first token: the decode backlog dilutes the running batch, every decode step crawls, and end-to-end latency explodes. A TTFT-only objective therefore sees no penalty for herding traffic onto the one warm replica. Great first token; wrecked <code>E2E</code>.</p>
+
+  <aside class="pq">
+    <p class="pq__body">TTFT is the one axis that doesn't price the decode backlog — so optimizing it alone optimizes for hiding the cost. E2E is the honest objective on a saturating fleet.</p>
+    <span class="pq__cite"><b>§ 5</b> · Twist</span>
+  </aside>
+
+  <p>A controlled load sweep makes it concrete. We replay the <em>same</em> window at three arrival rates — only the inter-arrival gaps change; the requests, their order, and the cache structure are fixed — and watch GORGO's standing improve monotonically as load backs off the saturation ceiling. At full load the three-replica fleet is over capacity for <em>every</em> policy, so cache-greedy concentration is merely "less bad" — with zero slack, minimizing total prefill work beats spreading it. At half load, GORGO lands within ~7% of <code>session-affinity</code> on TTFT p95 while winning E2E p95 by ~2.7× (5.6 s vs 15.5 s). At one-third load it wins every metric. The advantage scales inversely with saturation: the more headroom a fleet has — which is exactly the regime operators provision for — the more a load-aware router beats one that optimizes the first token alone.</p>
+
+  <h3>Where this goes next</h3>
+
+  <p>The whole TTFT-vs-E2E tension is, in the end, an artifact of co-locating prefill and decode on one replica — the replica that wins the first token is the same one that then has to decode the request, so concentrating prefill is precisely what dilutes decode. Prefill/decode disaggregation breaks that link. Under DistServe<a class="cite" href="#ref-6">6</a>, Splitwise<a class="cite" href="#ref-7">7</a>, or Mooncake<a class="cite" href="#ref-8">8</a>, a request prefills in one pool and decodes in another; the decode dilution that destroys E2E is decoupled from the prefill routing decision GORGO is making. The router would then score only TTFT-relevant terms — RTT, uncached prefill, and <em>prefill-pool</em> queueing — and herding prefill onto a cache-warm worker would no longer blow up decode latency. The reward hack defuses itself. We have not run a disaggregated fleet yet; it is the obvious next experiment, and the cleanest direction this line of work points.</p>
+</section>
+
+<!-- Endmatter -->
+<section class="endmatter" id="notes">
+  <div>
+    <h2>Notes</h2>
+    <p class="endmatter__meta">Three asides kept out of the body to preserve cadence.</p>
+  </div>
+  <ol>
+    <li id="fn-1">
+      <span class="marker">N · 01</span>
+      <span>Each window is pre-filtered to the model's 24,000-token effective context, and output is capped at 128 tokens, so decode never dominates the latency we attribute to routing. The arrival trace is replayed at original wall-clock speed. <a href="#fnref-1" class="cite">↩</a></span>
+    </li>
+    <li id="fn-2">
+      <span class="marker">N · 02</span>
+      <span><code>gorgo-autotune</code> is omitted from the main production tables: at high prefix-hit rates the uncached-token count approaches zero, so its median-of-rates estimator inflates the per-token prefill rate and effectively blacklists a replica for reasons unrelated to load or cache. <a href="#fnref-2" class="cite">↩</a></span>
+    </li>
+    <li id="fn-3">
+      <span class="marker">N · 03</span>
+      <span>On the nighttime windows each policy completes only ~2,100 requests, so p99 spreads among the top policies sit within one standard error; GORGO's p99 lead is decisive only under the heavier midday load. <a href="#fnref-3" class="cite">↩</a></span>
+    </li>
+  </ol>
+</section>
+
+<section class="endmatter" id="refs">
+  <div>
+    <h2>References</h2>
+    <p class="endmatter__meta">Eight anchors, ordered by first appearance.</p>
+  </div>
+  <ol>
+    <li id="ref-1">
+      <span class="marker">R · 01</span>
+      <span><cite>Zheng, L. et al.</cite> “<span class="ref-title">SGLang: Efficient Execution of Structured Language Model Programs.</span>” <span class="ref-venue">NeurIPS</span>, 2024.</span>
+    </li>
+    <li id="ref-2">
+      <span class="marker">R · 02</span>
+      <span><cite>Kwon, W. et al.</cite> “<span class="ref-title">Efficient Memory Management for LLM Serving with PagedAttention.</span>” <span class="ref-venue">SOSP</span>, 2023.</span>
+    </li>
+    <li id="ref-3">
+      <span class="marker">R · 03</span>
+      <span><cite>Zheng, L. et al.</cite> “<span class="ref-title">LMSYS-Chat-1M: A Large-Scale Real-World LLM Conversation Dataset.</span>” <span class="ref-venue">ICLR</span>, 2024.</span>
+    </li>
+    <li id="ref-4">
+      <span class="marker">R · 04</span>
+      <span><cite>Zhao, W. et al.</cite> “<span class="ref-title">WildChat: 1M ChatGPT Interaction Logs in the Wild.</span>” <span class="ref-venue">ICLR</span>, 2024.</span>
+    </li>
+    <li id="ref-5">
+      <span class="marker">R · 05</span>
+      <span><cite>Srivatsa, V. et al.</cite> “<span class="ref-title">Preble: Efficient Distributed Prompt Scheduling for LLM Serving.</span>” <span class="ref-venue">ICLR</span>, 2025.</span>
+    </li>
+    <li id="ref-6">
+      <span class="marker">R · 06</span>
+      <span><cite>Zhong, Y. et al.</cite> “<span class="ref-title">DistServe: Disaggregating Prefill and Decoding for Goodput-Optimized LLM Serving.</span>” <span class="ref-venue">OSDI</span>, 2024.</span>
+    </li>
+    <li id="ref-7">
+      <span class="marker">R · 07</span>
+      <span><cite>Patel, P. et al.</cite> “<span class="ref-title">Splitwise: Efficient Generative LLM Inference Using Phase Splitting.</span>” <span class="ref-venue">ISCA</span>, 2024.</span>
+    </li>
+    <li id="ref-8">
+      <span class="marker">R · 08</span>
+      <span><cite>Qin, R. et al.</cite> “<span class="ref-title">Mooncake: A KVCache-centric Disaggregated Architecture for LLM Serving.</span>” <span class="ref-venue">arXiv:2407.00079</span>, 2024.</span>
+    </li>
+  </ol>
+</section>
+
+<footer class="colophon">
+  <div class="colophon__label">Carbon · canonical v1.0</div>
+  <div>
+    Set in <b>IBM Plex Sans</b>, <b>IBM Plex Mono</b>, <b>Source Serif 4</b>. Type scale: Perfect Fourth (1.333), seven roles. Single accent <b>oklch(0.50 0.17 254)</b>.
+  </div>
+  <div>
+    <b>Cite as.</b> GORGO Team (2026). Routing LLM Requests by Jointly Pricing Cache, Load, and Network. <span class="mono">Systems · Working Papers</span>.
+  </div>
+</footer>
+
+<!-- Figure expand modal + tooltip -->
+<div class="fig-modal" id="fig-modal" hidden="" role="dialog" aria-modal="true">
+  <div class="fig-modal__head">
+    <span class="fig-modal__title"><b>Figure</b></span>
+    <button class="fig-modal__close" type="button">Close · Esc</button>
+  </div>
+  <div class="fig-modal__body"></div>
+  <div class="fig-modal__caption"></div>
+</div>
+<div class="fig-tip" id="fig-tip" aria-hidden="true"></div>
+
+<script>
+  // ── Interactive equations ───────────────────────────────────
+  (function() {
+    document.querySelectorAll('.eq-block').forEach(block => {
+      const eqId = block.getAttribute('data-eq');
+      const dataNode = document.getElementById(eqId + '-glosses');
+      if (!dataNode) return;
+      let glosses;
+      try { glosses = JSON.parse(dataNode.textContent); } catch (e) { return; }
+      const gloss   = block.querySelector('.eq-gloss');
+      const idEl    = gloss.querySelector('.eq-gloss__id');
+      const bodyEl  = gloss.querySelector('.eq-gloss__body');
+      const hint    = block.querySelector('.eq-hint');
+      const terms   = [...block.querySelectorAll('.eq-term')];
+      terms.forEach(t => {
+        t.setAttribute('role', 'button');
+        t.setAttribute('tabindex', '0');
+        const show = () => {
+          const id = t.dataset.eqId;
+          const isActive = t.dataset.active === 'true';
+          terms.forEach(x => x.removeAttribute('data-active'));
+          if (isActive) {
+            gloss.hidden = true;
+            if (hint) hint.style.opacity = '';
+            return;
+          }
+          t.dataset.active = 'true';
+          const g = glosses[id];
+          if (g) {
+            idEl.innerHTML = g.id || id;
+            bodyEl.innerHTML = g.body || '';
+            gloss.hidden = false;
+            if (hint) hint.style.opacity = '0';
+          }
+        };
+        t.addEventListener('click', show);
+        t.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); show(); }
+        });
+      });
+    });
+  })();
+
+  // ── Figure tooltips (points) ────────────────────────────────
+  (function() {
+    const tip = document.getElementById('fig-tip');
+    if (!tip) return;
+    const show = (e, text) => {
+      tip.innerHTML = text;
+      tip.style.left = e.clientX + 'px';
+      tip.style.top  = e.clientY + 'px';
+      tip.setAttribute('data-show', 'true');
+    };
+    const hide = () => tip.removeAttribute('data-show');
+    document.body.addEventListener('mouseover', (e) => {
+      const el = e.target.closest('[data-tip]');
+      if (!el) return;
+      show(e, el.getAttribute('data-tip'));
+    });
+    document.body.addEventListener('mousemove', (e) => {
+      if (tip.getAttribute('data-show') !== 'true') return;
+      tip.style.left = e.clientX + 'px';
+      tip.style.top  = e.clientY + 'px';
+    });
+    document.body.addEventListener('mouseout', (e) => {
+      if (e.target.closest('[data-tip]')) hide();
+    });
+  })();
+
+  // ── Figure expand modal ─────────────────────────────────────
+  (function() {
+    const modal = document.getElementById('fig-modal');
+    if (!modal) return;
+    const body  = modal.querySelector('.fig-modal__body');
+    const cap   = modal.querySelector('.fig-modal__caption');
+    const title = modal.querySelector('.fig-modal__title');
+    const close = modal.querySelector('.fig-modal__close');
+
+    const open = (figId, ttl) => {
+      const fig = document.getElementById(figId);
+      if (!fig) return;
+      const frame = fig.querySelector('.figure-frame');
+      const figCap = fig.querySelector('figcaption');
+      body.innerHTML = '';
+      if (frame) {
+        const fclone = frame.cloneNode(true);
+        // Wrap the cloned frame in a container so vertical figures stay constrained
+        if (fig.classList.contains('figure--vert')) {
+          const wrap = document.createElement('div');
+          wrap.style.maxWidth = '600px';
+          wrap.style.margin = '0 auto';
+          wrap.appendChild(fclone);
+          body.appendChild(wrap);
+        } else {
+          body.appendChild(fclone);
+        }
+      }
+      if (figCap) {
+        const tmp = figCap.cloneNode(true);
+        tmp.querySelectorAll('.fig-expand').forEach(n => n.remove());
+        cap.innerHTML = tmp.innerHTML;
+      } else {
+        cap.innerHTML = '';
+      }
+      title.innerHTML = '<b>' + (ttl || 'Figure') + '</b>';
+      modal.hidden = false;
+      document.documentElement.style.overflow = 'hidden';
+    };
+    const closeFn = () => {
+      modal.hidden = true;
+      document.documentElement.style.overflow = '';
+    };
+    document.querySelectorAll('[data-fig-expand]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        open(btn.getAttribute('data-fig-expand'), btn.getAttribute('data-fig-title'));
+      });
+    });
+    close.addEventListener('click', closeFn);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !modal.hidden) closeFn();
+    });
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeFn();
+    });
+  })();
+
+  // ── TOC scroll tracking ─────────────────────────────────────
+  (function() {
+    const items = [...document.querySelectorAll('.toc__item')];
+    const map = new Map();
+    items.forEach(a => {
+      const id = a.getAttribute('data-section');
+      const target = document.getElementById(id);
+      if (target) map.set(a, target);
+    });
+    let current = null;
+    const setCurrent = (a) => {
+      if (current === a) return;
+      if (current) current.removeAttribute('data-current');
+      current = a;
+      if (current) current.setAttribute('data-current', 'true');
+    };
+    let scheduled = false;
+    const update = () => {
+      scheduled = false;
+      const threshold = window.innerHeight * 0.28;
+      let chosen = items[0];
+      for (const a of items) {
+        const t = map.get(a);
+        if (!t) continue;
+        if (t.getBoundingClientRect().top <= threshold) chosen = a;
+      }
+      setCurrent(chosen);
+    };
+    const onScroll = () => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(update);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    update();
+  })();
+
+  // ── Endmatter back-links: scroll to first inline citation ──
+  (function() {
+    const items = document.querySelectorAll('.endmatter li[id^="ref-"], .endmatter li[id^="fn-"]');
+    items.forEach(li => {
+      const id = li.id;
+      const firstUse = document.querySelector(`.sect a[href="#${id}"], .lede a[href="#${id}"]`);
+      if (!firstUse) return;
+      // Tag the inline citation with an ID so we can scroll precisely back to it
+      if (!firstUse.id) firstUse.id = `use-${id}`;
+      const targetId = firstUse.id;
+
+      // Append the back-link affordance
+      const content = li.querySelector(':scope > span:last-child') || li;
+      const back = document.createElement('a');
+      back.className = 'back';
+      back.href = `#${targetId}`;
+      back.innerHTML = `<span class="arr">\u2191</span> First use`;
+      content.appendChild(document.createTextNode(' '));
+      content.appendChild(back);
+
+      // Make the whole row clickable (except links/buttons inside)
+      li.setAttribute('data-clickable', 'true');
+      li.addEventListener('click', (e) => {
+        if (e.target.closest('a, button')) return;
+        const t = document.getElementById(targetId);
+        if (t) t.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
+  })();
+
+  // ── Inline citation flash — when target arrives, brief highlight ──
+  (function() {
+    const flash = (el) => {
+      el.style.transition = 'background-color 800ms ease';
+      el.style.backgroundColor = 'oklch(0.94 0.08 254 / 0.7)';
+      setTimeout(() => { el.style.backgroundColor = 'transparent'; }, 900);
+    };
+    document.addEventListener('click', (e) => {
+      const a = e.target.closest('a[href^="#"]');
+      if (!a) return;
+      const id = a.getAttribute('href').slice(1);
+      const t = document.getElementById(id);
+      if (!t) return;
+      // After smooth-scroll settles, flash the target if it's a small inline anchor
+      if (t.tagName === 'A' || t.classList.contains('cite') || t.classList.contains('fn-ref') || t.id.startsWith('use-')) {
+        setTimeout(() => flash(t), 420);
+      }
+    });
+  })();
+  (function() {
+    const bar = document.querySelector('.read-progress__bar');
+    if (!bar) return;
+    let scheduled = false;
+    const update = () => {
+      scheduled = false;
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      const pct = max <= 0 ? 0 : Math.min(100, Math.max(0, (window.scrollY / max) * 100));
+      bar.style.width = pct + '%';
+    };
+    const onScroll = () => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(update);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    update();
+  })();
+</script>
+
+
+
+
+</body>
+</html>
