@@ -71,7 +71,7 @@ We benchmark GORGO on a series of user workloads from ARTChat-411k, our sensitiz
 
 \subsection{Cost Model}
 
-TTFT is known to consist of three different costs: network latency, prefill time, and queueing delay \citep{banaserve2025}. The KV-Cache, which stores key-value pairs of input sequences, removes redundant prefill computation for user sequences sharing a prefix with previously computed sequences \citep{sglang2024}. In a cross-region deployment setting, for an inference engine replica $i$ holding a set of cached token prefixes $c_i$, the cost of TTFT can be defined as the following function, where $x_r$ is the input sequence of tokens for a request $r$ and the prefill time depends only on the set difference $(x_r \setminus c_i)$, the tokens in $x_r$ not already cached on $i$:
+TTFT \rev{can be decomposed into} three different costs: network latency, prefill time, and queueing delay \citep{banaserve2025}. The KV-Cache, which stores key-value pairs of input sequences, removes redundant prefill computation for user sequences sharing a prefix with previously computed sequences \citep{sglang2024}. In a cross-region deployment setting, for an inference engine replica $i$ holding a set of cached token prefixes $c_i$, the cost of TTFT can be defined as the following function, where $x_r$ is the input sequence of tokens for a request $r$ and the prefill time depends only on the set difference $(x_r \setminus c_i)$, the tokens in $x_r$ not already cached on $i$:
 
 \begin{equation}
 \mathrm{TTFT} = T_{\texttt{network}}(i) + T_{\texttt{queue}}(i) + T_{\texttt{prefill}}(x_r \setminus c_i)
@@ -549,9 +549,10 @@ spillover layers respectively, but treat per-request routing as out of scope.
 k-LPM \citep{klpm2025} formulates LLM scheduling under TTFT constraints as
 NP-hard. DLPM \citep{dlpm2025} targets fairness with locality. Llumnix
 \citep{llumnix2024} migrates requests across replicas. Multi-LLM routers
-\citep{routerwu2025} address model selection. CacheBlend
-\citep{yao2024cacheblend} routes by trie-measured prefix length but does not
-measure network RTT. DistServe \citep{distserve2024} and Splitwise
+\citep{routerwu2025} address model selection. \rev{CacheBlend
+\citep{yao2024cacheblend} extends KV reuse beyond exact prefixes by selectively
+recomputing cache for fused non-prefix chunks, but targets single-node reuse
+rather than cross-replica routing.} DistServe \citep{distserve2024} and Splitwise
 \citep{splitwise2024} disaggregate prefill from decode. GORGO is the first
 single-router policy in this space that scores cache locality, replica load,
 and wide-area latency in one cost and derives the cost weights from the
