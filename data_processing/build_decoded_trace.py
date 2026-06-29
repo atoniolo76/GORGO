@@ -286,3 +286,231 @@ def main(
         seed=seed,
     )
     print(json.dumps(result, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# Per-file parallel decode (CPU fan-out, deterministic block-keyed generation)
+# ---------------------------------------------------------------------------
+# Each metadata shard is decoded independently. Synthetic text is a pure
+# function of the block ``hash_ids`` (prefix-cumulative, globally consistent),
+# so any two requests that share a real prefix get a character-identical
+# synthetic prefix with zero shared state -- preserving both intra-user and
+# cross-user (system-prompt) reuse across shards. One RNG seed per 256-token
+# block (not per token), so it is cheap.
+
+DEFAULT_BLOCK_SIZE = 256
+
+CANDIDATE_WORDS = [
+    "the", "of", "and", "to", "in", "is", "for", "that", "it", "as", "was",
+    "with", "be", "by", "on", "not", "he", "are", "from", "or", "his", "an",
+    "at", "but", "they", "have", "had", "her", "she", "my", "we", "all", "if",
+    "so", "no", "up", "one", "its", "out", "do", "who", "when", "been", "can",
+    "more", "will", "has", "just", "new", "than", "may", "any", "our", "now",
+    "get", "use", "how", "each",
+]
+
+
+def _build_word_pool(tok) -> list[str]:
+    """Single-token words under the given tokenizer (stable order, so the pool
+    is identical across workers -> reuse is consistent fleet-wide)."""
+    words = [w for w in CANDIDATE_WORDS if len(tok.encode(w, add_special_tokens=False)) == 1]
+    nl = tok.encode("\n", add_special_tokens=False)
+    assert len(nl) == 1, f"newline is {len(nl)} tokens, expected 1"
+    return words
+
+
+@app.function(
+    image=image,
+    memory=1024 * 8,
+    timeout=3600,
+    retries=2,
+    cpu=4.0,
+    volumes={"/data": completions_volume},
+)
+def decode_file(
+    meta_filename: str,
+    input_dir: str,
+    output_dir: str,
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    block_size: int = DEFAULT_BLOCK_SIZE,
+) -> dict:
+    """Decode ONE metadata shard into a Mooncake JSONL shard. Idempotent."""
+    import json
+    import os
+    import random
+
+    from transformers import AutoTokenizer
+
+    stem = meta_filename.replace(".jsonl", "")
+    out_path = os.path.join(output_dir, f"{stem}.jsonl")
+    os.makedirs(output_dir, exist_ok=True)
+
+    if os.path.exists(out_path):
+        n = sum(1 for line in open(out_path) if line.strip())
+        return {"meta_filename": meta_filename, "skipped": True, "requests": n}
+
+    tok = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION, trust_remote_code=False)
+    words = _build_word_pool(tok)
+
+    in_path = os.path.join(input_dir, meta_filename)
+    tmp_path = out_path + ".tmp"
+    count = 0
+
+    with open(in_path) as fin, open(tmp_path, "w") as fout:
+        for idx, line in enumerate(fin):
+            if not line.strip():
+                continue
+            e = json.loads(line)
+            hash_ids = e["hash_ids"]
+            input_length = e["input_length"]
+            messages_meta = e["messages"]
+            n_blocks = len(hash_ids)
+
+            # Build the flat per-token string list, one RNG seed per block.
+            flat: list[str] = []
+            for bi, digest in enumerate(hash_ids):
+                blk = block_size if bi < n_blocks - 1 else input_length - block_size * (n_blocks - 1)
+                if blk <= 0:
+                    continue
+                rng_b = random.Random(int(digest, 16))
+                n_words = (blk + 1) // 2  # even local positions are words
+                chosen = rng_b.choices(words, k=n_words)
+                blk_list = ["\n"] * blk
+                blk_list[0::2] = chosen
+                flat.extend(blk_list)
+
+            # Split the flat token strings back into per-message content.
+            synthetic_messages: list[dict] = []
+            off = 0
+            for m in messages_meta:
+                n = m["tokens"]
+                synthetic_messages.append(
+                    {"role": m["role"], "content": "".join(flat[off : off + n])}
+                )
+                off += n
+
+            output_length = e.get("output_length") or 0
+            if not (0 < output_length <= max_output_tokens):
+                seed = int(hash_ids[0][:8], 16) if hash_ids else 0
+                output_length = 16 + (seed % (max_output_tokens - 15))
+
+            row = {
+                "abs_timestamp_ms": e["abs_timestamp_ms"],
+                "input_length": input_length,
+                "output_length": output_length,
+                "unique_input_tokens": input_length,
+                "hash_ids": hash_ids,
+                "request": {
+                    "model": "",
+                    "messages": synthetic_messages,
+                    "max_tokens": max_output_tokens,
+                    "stream": True,
+                },
+                "response": None,
+                "request_id": f"decoded_{stem}_{idx:06d}",
+                "token_hash": e.get("token_hash", ""),
+                "system_prompt_hash": e.get("system_prompt_hash"),
+            }
+            fout.write(json.dumps(row, ensure_ascii=False) + "\n")
+            count += 1
+
+    os.replace(tmp_path, out_path)
+    completions_volume.commit()
+    return {"meta_filename": meta_filename, "skipped": False, "requests": count}
+
+
+@app.function(image=image, timeout=14400, volumes={"/data": completions_volume})
+def decode_week(
+    input_dir: str = "/data/mooncake_traces/metadata_week",
+    output_dir: str = "/data/mooncake_traces/decoded_week",
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    limit: int = 0,
+) -> dict:
+    """Fan ``decode_file`` over every metadata shard."""
+    import os
+    import time
+
+    files = sorted(f for f in os.listdir(input_dir) if f.endswith(".jsonl"))
+    if limit:
+        files = files[:limit]
+    print(f"[decode_week] {len(files)} shards -> {output_dir}")
+
+    args = [(f, input_dir, output_dir, max_output_tokens) for f in files]
+    t0 = time.time()
+    total = 0
+    skipped = 0
+    for i, r in enumerate(decode_file.starmap(args), start=1):
+        total += r.get("requests", 0)
+        if r.get("skipped"):
+            skipped += 1
+        if i % 20 == 0 or i == len(files):
+            print(
+                f"  {i}/{len(files)} | {total:,} requests | {skipped} cached | "
+                f"{time.time() - t0:.0f}s",
+                flush=True,
+            )
+    completions_volume.commit()
+    return {
+        "output_dir": output_dir,
+        "shards": len(files),
+        "requests": total,
+        "skipped_files": skipped,
+        "elapsed_seconds": time.time() - t0,
+    }
+
+
+@app.local_entrypoint()
+def week_decode(
+    input_dir: str = "/data/mooncake_traces/metadata_week",
+    output_dir: str = "/data/mooncake_traces/decoded_week",
+    limit: int = 0,
+):
+    print(json.dumps(decode_week.remote(input_dir=input_dir, output_dir=output_dir, limit=limit), indent=2))
+
+
+@app.function(image=image, memory=1024 * 8, timeout=1800, volumes={"/data": completions_volume})
+def validate_qwen(
+    decoded_dir: str = "/data/mooncake_traces/decoded_week",
+    n_per_shard: int = 200,
+    n_shards: int = 4,
+) -> dict:
+    """Re-tokenize decoded message content under the real Qwen tokenizer and
+    assert it reproduces ``input_length`` exactly. Also re-checks reuse."""
+    import json
+    import os
+
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION, trust_remote_code=False)
+    shards = sorted(f for f in os.listdir(decoded_dir) if f.endswith(".jsonl"))[:n_shards]
+    checked = 0
+    mismatches = 0
+    worst = 0
+    for shard in shards:
+        with open(os.path.join(decoded_dir, shard)) as f:
+            for i, line in enumerate(f):
+                if i >= n_per_shard:
+                    break
+                if not line.strip():
+                    continue
+                e = json.loads(line)
+                got = sum(
+                    len(tok.encode(m["content"], add_special_tokens=False))
+                    for m in e["request"]["messages"]
+                )
+                checked += 1
+                if got != e["input_length"]:
+                    mismatches += 1
+                    worst = max(worst, abs(got - e["input_length"]))
+    return {
+        "shards": len(shards),
+        "checked": checked,
+        "exact_match": checked - mismatches,
+        "mismatches": mismatches,
+        "worst_abs_diff": worst,
+    }
+
+
+@app.local_entrypoint()
+def validate():
+    print(json.dumps(validate_qwen.remote(), indent=2))
