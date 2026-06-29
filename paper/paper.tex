@@ -1,7 +1,8 @@
 \documentclass{article}
 
-\usepackage[final,main]{neurips_2026}
-% \usepackage[main]{neurips_2026}
+\usepackage[preprint]{neurips_2026}
+% \usepackage[final,main]{neurips_2026}  % camera-ready: "40th Conference on NeurIPS 2026."
+% \usepackage[main]{neurips_2026}        % anonymous submission
 
 \usepackage[utf8]{inputenc}
 \usepackage{natbib}
@@ -19,6 +20,9 @@
 \usepackage{placeins}
 \graphicspath{{figures/}}
 
+% Toggle the NeurIPS Paper Checklist: set to \showchecklisttrue to include it.
+\newif\ifshowchecklist\showchecklistfalse
+
 \title{GORGO: Online Tuning for Cross-Region Network-Aware LLM Serving}
 
 \author{
@@ -27,12 +31,12 @@
   \texttt{atoniolo@andrew.cmu.edu} \\
   \And
   Rome Thorstenson \\
-  Yale University \\
-  \texttt{rome.thorstenson@aya.yale.edu} \\
+  ART \\
+  \texttt{rome@arcadiaresearch.team} \\
   \And
   Abinaya Dinesh \\
-  UC Berkeley \\
-  \texttt{adinesh@berkeley.edu} \\
+  ART \\
+  \texttt{abinaya@arcadiaresearch.team} \\
 }
 
 \begin{document}
@@ -418,6 +422,7 @@ calibration window before each redeploy is not affordable, making it effective i
 \bibliographystyle{plainnat}
 \bibliography{references}
 
+\ifshowchecklist
 \newpage
 
 \section*{NeurIPS Paper Checklist}
@@ -505,6 +510,7 @@ Answer: \answerNA{}\\
 Justification: LLM serving infrastructure is the object of study. Authors used LLMs for routine writing assistance only.
 
 \end{enumerate}
+\fi
 
 \newpage
 
@@ -532,18 +538,11 @@ Justification: LLM serving infrastructure is the object of study. Authors used L
 \section{Evaluation Window Characteristics}
 \label{app:windows}
 
-Table~\ref{tab:windows} characterizes the three decoded replay windows used in
-\S\ref{sec:setup} and Table~\ref{tab:results}.
-
 \begin{table}[h]
 \centering
 \small
-\caption{Workload characteristics of the three decoded replay windows in
-  Table~\ref{tab:results}. Users, requests-per-user, token lengths, and block
-  reuse are measured on the decoded replay files actually benchmarked; block
-  reuse is token-weighted 256-token global / intra-user prefix reuse. Turn
-  structure ($\dagger$) is measured on the source window metadata and is
-  preserved by the synthetic decode. Token counts use tiktoken gpt-4o.}
+\caption{Workload characteristics of the three tuning and held-out windows in
+  Table~\ref{tab:results}.}
 \label{tab:windows}
 \begin{tabular}{lrrr}
 \toprule
@@ -564,30 +563,14 @@ Block intra-user reuse       & 78.5\%   & 77.1\%   & 87.4\%   \\
 \end{tabular}
 \end{table}
 
-\section{Apr~7 at \texttt{time\_scale}${=}2.0$ (saturation reference)}
+\section{Apr~7 at \texttt{time\_scale}${=}2.0$}
 \label{app:apr7_ts2}
-
-The main held-out evaluation replays Apr~7 at \texttt{time\_scale}${=}3.0$
-because at \texttt{time\_scale}${=}2.0$ the concentrating and cache-blind
-baselines are past their saturation knee. Table~\ref{tab:apr7_ts2} reports the
-full 5-policy run at \texttt{time\_scale}${=}2.0$ ($n{=}8{,}663$ per policy).
-\texttt{simple-session-affinity} posts the best TTFT at every percentile, yet its
-E2E p95 is 14.66\,s versus GORGO's 7.10\,s, and \texttt{prefix-cache} melts
-(E2E p95 22.14\,s, client scheduling-slip p95 $\sim$181\,s): continuous batching
-admits the first token on schedule even on a saturated replica, so TTFT looks
-healthy while E2E exposes the overload. GORGO holds the lowest E2E at this load
-but trails on TTFT---a saturation artifact, not a routing deficit---which is why
-the clean within-capacity comparison in Table~\ref{tab:results} uses
-\texttt{time\_scale}${=}3.0$.
 
 \begin{table}[h]
 \centering
 \small
 \setlength{\tabcolsep}{2.7pt}
-\caption{Apr~7 19:45--20:15 held-out window at \texttt{time\_scale}${=}2.0$
-  (5 policies, $n{=}8{,}663$ each). ITL is the median inter-token latency. Bold is
-  best in column. TTFT looks best for the concentrating baselines while E2E
-  reveals their saturation.}
+\caption{Apr~7 19:45--20:15 held-out window at \texttt{time\_scale}${=}2.0$}
 \label{tab:apr7_ts2}
 \begin{tabular}{lrrrrrrr}
 \toprule
@@ -602,117 +585,59 @@ prefix-cache            & 1{,}474      & 8{,}243          & 12{,}167         & 7
 \end{tabular}
 \end{table}
 
-\section{WildChat replay (regime-sensitivity control)}
+\section{WildChat replay}
 \label{app:wildchat}
-
-We replay a 30-minute window of WildChat-4.8M \citep{wildchat2024} on the
-same 2$\times$L40S three-region fleet, with the same seven policies as the
-ART-Chat-2.5M sweeps (five baselines plus \texttt{gorgo (online)} and
-\texttt{gorgo (fixed)}). WildChat averages 2{,}925 input tokens per request and
-4.7\% intra-user prefix reuse---an order of magnitude shorter than ART-Chat-2.5M
-and a small fraction of the reuse---putting it well outside the regime
-characterized in \S\ref{sec:characterization}.
 
 \begin{table}[h]
 \centering
 \small
-\caption{WildChat-4.8M replay: 30-minute window, $c{=}32$. TTFT in seconds.
-  Bold is best in column. Compared to the ART-Chat-2.5M results, GORGO variants
-  are not competitive: \texttt{gorgo (fixed)} is the slowest policy on p95.}
+\caption{WildChat-4.8M replay. We evaluate the same baseline policies with GORGO on a 30-minute window where $c{=}32$. TTFT latencies are in seconds.
+}
 \label{tab:wildchat}
-\begin{tabular}{lrrrrrr}
+\begin{tabular}{lrrrrr}
 \toprule
-Policy & Completed & p50 & p95 & p99 & max & Succ.\% \\
+Policy & Completed & TTFT p50 & TTFT p95 & TTFT p99 & TTFT max \\
 \midrule
-\textbf{simple-session-affinity} & 20{,}447 & 0.416 & \textbf{1.025} & \textbf{1.712} & 7.75    & 99.6 \\
-least-request                    & 20{,}517 & 0.480 & 1.036          & 1.731          & 110.45  & 100.0 \\
-random                           & 20{,}436 & \textbf{0.416} & 1.077 & 1.796          & 15.82   & 99.6 \\
-prefix-cache                     & 20{,}504 & 0.497 & 1.186          & 2.588          & 10.63   & 99.9 \\
-least-load                       & 20{,}484 & 0.532 & 1.217          & 2.535          & 8.28    & 99.8 \\
-gorgo (online)                   & 20{,}473 & 0.541 & 1.325          & 2.654          & 7.05    & 99.8 \\
-gorgo (fixed)                    & 20{,}462 & 0.709 & 1.932          & 3.969          & 60.18   & 99.7 \\
+\textbf{simple-session-affinity} & 20{,}447 & 0.416 & \textbf{1.025} & \textbf{1.712} & 7.75    \\
+least-request                    & 20{,}517 & 0.480 & 1.036          & 1.731          & 110.45  \\
+random                           & 20{,}436 & \textbf{0.416} & 1.077 & 1.796          & 15.82   \\
+prefix-cache                     & 20{,}504 & 0.497 & 1.186          & 2.588          & 10.63   \\
+least-load                       & 20{,}484 & 0.532 & 1.217          & 2.535          & 8.28    \\
+gorgo (online)                   & 20{,}473 & 0.541 & 1.325          & 2.654          & 7.05    \\
+gorgo (fixed)                    & 20{,}462 & 0.709 & 1.932          & 3.969          & 60.18   \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\begin{figure}[h]
-\centering
-\includegraphics[width=\linewidth]{ttft_bars_wildchat.png}
-\caption{WildChat-4.8M replay, per-percentile TTFT (p50/p95/p99) across
-  the seven policies. GORGO variants (dark blues) are not competitive:
-  \texttt{gorgo (fixed)} is the slowest policy at the tail, and
-  \texttt{gorgo (online)} sits mid-pack. The ranking inverts the
-  ART-Chat-2.5M result, consistent with the regime argument in
-  \S\ref{sec:characterization}.}
-\label{fig:ttft_bars_wildchat}
-\end{figure}
-
-The ranking is reversed: \texttt{simple-session-affinity} wins p95 and
-p99 by a large margin, \texttt{least-request} is competitive,
-\texttt{gorgo (online)} sits mid-pack, and \texttt{gorgo (fixed)} is the
-slowest policy. Two mechanisms drive this. First, the prefill term in
-Equation~\ref{eq:score} is small at 2{,}925 tokens; the cost-model weights
-are mostly fitting noise. Second, intra-user reuse is 4.7\% rather than
-89\%; even a perfect cache-routing decision saves only a few hundred tokens
-per request, well inside the cross-region RTT band, so chasing cache
-locality is counterproductive when paired with a cross-region routing
-penalty. The \texttt{gorgo (fixed)} weights frozen from an ART-Chat-2.5M W1
-are particularly mis-calibrated to this regime---a reminder that the
-cost-model parameters do not transfer across workload classes.
-
-We include this result as a regime-sensitivity control, not as a
-contribution. The takeaway is the same one stated in \S\ref{sec:characterization}:
-the gain from joint cache--network--queue routing depends on the workload
-having long prompts and substantial intra-user prefix reuse. Public chat
-datasets do not exercise this regime.
-
-\section{GORGO Achieves Convergence of Cache Reuse}
-\label{app:convergence}
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=0.75\linewidth]{cache_convergence.png}
-\caption{Achieved prefix hit rate over the W1 tuning window: the fraction
-  of each request's input tokens that were already cached on the replica
-  the policy routed to (not the total cache available across all replicas).
-  A higher rate means the routing decision exploited more of the available
-  cache. Bold lines are EWMA-smoothed ($\alpha{=}0.06$); faint lines are
-  64-request rolling averages. \texttt{gorgo-hillclimb} converges from
-  $\sim$45\% to $\sim$95\% within the first 5 minutes as the ES learns
-  to route requests to their best-cached replica.}
-\label{fig:cache_convergence}
-\end{figure}
-
-\section{Load-Weight Ablation: Single-Replica Concentration}
+\section{Load Weight Adaptation}
 \label{app:load_ablation}
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
-\footnotesize
-\setlength{\tabcolsep}{4pt}
-\caption{Midday diurnal evaluation (apr2 12:30--13:00, $n{=}3{,}071$ per
-  policy). The reward-hacked \texttt{gorgo-static} ($w_{\mathrm{load}}{=}0$,
-  tuned on p95 TTFT) wins every TTFT percentile yet is worst on the E2E and
-  ITL tails: it concentrates $\sim$100\% of traffic on one replica, which
-  saturates under load. Bold marks the best (lowest) value per column.}
+\small
+\caption{Reward hacking on the Apr~2 12:30--13:00 window. With $w_{\mathrm{queue}}{=}0$, the
+tuned \texttt{gorgo-static} wins every TTFT percentile but is worst on the E2E and ITL tails,
+because it routes $\sim$100\% of traffic to a single replica that saturates under load. Bold
+marks the best value per column; ITL is the median.}
 \label{tab:load_ablation}
-\begin{tabular}{l ccc ccc ccc}
+\setlength{\tabcolsep}{2.7pt}
+\begin{tabular}{lrrrrrrr}
 \toprule
- & \multicolumn{3}{c}{TTFT (ms)} & \multicolumn{3}{c}{E2E (s)} & \multicolumn{3}{c}{ITL (ms)} \\
-\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}
-Policy & p50 & p95 & p99 & p50 & p95 & p99 & p50 & p95 & p99 \\
+Policy & TTFT P50 (ms) & TTFT P95 & TTFT P99 & E2E P50 (s) & E2E P95 & E2E P99 & ITL (ms) \\
 \midrule
-\texttt{gorgo-static} (hacked)   & \textbf{180} & \textbf{1072} & \textbf{1810} & 2.05 & 12.49 & 16.63 & 14.1 & 94.2 & 125.7 \\
-\texttt{least-request}           & 274 & 1285 & 1902 & \textbf{1.37} & \textbf{2.61} & \textbf{3.34} & 8.6 & \textbf{13.6} & \textbf{19.4} \\
-\texttt{random}                  & 283 & 1456 & 2124 & 1.40 & 2.92 & 4.24 & \textbf{8.5} & 15.0 & 21.9 \\
-\texttt{prefix-cache}            & 288 & 1468 & 2374 & 1.56 & 3.59 & 7.12 & 9.4 & 19.3 & 56.3 \\
-\texttt{least-load}              & 278 & 1669 & 2665 & 1.69 & 3.89 & 8.94 & 10.1 & 20.9 & 70.0 \\
-\texttt{simple-session-affinity} & 268 & 1715 & 2947 & 1.74 & 3.88 & 5.90 & 10.8 & 20.0 & 27.8 \\
+\multicolumn{8}{l}{\textit{Held-out eval --- Apr~2 12:30--13:00 (time\_scale${=}1.0$, 3{,}071 requests)}} \\
+\midrule
+gorgo-static (hacked)            & \textbf{180} & \textbf{1{,}072} & \textbf{1{,}810} & 2.05          & 12.49         & 16.63         & 14.1 \\
+simple-session-affinity          & 268          & 1{,}715          & 2{,}947          & 1.74          & 3.88          & 5.90          & 10.8 \\
+least-load                       & 278          & 1{,}669          & 2{,}665          & 1.69          & 3.89          & 8.94          & 10.1 \\
+least-request                    & 274          & 1{,}285          & 1{,}902          & \textbf{1.37} & \textbf{2.61} & \textbf{3.34} & 8.6 \\
+random                           & 283          & 1{,}456          & 2{,}124          & 1.40          & 2.92          & 4.24          & \textbf{8.5} \\
+prefix-cache                     & 288          & 1{,}468          & 2{,}374          & 1.56          & 3.59          & 7.12          & 9.4 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\begin{figure}[h]
+\begin{figure}[th]
 \centering
 \includegraphics[width=\linewidth]{load_weight_ablation.png}
 \caption{\textit{Left}: TTFT p95 (dark) vs.\ E2E p95 (light) on the midday
