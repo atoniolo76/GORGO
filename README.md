@@ -1,7 +1,7 @@
 # GORGO
 
 ## Goal
-Decrease TTFT from standard methods for LLM load balanacing (least-load, consistent-hasing, vtc-basic) by >2X using GORGO + tuning.
+Decrease TTFT from standard methods for LLM load balanacing (least-load, consistent-hasing, vtc-basic) by >2× using GORGO + tuning.
 
 ## Getting Started
 

@@ -50,3 +50,28 @@ $ \x_k' = clip(exp(ln(x_t,k) + \sigma_t * z_k), [lo_k, hi_k]) $
 When \x' beats the parent weight \x_t on the objective metric, the incumbent weight \x_t+1 is updated to \x', and \sigma is adjusted to maintain Rechenburg's 1/5 success
 rate of 1 accepted offspring for every 5 offspring. 
 
+# Dataset
+Existing LLM chatbot datasets lack two critical components for benchmarking cache-aware policies: (i) prefill-bound requests with long-context prompts and (ii) multi-turn workloads with high prefix-reuse between requests. For example, we measure the average request length and global prefix reuse of LMSYS-Chat-1M and WildChat-4.8M, two popular LLM datasets derived from public chatbot demos [link to figure/table]. WildChat-4.8M contains hashed IPs per request, allowing categorization of cross-user and intra-user reuse while LMSYS-Chat-1M lacks user identification. Additional results from benchmarking GORGO on WildChat-4.8M can be found in [link to appendix]. Cache-aware policies provide no measurable gains over simple baseline policies like random when routing requests with a length of <3,000 tokens.
+
+ART-Chat-2.5M is a long-context, multi-turn dataset synthetically generated from a week-long metadata trace of production inference traffic with the same prefix-reuse structure as the original workload. We release a replay-ready trace in the Mooncake FAST'25 format, which contains per-request timestamps, request metadata, and synthetically generated chat completion data [cite mooncake paper]. By stored request timestamps, one can linearly scale the time between requests to control replica load.
+
+# Experimental Setup
+## Baseline Policies
+We benchmark the GORGO policy and compare performance of both online and static modes to the below baselines. All SGLang metrics are scraped every 30 seconds from the engine's prometheus endpoint `/metrics`.
+
+1. least-load minimizes the sum of proxy-tracked queued requests with SGLang metrics `num_running_reqs`, `num_queue_reqs`, and `num_used_tokens`. Queued requests to the proxy are defined as recently dispatched requests without a token response and `num_used_tokens` are the currently occupied per-token KV slots.
+2. least-request chooses the replica with the fewest in-flight requests from the proxy.
+3. prefix-cache matches the request's prefix to the replica with the highest prefix-cache overlap, tracked on the proxy-side by a prefix trie of dispatched requests [cite aibrix].
+4. simple-session affinity hashes the first 256 token from a request and routes to the replica with that prefix hash.
+
+## Proxy and Engine Configuration
+Each policy runs the GORGO proxy on a small CPU worker in us-ashburn and controls a dedicated SGLang inference engine in each the following regions: us-ashburn, eu-frankfurt, and ap-seoul. The engines contain two L40S GPUs each and serve the Qwen3.5-35B-A3B model in FP8 format [link qwen3.5 paper citation]. All policies are benchmarked on the same workload in parallel to rule out any variance in network conditions. The round trip time between the us-ashburn proxy and engines during the tuning window is plotted in [insert ref to timeseries figure]. Due to the Qwen model's limited context length of 32,768 tokens, we filter out any requests that contain >24,000 tokens to leave adequate KV headroom. In SGLang, we set `max_concurrent_requests` to 64 and `max_output_tokens` to 128 to limit unnecessary decode while simulating adequate load on the replica. All workloads run alongside the proxy, dispatching requests to a local chat completion endpoint.
+
+## Tuning and Evaluation Windows
+We pick three 30 minute windows with high-user diversity from the ART-Chat-2.5M trace: Apr 5th 16:15–16:45, Apr 6 15:05–15:35, and Apr 7 19:45–20:15. Statistics on each of these windows is found in [link table with the winow stats]. We assign Apr 5th as the window where we tune GORGO's weights online to minimize the P95 TTFT of a rolling 128 request window with hop size 32. $W_rtt$ and $W_queue$ are each initialized to 0.5 and 0.1 and restricted to ranges [0.05, 2.0] and [0.05, 0.5]. These values are hand-picked from the paradigm of continuous batching in SGLang, where incoming requests can be scheduled into the current batch, affecting TTFT less significantly than a fixed floor of network latency between regions. The Apr 6-7 windows fix weight values GORGO learned on the Apr 5 tuning window. Due to the greater number of requests in Apr 6-7, we linearly scale the time between requests to control replica saturation [link characteristics table of these dinwos].
+
+# Results
+Table X reports TTFT, E2E latency, and inter-token latency (ITL) for policies in all three windows. While the GORGO policy's weights are updated to minimize P95 TTFT during tuning, the held-out, fixed weight evaluation shows generalization of learned values across days with GORGO improving P95 TTFT by X% and E2E latency by Y% over the next-best policy, sesssion-affinity. GORGO slightly underperforms baseline policies on the tuning window because the evolutionary strategy actively explores the space of parameters and tests worse weights than the learned solution, which converges after X samples [link to the hyperparameter convergence window]
+
+## Related work: 
+Prefix-cache aware policies

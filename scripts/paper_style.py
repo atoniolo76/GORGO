@@ -42,8 +42,10 @@ GORGO_POLICIES = {
 }
 
 POLICY_DISPLAY = {
-    "gorgo-hillclimb-p95": "gorgo-hillclimb",
-    "gorgo-static-p95": "gorgo-static",
+    "gorgo-hillclimb": "gorgo (online)",
+    "gorgo-hillclimb-p95": "gorgo (online)",
+    "gorgo-static": "gorgo (fixed)",
+    "gorgo-static-p95": "gorgo (fixed)",
     "simple-session-affinity": "simple-session-affinity",
     "least-request": "least-request",
     "least-load": "least-load",
