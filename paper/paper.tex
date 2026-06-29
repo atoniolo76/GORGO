@@ -412,9 +412,7 @@ higher-dimensional cost model could shift the result. Fourth, because the online
 tuner optimizes p95 TTFT, it can exploit continuous batching by concentrating
 load on the nearest replica, trading E2E and ITL tails for TTFT
 (\S\ref{sec:results:hacking}); the queue term mitigates but does not eliminate
-this. Finally, we do not consider prefill/decode disaggregation, and the
-$(1{+}1)$-ES requires a clean, under-saturated tuning window to converge, which a
-deployment must locate via a timescale sweep before tuning.
+this. Finally, we do not consider prefill/decode disaggregation.
 
 % -----------------------------------------------------------------------
 \section{Conclusion}
@@ -456,7 +454,7 @@ Justification: The abstract claims (i) public datasets underrepresent long-conte
 \item {\bf Limitations}\\
 Question: Does the paper discuss the limitations of the work?\\
 Answer: \answerYes{}\\
-Justification: Section~\ref{sec:limitations} discusses single-trace generalization, hardware and fleet homogeneity, the single-tenant assumption, the saturation of the queue-weight search range, the continuous-batching TTFT/E2E trade-off, the absence of prefill/decode disaggregation, and the ES's need for an under-saturated tuning window.
+Justification: Section~\ref{sec:limitations} discusses single-trace generalization, hardware and fleet homogeneity, the single-tenant assumption, the saturation of the queue-weight search range, the continuous-batching TTFT/E2E trade-off, and the absence of prefill/decode disaggregation.
 
 \item {\bf Theory assumptions and proofs}\\
 Question: For each theoretical result, does the paper provide the full set of assumptions and a complete proof?\\
