@@ -404,11 +404,7 @@ convergence in our 2-dimensional weight space.
 Several constraints bound our conclusions. First, the evaluation rests on a
 single production trace and a homogeneous fleet (three regions, two L40S GPUs
 per replica); generalization to other workloads, hardware mixes, and replica
-counts is untested. Second, GORGO assumes a single tenant per fleet and does not
-model fair sharing across competing clients. Third, the learned queue weight
-$w_{\mathrm{queue}}$ saturates the upper end of its search range $[0.05, 0.5]$,
-so the tuned optimum may lie outside the swept box; a wider range or a
-higher-dimensional cost model could shift the result. Fourth, because the online
+counts is untested. Second, because the online
 tuner optimizes p95 TTFT, it can exploit continuous batching by concentrating
 load on the nearest replica, trading E2E and ITL tails for TTFT
 (\S\ref{sec:results:hacking}); the queue term mitigates but does not eliminate
@@ -454,7 +450,7 @@ Justification: The abstract claims (i) public datasets underrepresent long-conte
 \item {\bf Limitations}\\
 Question: Does the paper discuss the limitations of the work?\\
 Answer: \answerYes{}\\
-Justification: Section~\ref{sec:limitations} discusses single-trace generalization, hardware and fleet homogeneity, the single-tenant assumption, the saturation of the queue-weight search range, the continuous-batching TTFT/E2E trade-off, and the absence of prefill/decode disaggregation.
+Justification: Section~\ref{sec:limitations} discusses single-trace generalization, hardware and fleet homogeneity, the continuous-batching TTFT/E2E trade-off, and the absence of prefill/decode disaggregation.
 
 \item {\bf Theory assumptions and proofs}\\
 Question: For each theoretical result, does the paper provide the full set of assumptions and a complete proof?\\
