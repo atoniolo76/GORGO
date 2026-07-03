@@ -12,19 +12,19 @@ Usage::
     # Extract metadata + generate synthetic trace for W1 window:
     modal run --env=alessio-dev data_processing/build_synthetic_trace.py::main \\
         --start-time 2026-04-02T00:30:00 --end-time 2026-04-02T01:00:00 \\
-        --output-path /data/mooncake_traces/synthetic/glm5_synthetic_apr2_0030_to_0100.jsonl \\
+        --output-path /data/mooncake_traces/synthetic/prod_synthetic_apr2_0030_to_0100.jsonl \\
         --max-input-tokens 24000
 
     # W2a nighttime:
     modal run --env=alessio-dev data_processing/build_synthetic_trace.py::main \\
         --start-time 2026-04-02T01:00:00 --end-time 2026-04-02T01:30:00 \\
-        --output-path /data/mooncake_traces/synthetic/glm5_synthetic_apr2_0100_to_0130.jsonl \\
+        --output-path /data/mooncake_traces/synthetic/prod_synthetic_apr2_0100_to_0130.jsonl \\
         --max-input-tokens 24000
 
     # W2b midday:
     modal run --env=alessio-dev data_processing/build_synthetic_trace.py::main \\
         --start-time 2026-04-02T12:30:00 --end-time 2026-04-02T13:00:00 \\
-        --output-path /data/mooncake_traces/synthetic/glm5_synthetic_apr2_1230_to_1300.jsonl \\
+        --output-path /data/mooncake_traces/synthetic/prod_synthetic_apr2_1230_to_1300.jsonl \\
         --max-input-tokens 24000
 """
 
@@ -379,7 +379,7 @@ def main(
     if not output_path:
         st = start_time.replace(":", "").replace("-", "").replace("T", "_")
         et = end_time.replace(":", "").replace("-", "").replace("T", "_")
-        output_path = f"/data/mooncake_traces/synthetic/glm5_synthetic_{st}_to_{et}.jsonl"
+        output_path = f"/data/mooncake_traces/synthetic/prod_synthetic_{st}_to_{et}.jsonl"
 
     result = build_synthetic_trace.remote(
         start_time=start_time,

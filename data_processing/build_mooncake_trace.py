@@ -4,7 +4,7 @@ WildChat-4.8M) into a Mooncake FAST '25 trace JSONL.
 Three sources, selected with ``--source``:
 
 * ``prod`` (default) -- walks the production ClickHouse export on the
-  ``GORGO-glm5-completions`` volume (mounted at ``/data``) starting from
+  ``GORGO-completions`` volume (mounted at ``/data``) starting from
   ``--start-time`` and consumes up to ``--num-requests`` rows. Real
   per-request timestamps come from the parquet ``timestamp`` column.
 
@@ -68,7 +68,7 @@ Usage::
         --target-input-tokens 30000000 \\
         --arrival-rate-per-second 11 --include-bodies
 
-Output JSONL is written to the ``GORGO-glm5-completions`` volume (default
+Output JSONL is written to the ``GORGO-completions`` volume (default
 ``/data/mooncake_traces/mooncake_<UTC-timestamp>.jsonl``).
 """
 

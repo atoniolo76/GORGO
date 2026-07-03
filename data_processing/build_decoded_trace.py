@@ -12,8 +12,8 @@ turn content gets fresh random tokens.
 Usage::
 
     modal run --env=alessio-dev data_processing/build_decoded_trace.py::main \\
-        --metadata-path /data/mooncake_traces/metadata/glm5_metadata_apr2_0030_to_0100.jsonl \\
-        --output-path /data/mooncake_traces/decoded/glm5_decoded_apr2_0030_to_0100.jsonl
+        --metadata-path /data/mooncake_traces/metadata/prod_metadata_apr2_0030_to_0100.jsonl \\
+        --output-path /data/mooncake_traces/decoded/prod_decoded_apr2_0030_to_0100.jsonl
 """
 
 from __future__ import annotations
@@ -272,7 +272,7 @@ def build_decoded(
 
 @app.local_entrypoint()
 def main(
-    metadata_path: str = "/data/mooncake_traces/metadata/glm5_metadata_apr2_0030_to_0100.jsonl",
+    metadata_path: str = "/data/mooncake_traces/metadata/prod_metadata_apr2_0030_to_0100.jsonl",
     output_path: str = "",
     seed: int = 42,
 ):

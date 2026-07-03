@@ -1,6 +1,6 @@
 {
   "_note": "HELD-OUT EVAL on the apr6 15:05-15:35 high-diversity decoded window at time_scale=2.0 (within-capacity stress; ts1/full load is over capacity for all policies, slip=minutes, so 2.0 is the cleanest valid stress point). Frozen gorgo weights from the decoded_v9 apr5 16:15-16:45 hillclimb tuning (rtt=0.276, queue=0.5; prefill_rate=queue_rate=1.0 -> score=rtt*rtt_ms+uncached+queue*queued). No tuning here -- deploy-and-freeze. Paired with eval_ts2/apr7.json (same config, other held-out window). Full 5-policy baseline set (session-affinity, least-request, least-load, prefix-cache, gorgo) = 5 engines/region, fits the 5-container/region budget exactly.",
-  "run_id": "glm5_c64_eval_ts2_apr6",
+  "run_id": "prod_c64_eval_ts2_apr6",
   "trace_path": "",
   "start_delay_seconds": 30,
   "concurrency": 64,

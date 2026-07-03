@@ -1,6 +1,6 @@
 {
   "_note": "LOAD SWEEP on the apr7 19:45-20:15 high-diversity decoded window. Tests the hypothesis that the high-diversity windows also saturate the 3-replica fleet, so queueing (not cache/RTT) dominates and load-agnostic session-affinity wins. time_scale stretches inter-arrival times: 1.0 = real load (~7 rps), 2.0 = half load, 3.0 = third load. Same requests/order/prompts/cache structure across the sweep; only arrival rate varies. Fixed gorgo weights from the decoded_v9 NON-physical-rate 2D tuning (rtt=0.276, queue=0.5; prefill_rate=queue_rate=1.0 collapse route_gorgo_2d back to score=rtt*rtt_ms+uncached+queue*queued) -- the best-performing cost function on a high-diversity window (apr5) -- so load is the only variable (de-confounds from tuning noise). Trimmed to gorgo vs session-affinity vs least-request to keep GPU cost down. THIS FILE: time_scale=1.0 (baseline, full load).",
-  "run_id": "glm5_c64_loadsweep_apr7_ts1",
+  "run_id": "prod_c64_loadsweep_apr7_ts1",
   "trace_path": "",
   "start_delay_seconds": 30,
   "concurrency": 64,

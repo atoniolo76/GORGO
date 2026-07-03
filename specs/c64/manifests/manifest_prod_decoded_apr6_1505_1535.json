@@ -1,0 +1,10 @@
+{
+  "_note": "Decoded synthetic trace: production April 6 15:05-15:35 high-diversity eval window. Privacy-safe; selected by find_best_window.py.",
+  "top": [
+    {
+      "result": {
+        "output_path": "/data/mooncake_traces/decoded/prod_decoded_apr6_1505_to_1535.jsonl"
+      }
+    }
+  ]
+}

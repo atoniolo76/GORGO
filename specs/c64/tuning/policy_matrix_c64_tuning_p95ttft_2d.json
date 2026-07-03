@@ -1,6 +1,6 @@
 {
-  "_note": "GLM5 c=64 tuning, optimizing p95 TTFT. 2D GORGO model: fixed own-prefill unit, ES searches (rtt_weight, queue_weight).",
-  "run_id": "glm5_c64_tuning_p95ttft_2d",
+  "_note": "Production c=64 tuning, optimizing p95 TTFT. 2D GORGO model: fixed own-prefill unit, ES searches (rtt_weight, queue_weight).",
+  "run_id": "prod_c64_tuning_p95ttft_2d",
   "trace_path": "",
   "start_delay_seconds": 30,
   "concurrency": 64,

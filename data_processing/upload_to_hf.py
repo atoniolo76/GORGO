@@ -1,7 +1,7 @@
 """Upload the packaged week release from the Modal volume to the HuggingFace Hub.
 
 Pulls ``/data/mooncake_traces/week_release`` (per-day parquet + Mooncake JSONL)
-from the ``GORGO-glm5-completions`` volume and uploads it to a dataset repo,
+from the ``GORGO-completions`` volume and uploads it to a dataset repo,
 authenticating with the ``huggingface-secret`` Modal secret.
 
 Usage::

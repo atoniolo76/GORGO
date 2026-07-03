@@ -1,7 +1,7 @@
 """Extract E2E + ITL + TTFT percentiles for the apr6/apr7 held-out eval runs.
 
 Scans the GORGO-bench-results volume for the per-policy result JSONs of
-``glm5_c64_eval_ts2_apr6`` and ``glm5_c64_eval_ts3_apr7`` and prints
+``prod_c64_eval_ts2_apr6`` and ``prod_c64_eval_ts3_apr7`` and prints
 TTFT/E2E/ITL p50/p95/p99 per policy. Falls back to recomputing from the
 per-request ``requests.jsonl`` trace if a harvested JSON lacks the metrics.
 
@@ -20,7 +20,7 @@ from app import app, bench_results_volume
 
 image = modal.Image.debian_slim().add_local_python_source("app")
 
-RUN_IDS = ["glm5_c64_eval_ts2_apr6", "glm5_c64_eval_ts3_apr7", "glm5_c64_eval_ts2_apr7"]
+RUN_IDS = ["prod_c64_eval_ts2_apr6", "prod_c64_eval_ts3_apr7", "prod_c64_eval_ts2_apr7"]
 
 
 def _find(o, key):
@@ -97,7 +97,7 @@ def _pct(vals, p):
 @app.function(
     image=image, memory=1024 * 8, timeout=3600, volumes={"/results": bench_results_volume}
 )
-def recompute_loadsweep(run_substr: str = "glm5_c64_loadsweep_apr7_ts3") -> dict:
+def recompute_loadsweep(run_substr: str = "prod_c64_loadsweep_apr7_ts3") -> dict:
     """Recompute TTFT/E2E/ITL percentiles from requests.jsonl (status==200)."""
     import os
 
@@ -215,7 +215,7 @@ def recompute_run(run_substr: str) -> dict:
 
 @app.local_entrypoint()
 def hacked(
-    run_substr: str = "glm5_c64_eval_p95ttft_diurnal_v2",
+    run_substr: str = "prod_c64_eval_p95ttft_diurnal_v2",
     out_path: str = "results/decoded_v9/hacked_ablation_metrics.json",
 ):
     import os

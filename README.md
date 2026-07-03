@@ -80,7 +80,7 @@ modal run --env=alessio-dev data_processing/build_mooncake_trace.py::main \
 # 2. Launch (spec defines policies/regions/concurrency; manifest points at the trace)
 modal run --detach --env=alessio-dev experiment_runner/policy_matrix_app.py::main \
   --base-spec-path specs/c64/tuning/policy_matrix_c64_tuning_p95ttft_2d.json \
-  --sweep-manifest-path specs/c64/manifests/manifest_glm5_decoded_apr5_1615_1645.json \
+  --sweep-manifest-path specs/c64/manifests/manifest_prod_decoded_apr5_1615_1645.json \
   --experiment-id my_experiment_v1 --start-index 0 --top-k 1 \
   --output-dir /results/policy_matrix_sweep/my_experiment_v1
 # 3. Monitor / early-stop
@@ -128,7 +128,7 @@ The tuning script is now a lightweight client for the running proxy. It
 submits a batch tuning request to the proxy's embedded `/tuning/*` API; the
 proxy runs the workload locally against `http://127.0.0.1:8000` so the tuning
 metric does not include client-to-proxy tunnel latency. Start the proxy with
-the `GORGO-glm5-completions` and `GORGO-bench-results` volumes available (the
+the `GORGO-completions` and `GORGO-bench-results` volumes available (the
 default `proxy/modal_proxy.py::proxy` deployment does this) and set the active
 policy to `gorgo` before launching a run.
 

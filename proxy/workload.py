@@ -4,7 +4,7 @@ Runs as a Modal function pinned to the same region as the proxy (and the
 engine). Three data sources are supported via the ``--source`` flag:
 
 - ``prod`` (default): the production ClickHouse export. Parquet shards under
-  ``GORGO-glm5-completions`` (mounted at ``/data``) with ``timestamp`` plus a
+  ``GORGO-completions`` (mounted at ``/data``) with ``timestamp`` plus a
   JSON ``request`` column. Supports ISO ``--start-time`` / ``--end-time``
   filtering against the row timestamps.
 - ``hf``: any Hugging Face ``save_to_disk`` chat dataset (LMSYS-Chat-1M,

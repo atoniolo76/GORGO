@@ -30,7 +30,7 @@ Usage::
 
     modal run --env=alessio-dev data_processing/export_metadata_trace.py::main \\
         --start-time 2026-04-02T00:30:00 --end-time 2026-04-02T01:00:00 \\
-        --output-path /data/mooncake_traces/metadata/glm5_metadata_apr2_0030_to_0100.jsonl
+        --output-path /data/mooncake_traces/metadata/prod_metadata_apr2_0030_to_0100.jsonl
 """
 
 from __future__ import annotations
@@ -328,7 +328,7 @@ def main(
     if not output_path:
         st = start_time.replace(":", "").replace("-", "")
         et = end_time.replace(":", "").replace("-", "")
-        output_path = f"/data/mooncake_traces/metadata/glm5_metadata_{st}_to_{et}.jsonl"
+        output_path = f"/data/mooncake_traces/metadata/prod_metadata_{st}_to_{et}.jsonl"
 
     result = export_metadata.remote(
         start_time=start_time,

@@ -10,7 +10,7 @@ proxies = modal.Dict.from_name(
     "GORGO-proxies", create_if_missing=True, environment_name=ENVIRONMENT_NAME
 )
 completions_volume = modal.Volume.from_name(
-    "GORGO-glm5-completions", create_if_missing=True, environment_name=ENVIRONMENT_NAME
+    "GORGO-completions", create_if_missing=True, environment_name=ENVIRONMENT_NAME
 )
 # Output destination for ``proxy/workload.py`` runs (one JSON doc per run
 # under ``/results``).

@@ -1,6 +1,6 @@
 {
   "_note": "LOAD SWEEP on the apr7 19:45-20:15 high-diversity decoded window. Tests whether fleet saturation (not routing quality) is why gorgo loses to session-affinity on high-diversity windows. time_scale stretches inter-arrival times; same requests/order/prompts/cache structure, only arrival rate varies. Fixed gorgo weights from decoded_v9 non-physical-rate 2D tuning (rtt=0.276, queue=0.5; prefill_rate=queue_rate=1.0 -> score=rtt*rtt_ms+uncached+queue*queued). THIS FILE: time_scale=3.0 (third load, ~90min replay).",
-  "run_id": "glm5_c64_loadsweep_apr7_ts3",
+  "run_id": "prod_c64_loadsweep_apr7_ts3",
   "trace_path": "",
   "start_delay_seconds": 30,
   "concurrency": 64,

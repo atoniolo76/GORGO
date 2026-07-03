@@ -22,9 +22,9 @@ from app import app, completions_volume
 image = modal.Image.debian_slim().add_local_python_source("app")
 
 FILES = {
-    "apr5": "/data/mooncake_traces/decoded/glm5_decoded_apr5_1615_to_1645.jsonl",
-    "apr6": "/data/mooncake_traces/decoded/glm5_decoded_apr6_1505_to_1535.jsonl",
-    "apr7": "/data/mooncake_traces/decoded/glm5_decoded_apr7_1945_to_2015.jsonl",
+    "apr5": "/data/mooncake_traces/decoded/prod_decoded_apr5_1615_to_1645.jsonl",
+    "apr6": "/data/mooncake_traces/decoded/prod_decoded_apr6_1505_to_1535.jsonl",
+    "apr7": "/data/mooncake_traces/decoded/prod_decoded_apr7_1945_to_2015.jsonl",
 }
 BLOCK_SIZE = 256
 
