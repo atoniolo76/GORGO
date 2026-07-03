@@ -1396,7 +1396,7 @@ components:
 
     WorkloadSource:
       type: string
-      enum: [glm5, hf, mooncake]
+      enum: [prod, hf, mooncake]
 
     ArrivalMode:
       type: string

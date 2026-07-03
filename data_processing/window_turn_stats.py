@@ -1,6 +1,6 @@
 """Average turns-per-conversation for the apr5/apr6/apr7 candidate windows.
 
-Each GLM5 request carries the *full* message history up to that point, so a
+Each production request carries the *full* message history up to that point, so a
 conversation's depth equals the number of user-role messages in its deepest
 request. There's no conversation id in the raw data, so we group requests into
 conversations by ``(token_hash, sha1(opening user message))`` and take the max

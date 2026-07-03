@@ -81,7 +81,7 @@ def _dispatch_tune(
 
     base_url = proxy_url.rstrip("/")
     payload = {
-        "source": source or "glm5",
+        "source": source or "prod",
         "data_path": data_path or None,
         "arrival_mode": arrival_mode or "bounded",
         "time_scale": time_scale,
@@ -156,9 +156,9 @@ _TUNE_TUI_SPEC: list[tuple[str, list[dict]]] = [
             {
                 "name": "source",
                 "kind": "choice",
-                "default": "glm5",
+                "default": "prod",
                 "help": "Workload source",
-                "choices": ["glm5", "hf", "mooncake"],
+                "choices": ["prod", "hf", "mooncake"],
             },
             {
                 "name": "data_path",
@@ -421,7 +421,7 @@ def _run_tui(initial_proxy_url: str = "") -> dict:
 @app.local_entrypoint()
 def tune_cli(
     proxy_url: str,
-    source: str = "glm5",
+    source: str = "prod",
     data_path: str = "",
     arrival_mode: str = "bounded",
     time_scale: float = 1.0,

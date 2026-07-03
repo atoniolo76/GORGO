@@ -23,7 +23,7 @@ Per-sample procedure
 2. Ping the replica ``K`` times back-to-back; take the median RTT
    (filters single-ping jitter without being too costly).
 3. Send one *streaming* chat completion with ``max_tokens=N`` (large),
-   using a prompt sampled from the GLM 5.1 dataset (long realistic
+   using a prompt sampled from the production dataset (long realistic
    prompts make the rate-per-token estimate stable -- with short
    prompts the fixed overheads dominate).
 4. Parse the SSE stream with chunk-arrival-precise timing (shared with
@@ -190,7 +190,7 @@ def calibrate(
     *,
     replica_url: str | None = None,
     proxy_url: str | None = None,
-    source: str = "glm5",
+    source: str = "prod",
     preset: str | None = None,
     data_path: str | None = None,
     start_time: str | None = None,
@@ -215,11 +215,11 @@ def calibrate(
             ``GET /replicas`` on this proxy and uses the first one. The
             proxy itself is never in the calibration request path.
         source / preset / data_path: Prompt sourcing -- see
-            ``proxy/workload.py``. Defaults match workload (GLM 5.1 from
+            ``proxy/workload.py``. Defaults match workload (production from
             ``/data``).
         start_time / end_time / offset: Dataset slice for prompt sourcing.
             Honored only for sources that support time-range filtering
-            (``glm5``); ignored for HF sources.
+            (``prod``); ignored for HF sources.
         num_samples: Total number of measurement requests (after warmup).
         warmup_samples: Discard this many initial samples; first requests
             after a cold cache often show prefill artifacts.
@@ -429,7 +429,7 @@ def calibrate(
 def main(
     replica_url: str = "",
     proxy_url: str = "",
-    source: str = "glm5",
+    source: str = "prod",
     preset: str = "",
     data_path: str = "",
     start_time: str = "",

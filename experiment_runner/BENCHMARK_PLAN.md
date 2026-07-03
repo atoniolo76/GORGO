@@ -15,7 +15,7 @@ This document describes the experimental setup for evaluating GORGO against base
 | **Context length** | 32,768 tokens |
 | **Max output tokens** | 128 |
 | **Concurrency** | 32 in-flight requests per proxy |
-| **Arrival mode** | Open-loop (Poisson-scheduled for HF datasets, real timestamps for GLM5) |
+| **Arrival mode** | Open-loop (Poisson-scheduled for HF datasets, real timestamps for Production) |
 
 Each policy runs on its own dedicated fleet so routing decisions are fully isolated — no cross-policy interference on shared replicas.
 
@@ -29,7 +29,7 @@ Each policy runs on its own dedicated fleet so routing decisions are fully isola
 | `least-request` | `least-request` | `max(num_running_reqs, proxy_inflight)` | Routes to the replica with fewest in-flight requests. Industry standard (NGINX `least_conn`). Uses a proxy-side in-flight counter to bridge staleness between SGLang metrics scrapes. |
 | `least-load` | `least-load` | `num_running + num_queue + num_used_tokens` | Token-weighted load balance. Routes away from replicas with high KV-cache occupancy. |
 | `prefix-cache` | `prefix-cache` | Radix trie prefix match length | Routes to the replica with the longest cached prefix for the incoming prompt. Maximizes KV-cache hit rate but ignores load. |
-| `simple-session-affinity` | `simple-session-affinity` | Hash of first 256 token IDs | Sticky routing — same prompt prefix always hits the same replica. Maximizes intra-user cache reuse. *(GLM5 and WildChat only; excluded from LMSYS which has no user identity.)* |
+| `simple-session-affinity` | `simple-session-affinity` | Hash of first 256 token IDs | Sticky routing — same prompt prefix always hits the same replica. Maximizes intra-user cache reuse. *(Production and WildChat only; excluded from LMSYS which has no user identity.)* |
 
 ### GORGO Variants
 
@@ -59,7 +59,7 @@ Where:
 
 | Dataset | Source | Total rows | Avg tokens/req | Intra-user reuse | Cross-user reuse | Global reuse |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| **GLM-5.1** | GLM production traffic | 411,000 | ~4,000–17,000 | 53.7% | 1.6% | 55.3% |
+| **Production** | GLM production traffic | 411,000 | ~4,000–17,000 | 53.7% | 1.6% | 55.3% |
 | **LMSYS-Chat-1M** | Chatbot Arena | 1,000,000 | ~470 | N/A (no user identity) | 9.0% | 9.0% |
 | **WildChat-4.8M** | ChatGPT proxy | 3,200,000 | ~2,900 | 5.3% | 29.1% | 34.4% |
 
@@ -69,16 +69,16 @@ Reuse statistics from `data_processing/prefix_trie_results/*/stats.json`. These 
 
 Traces are built with `data_processing/build_mooncake_trace.py` using `--selection-mode chronological` (no curation) and `--include-bodies` (replayable). Each trace is pre-cleaned at build time via `--max-input-tokens 24000` to filter requests that exceed the model's context window.
 
-### GLM5 traces
+### Production traces
 
 Two consecutive 30-minute windows from April 1, 2026 night traffic:
 
 | Window | Time range | Purpose | Output path |
 | --- | --- | --- | --- |
-| W1 | 00:30–01:00 UTC | Tuning window (hyperparameter discovery) | `abstract_night_traces/.../glm5_0030_to_0100.jsonl` |
-| W2 | 01:00–01:30 UTC | Evaluation window (fresh, unseen data) | `abstract_night_traces/.../glm5_0100_to_0130.jsonl` |
+| W1 | 00:30–01:00 UTC | Tuning window (hyperparameter discovery) | `abstract_night_traces/.../prod_0030_to_0100.jsonl` |
+| W2 | 01:00–01:30 UTC | Evaluation window (fresh, unseen data) | `abstract_night_traces/.../prod_0100_to_0130.jsonl` |
 
-GLM5 uses real parquet timestamps with `--time-scale 1.0` so the trace replays at original arrival speed.
+Production uses real parquet timestamps with `--time-scale 1.0` so the trace replays at original arrival speed.
 
 ### LMSYS and WildChat traces
 
@@ -135,14 +135,14 @@ The controller reads two files: a **spec** (policies, regions, concurrency, auto
 ### Build traces
 
 ```bash
-# GLM5 W1
+# Production W1
 modal run --env=alessio-dev data_processing/build_mooncake_trace.py::main \
-  --source glm5 --start-time 2026-04-01T00:30:00 --end-time 2026-04-01T01:00:00 \
+  --source prod --start-time 2026-04-01T00:30:00 --end-time 2026-04-01T01:00:00 \
   --num-requests 200000 --selection-mode chronological --include-bodies \
   --max-input-tokens 24000 --time-scale 1.0 \
-  --output-path mooncake_traces/abstract_night_traces/with_bodies/glm5_0030_to_0100.jsonl
+  --output-path mooncake_traces/abstract_night_traces/with_bodies/prod_0030_to_0100.jsonl
 
-# GLM5 W2
+# Production W2
 # (same command, change --start-time/--end-time to 01:00-01:30, change output path)
 ```
 
@@ -151,25 +151,25 @@ modal run --env=alessio-dev data_processing/build_mooncake_trace.py::main \
 ```bash
 modal run --detach --env=alessio-dev experiments/policy_matrix_app.py::main \
   --base-spec-path specs/policy_matrix_abstract_night.json \
-  --sweep-manifest-path specs/manifest_glm5_0030_0100.json \
-  --experiment-id abstract_night_glm5_w1_v1 \
+  --sweep-manifest-path specs/manifest_prod_0030_0100.json \
+  --experiment-id abstract_night_prod_w1_v1 \
   --start-index 0 --top-k 1 \
-  --output-dir /results/policy_matrix_sweep/abstract_night/glm5_w1_v1
+  --output-dir /results/policy_matrix_sweep/abstract_night/prod_w1_v1
 ```
 
-For W2 runs, use `specs/policy_matrix_abstract_night_w2.json` (seeds GORGO variants with W1-learned hyperparameters) and swap the manifest to `specs/manifest_glm5_0100_0130.json`.
+For W2 runs, use `specs/policy_matrix_abstract_night_w2.json` (seeds GORGO variants with W1-learned hyperparameters) and swap the manifest to `specs/manifest_prod_0100_0130.json`.
 
 ### Monitor
 
 ```bash
 source .venv/bin/activate
-python scripts/experiment_status.py --experiment-id abstract_night_glm5_w1_v1 --env alessio-dev
+python scripts/experiment_status.py --experiment-id abstract_night_prod_w1_v1 --env alessio-dev
 ```
 
 ### Early stop with partial results
 
 ```bash
-python scripts/stop_experiment.py --experiment-id abstract_night_glm5_w1_v1
+python scripts/stop_experiment.py --experiment-id abstract_night_prod_w1_v1
 ```
 
 Cancels all running workloads, saves traces to volume, and computes partial TTFT/E2E stats from whatever requests completed. The controller writes the manifest as usual.
@@ -219,12 +219,12 @@ modal volume get --env=alessio-dev --force GORGO-bench-results \
 
 | File | Purpose |
 | --- | --- |
-| `specs/policy_matrix_abstract_night.json` | GLM5 W1 spec — 8 policies, manual GORGO starter hyperparameters |
-| `specs/policy_matrix_abstract_night_w2.json` | GLM5 W2 spec — 8 policies, GORGO seeded with W1-learned values |
+| `specs/policy_matrix_abstract_night.json` | Production W1 spec — 8 policies, manual GORGO starter hyperparameters |
+| `specs/policy_matrix_abstract_night_w2.json` | Production W2 spec — 8 policies, GORGO seeded with W1-learned values |
 | `specs/policy_matrix_abstract_night_lmsys.json` | LMSYS spec — 7 policies (no session-affinity) |
 | `specs/policy_matrix_abstract_night_wildchat.json` | WildChat spec — 8 policies |
-| `specs/manifest_glm5_0030_0100.json` | GLM5 W1 trace manifest |
-| `specs/manifest_glm5_0100_0130.json` | GLM5 W2 trace manifest |
+| `specs/manifest_prod_0030_0100.json` | Production W1 trace manifest |
+| `specs/manifest_prod_0100_0130.json` | Production W2 trace manifest |
 | `specs/manifest_lmsys_window1.json` | LMSYS W1 trace manifest |
 | `specs/manifest_lmsys_window2.json` | LMSYS W2 trace manifest |
 | `specs/manifest_wildchat_window1.json` | WildChat W1 trace manifest |

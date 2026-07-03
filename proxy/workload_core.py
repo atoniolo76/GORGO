@@ -97,14 +97,14 @@ def _validate_messages(messages: list) -> bool:
 
 
 # ``--source`` choices.
-SOURCE_GLM5 = "glm5"
+SOURCE_PROD = "prod"
 SOURCE_HF = "hf"
 SOURCE_MOONCAKE = "mooncake"
-SUPPORTED_SOURCES = (SOURCE_GLM5, SOURCE_HF, SOURCE_MOONCAKE)
+SUPPORTED_SOURCES = (SOURCE_PROD, SOURCE_HF, SOURCE_MOONCAKE)
 
 # Defaults wired up to volumes mounted on ``replay``. Match the layouts used
 # by ``data_processing/build_hf_prefix_trie.py``.
-GLM5_DEFAULT_PATH = "/data"
+PROD_DEFAULT_PATH = "/data"
 HF_PRESETS = {
     "lmsys": "/datasets/datasets/lmsys__lmsys-chat-1m",
     "wildchat": "/datasets/datasets/allenai__WildChat-4.8M",
@@ -225,19 +225,19 @@ def _select_files(
 
 # A "row source" is any iterator that yields ``(timestamp_or_none, chat_completion_body)``
 # tuples. ``_iter_bodies`` layers offset / limit / overrides / stream_options
-# injection on top of one. Both built-in sources (GLM 5.1 parquet, HF
+# injection on top of one. Both built-in sources (production parquet, HF
 # ``save_to_disk``) follow this contract; adding a new dataset only requires
 # implementing another generator.
 RowSource = Iterator[tuple["datetime | None", dict]]
 
 
-def _iter_glm5_rows(
+def _iter_prod_rows(
     data_dir: str,
     *,
     start_dt: datetime | None,
     end_dt: datetime | None,
 ) -> RowSource:
-    """Yield ``(timestamp, chat_completion_body)`` from GLM 5.1 parquet shards.
+    """Yield ``(timestamp, chat_completion_body)`` from production parquet shards.
 
     Streams via ``iter_batches`` so memory stays bounded even on a multi-day
     window. The optional time range is applied at the row level; rows with
@@ -247,7 +247,9 @@ def _iter_glm5_rows(
 
     files = _select_files(data_dir, start_dt, end_dt)
     if not files:
-        raise SystemExit(f"no GLM5 parquet files match the requested time range under {data_dir!r}")
+        raise SystemExit(
+            f"no production parquet files match the requested time range under {data_dir!r}"
+        )
     for filename in files:
         path = os.path.join(data_dir, filename)
         pf = pq.ParquetFile(path)
@@ -417,11 +419,11 @@ def _build_row_source(
     :data:`RowSource` plus the path it actually reads from. Raises
     :class:`SystemExit` for invalid combinations so the Modal CLI prints a
     clean error."""
-    if source == SOURCE_GLM5:
+    if source == SOURCE_PROD:
         if preset:
             raise SystemExit(f"--preset is only valid with --source hf (got {preset!r})")
-        path = data_path or GLM5_DEFAULT_PATH
-        return _iter_glm5_rows(path, start_dt=start_dt, end_dt=end_dt), path
+        path = data_path or PROD_DEFAULT_PATH
+        return _iter_prod_rows(path, start_dt=start_dt, end_dt=end_dt), path
     if source == SOURCE_HF:
         if preset is not None:
             if preset not in HF_PRESETS:
@@ -462,7 +464,7 @@ def _iter_bodies(
     """Layer offset / limit / per-request field overrides / stream_options
     injection on top of any :data:`RowSource`.
 
-    Splitting source enumeration from this transformer step lets the GLM5
+    Splitting source enumeration from this transformer step lets the production
     and HF readers stay simple generators -- all CLI knobs are honored
     uniformly here.
 
@@ -870,7 +872,7 @@ def _print_summary(stats: dict, fail_breakdown: dict[int, int]) -> None:
 async def run_replay_async(
     proxy_url: str,
     *,
-    source: str = SOURCE_GLM5,
+    source: str = SOURCE_PROD,
     preset: str | None = None,
     data_path: str | None = None,
     start_time: str | None = None,
@@ -894,19 +896,19 @@ async def run_replay_async(
         proxy_url: Base URL of the proxy (the ``modal.forward`` tunnel URL
             printed by ``modal run proxy/modal_proxy.py``). Trailing slashes
             are stripped.
-        source: ``"glm5"`` (default) replays the GLM 5.1 ClickHouse export
+        source: ``"prod"`` (default) replays the production ClickHouse export
             from ``/data``; ``"hf"`` replays a Hugging Face ``save_to_disk``
             chat dataset.
         preset: For ``source="hf"``, fills in a default ``data_path`` from
             :data:`HF_PRESETS` (currently ``lmsys`` and ``wildchat``). Mutually
             exclusive with passing a custom ``data_path`` only in the sense
             that an explicit ``data_path`` always wins.
-        data_path: Override the dataset disk path. For ``glm5`` defaults to
+        data_path: Override the dataset disk path. For ``prod`` defaults to
             ``/data``; for ``hf`` is required unless ``preset`` is set.
         start_time / end_time: Half-open ``[start, end)`` filter on the row
             ``timestamp`` column (ISO 8601, e.g. ``2026-04-01T12:00:00``).
             ``None`` on either side means unbounded. Only honored for
-            ``source="glm5"``; ignored (with a warning) for ``hf``.
+            ``source="prod"``; ignored (with a warning) for ``hf``.
         offset: Skip this many requests before sending.
         num_requests: Cap on requests sent (after ``offset``). ``None`` means
             consume the entire source.
@@ -982,7 +984,7 @@ async def run_replay_async(
     # Modal volumes are eventually consistent; ``reload()`` is a single
     # round-trip and cheap relative to the replay run. The other volumes
     # don't need refreshing because we only read from one per run.
-    if source in (SOURCE_GLM5, SOURCE_MOONCAKE):
+    if source in (SOURCE_PROD, SOURCE_MOONCAKE):
         await completions_volume.reload.aio()
     elif source == SOURCE_HF:
         # Both LMSYS and WildChat datasets are read-only here; reload both
@@ -1000,7 +1002,7 @@ async def run_replay_async(
     config["resolved_data_path"] = resolved_path
 
     range_desc = ""
-    if source == SOURCE_GLM5:
+    if source == SOURCE_PROD:
         range_desc = "".join(
             [
                 f" from {start_time}" if start_time else "",
@@ -1171,7 +1173,7 @@ async def run_replay_async(
         workers = [asyncio.create_task(worker()) for _ in range(concurrency)]
         try:
             # ``_iter_bodies`` wraps a per-source generator (parquet
-            # ``iter_batches`` for GLM5, Arrow-backed row iteration for
+            # ``iter_batches`` for production, Arrow-backed row iteration for
             # HF), so rows are pulled lazily; combined with ``queue``
             # (bounded at ``concurrency * 2``) the pipeline back-pressures
             # from the workers all the way down to the dataset reader.

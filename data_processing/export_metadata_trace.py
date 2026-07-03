@@ -1,4 +1,4 @@
-"""Export privacy-safe metadata traces from GLM-5.1 production parquets.
+"""Export privacy-safe metadata traces from production parquets.
 
 Produces a JSONL where each row contains per-request routing metadata
 with no message content:

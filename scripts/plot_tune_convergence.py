@@ -12,7 +12,7 @@ Usage:
     python scripts/plot_tune_convergence.py \
         --tune-jsonl results/proxy_traces/<run_id>_gorgo-hillclimb/tune.jsonl \
         --out-dir results/analysis \
-        --title "GLM5 W1 Stress Hillclimb Convergence"
+        --title "Production W1 Stress Hillclimb Convergence"
 
     # Compare hillclimb and autotune side by side:
     python scripts/plot_tune_convergence.py \

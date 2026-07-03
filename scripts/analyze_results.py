@@ -7,14 +7,14 @@ and produces:
   3. Auto-tune hyperparameter comparison (if applicable)
 
 Usage:
-    python scripts/analyze_results.py --prefix abstract_night_000_glm5_0030_to_0100 --label "GLM5 W1"
-    python scripts/analyze_results.py --prefix abstract_night_w2_000_glm5_0100_to_0130 --label "GLM5 W2"
+    python scripts/analyze_results.py --prefix abstract_night_000_prod_0030_to_0100 --label "Production W1"
+    python scripts/analyze_results.py --prefix abstract_night_w2_000_prod_0100_to_0130 --label "Production W2"
 
     # Compare two runs side by side:
     python scripts/analyze_results.py \
-        --prefix abstract_night_000_glm5_0030_to_0100 \
-        --prefix2 abstract_night_w2_000_glm5_0100_to_0130 \
-        --label "GLM5 W1" --label2 "GLM5 W2"
+        --prefix abstract_night_000_prod_0030_to_0100 \
+        --prefix2 abstract_night_w2_000_prod_0100_to_0130 \
+        --label "Production W1" --label2 "Production W2"
 """
 
 from __future__ import annotations

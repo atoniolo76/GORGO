@@ -7,7 +7,7 @@ Produces:
 
 Usage:
     python scripts/plot_cache_and_convergence.py \
-        --run-prefix abstract_night_000_glm5_0030_to_0100 \
+        --run-prefix abstract_night_000_prod_0030_to_0100 \
         --results-dir results \
         --out-dir results/analysis
 """

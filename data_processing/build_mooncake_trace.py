@@ -1,9 +1,9 @@
-"""Convert GLM 5.1 parquet shards or HF chat datasets (LMSYS-Chat-1M /
+"""Convert production parquet shards or HF chat datasets (LMSYS-Chat-1M /
 WildChat-4.8M) into a Mooncake FAST '25 trace JSONL.
 
 Three sources, selected with ``--source``:
 
-* ``glm5`` (default) -- walks the GLM 5.1 ClickHouse export on the
+* ``prod`` (default) -- walks the production ClickHouse export on the
   ``GORGO-glm5-completions`` volume (mounted at ``/data``) starting from
   ``--start-time`` and consumes up to ``--num-requests`` rows. Real
   per-request timestamps come from the parquet ``timestamp`` column.
@@ -38,7 +38,7 @@ Common output format (per https://github.com/kvcache-ai/Mooncake FAST25-release)
                       ``ceil(K / block_size)`` ids, which is what makes
                       these traces useful for KV-cache replay simulation.
 
-GLM5 walking matches ``proxy/workload.py`` (filename-timestamp file selection
+Production walking matches ``proxy/workload.py`` (filename-timestamp file selection
 plus a row-level timestamp filter), and tokenization uses tiktoken
 ``gpt-4o`` for parity with ``data_processing/build_eval_dataset.py``. The
 exact tokenizer doesn't matter for replay -- what matters is that input
@@ -49,11 +49,11 @@ to the same total prefill work: collection stops as soon as accumulated
 ``input_length`` reaches the target. Combined with chronological
 selection this yields directly-comparable traces across datasets with
 wildly different prompt-length distributions (LMSYS ~500 tok/req,
-WildChat ~3k, GLM5 ~17k chronological / ~6k token-hash-filtered).
+WildChat ~3k, production ~17k chronological / ~6k token-hash-filtered).
 
 Usage::
 
-    # GLM5 (existing):
+    # Production (existing):
     modal run data_processing/build_mooncake_trace.py \\
         --start-time 2026-04-01T12:00:00 --num-requests 10000
 
@@ -88,12 +88,12 @@ DEFAULT_BLOCK_SIZE = 512
 DEFAULT_DATA_DIR = "/data"
 
 # ---- Source selection ----
-SOURCE_GLM5 = "glm5"
+SOURCE_PROD = "prod"
 SOURCE_LMSYS = "lmsys"
 SOURCE_WILDCHAT = "wildchat"
-SUPPORTED_SOURCES = (SOURCE_GLM5, SOURCE_LMSYS, SOURCE_WILDCHAT)
+SUPPORTED_SOURCES = (SOURCE_PROD, SOURCE_LMSYS, SOURCE_WILDCHAT)
 
-# Default per-source dataset roots. ``glm5`` lives on the completions
+# Default per-source dataset roots. ``prod`` lives on the completions
 # volume directly; the HF datasets are on their own volumes.
 LMSYS_DEFAULT_PATH = "/lmsys/lmsys-chat-1m"
 WILDCHAT_DEFAULT_PATH = "/datasets/datasets/allenai__WildChat-4.8M"
@@ -123,7 +123,7 @@ _VALID_ROLES = frozenset({"system", "user", "assistant", "tool", "function"})
 )
 def build_mooncake_trace(
     num_requests: int,
-    source: str = SOURCE_GLM5,
+    source: str = SOURCE_PROD,
     start_time: str | None = None,
     output_path: str | None = None,
     end_time: str | None = None,
@@ -155,10 +155,10 @@ def build_mooncake_trace(
         num_requests: Upper bound on emitted rows. Walking stops as soon
             as this many valid candidates have been collected (or as soon
             as ``target_input_tokens`` is reached, whichever is first).
-        source: One of ``glm5`` (default; parquet shards) / ``lmsys`` (HF
+        source: One of ``prod`` (default; parquet shards) / ``lmsys`` (HF
             ``save_to_disk`` LMSYS-Chat-1M) / ``wildchat`` (HF
             ``save_to_disk`` allenai/WildChat-4.8M).
-        start_time: ISO 8601 timestamp. Required for ``glm5``; ignored
+        start_time: ISO 8601 timestamp. Required for ``prod``; ignored
             for ``lmsys`` (no row timestamps) and currently ignored for
             ``wildchat`` (full-dataset filter is too expensive on 4.8M
             rows; truncate the trace via ``num_requests`` /
@@ -166,17 +166,17 @@ def build_mooncake_trace(
         output_path: Where to write the JSONL inside the volume. Relative
             paths are resolved under ``/data``. ``None`` (default) ->
             auto-generated ``mooncake_traces/mooncake_<UTC-timestamp>.jsonl``.
-        end_time: Optional ISO 8601 upper bound for ``glm5``; ignored for
+        end_time: Optional ISO 8601 upper bound for ``prod``; ignored for
             HF sources (see ``start_time``).
         block_size: Token count per KV-cache block when hashing the prompt.
             Mooncake uses 512 in their published traces.
         data_dir: Source-specific dataset root. Defaults: ``/data`` for
-            ``glm5``, ``/lmsys/lmsys-chat-1m`` for ``lmsys``,
+            ``prod``, ``/lmsys/lmsys-chat-1m`` for ``lmsys``,
             ``/datasets/datasets/allenai__WildChat-4.8M`` for ``wildchat``.
         include_bodies: Include parsed request/response JSON objects so the
             trace can be replayed against the proxy.
         include_raw_bodies: Include raw request/response strings for exact
-            debugging/archival payloads. ``glm5`` only -- HF sources don't
+            debugging/archival payloads. ``prod`` only -- HF sources don't
             preserve original API payloads.
         time_scale: Multiply all relative timestamps by this factor.
         target_duration_ms: Alternative to ``time_scale``; when positive,
@@ -223,7 +223,7 @@ def build_mooncake_trace(
             request N as its prompt prefix, so naively counting
             ``input_length`` double-counts the cached portion. Stopping
             on unique tokens equates fleet load across high-reuse
-            (e.g. GLM5 ~82%) and low-reuse (e.g. WildChat ~5%) datasets
+            (e.g. production ~82%) and low-reuse (e.g. WildChat ~5%) datasets
             so policies are stress-tested on comparable real prefill
             work. Same chronological-only restriction as
             ``target_input_tokens``. When both are set, collection stops
@@ -262,7 +262,7 @@ def build_mooncake_trace(
 
     if data_dir is None:
         data_dir = {
-            SOURCE_GLM5: DEFAULT_DATA_DIR,
+            SOURCE_PROD: DEFAULT_DATA_DIR,
             SOURCE_LMSYS: LMSYS_DEFAULT_PATH,
             SOURCE_WILDCHAT: WILDCHAT_DEFAULT_PATH,
         }[source]
@@ -270,7 +270,7 @@ def build_mooncake_trace(
     # Reload only the volume(s) we read from. Output always lands on
     # completions_volume so reload that one too in case a sibling job
     # just dropped a sidecar there.
-    if source == SOURCE_GLM5:
+    if source == SOURCE_PROD:
         completions_volume.reload()
     elif source == SOURCE_LMSYS:
         lmsys_chat_1m_volume.reload()
@@ -280,21 +280,21 @@ def build_mooncake_trace(
     completions_volume.reload()
 
     start_dt = _parse_iso(start_time)
-    if source == SOURCE_GLM5 and start_dt is None:
-        raise SystemExit(f"--start-time is required for source=glm5 (got {start_time!r})")
-    if source != SOURCE_GLM5 and (start_time or end_time):
+    if source == SOURCE_PROD and start_dt is None:
+        raise SystemExit(f"--start-time is required for source=prod (got {start_time!r})")
+    if source != SOURCE_PROD and (start_time or end_time):
         # HF sources don't filter on row timestamps in this builder
         # (LMSYS has none; WildChat would require a full-dataset
         # ``ds.filter`` scan over 4.8M rows). Truncate via num_requests
         # / target_input_tokens instead. Warn rather than error so
-        # callers retargeting an existing GLM5 invocation just lose the
+        # callers retargeting an existing production invocation just lose the
         # filter cleanly.
         print(
             f"[mooncake] note: --start-time / --end-time ignored for source={source!r} "
             f"(use --num-requests / --target-input-tokens to bound the trace)",
             flush=True,
         )
-    end_dt = _parse_iso(end_time) if source == SOURCE_GLM5 else None
+    end_dt = _parse_iso(end_time) if source == SOURCE_PROD else None
     if num_requests <= 0:
         raise SystemExit(f"--num-requests must be > 0 (got {num_requests})")
     if block_size <= 0:
@@ -355,11 +355,11 @@ def build_mooncake_trace(
             f"--selection-mode chronological (got {selection_mode!r})"
         )
 
-    if source == SOURCE_GLM5:
+    if source == SOURCE_PROD:
         files = _select_files(data_dir, start_dt, end_dt)
         if not files:
             raise SystemExit(
-                f"no GLM5 parquet files match the requested time range under {data_dir!r}"
+                f"no production parquet files match the requested time range under {data_dir!r}"
             )
     else:
         if not os.path.isdir(data_dir):
@@ -518,7 +518,7 @@ def build_mooncake_trace(
     # overlap-based curation; ``target_input_tokens > 0`` overrides the
     # candidate cap with a token-budget stop criterion (chronological
     # only, validated above).
-    if source == SOURCE_GLM5:
+    if source == SOURCE_PROD:
         print(
             f"[mooncake] walking {len(files)} parquet file(s) under {data_dir!r}; "
             f"start={start_time} end={end_time or '-'} target={num_requests} rows "
@@ -575,7 +575,7 @@ def build_mooncake_trace(
         seen_block_ids.update(block_ids)
         return min(len(new_ids) * block_size, input_length)
 
-    if source == SOURCE_GLM5:
+    if source == SOURCE_PROD:
         con = duckdb.connect()
         for filename in files:
             if len(candidates) >= target_candidates or _token_target_reached():
@@ -993,8 +993,8 @@ def build_mooncake_trace(
             "system/harness prefixes by block-id frequency while still emitting "
             "selected rows in source timestamp order."
         ),
-        "start_time": start_time if source == SOURCE_GLM5 else None,
-        "end_time": end_time if source == SOURCE_GLM5 else None,
+        "start_time": start_time if source == SOURCE_PROD else None,
+        "end_time": end_time if source == SOURCE_PROD else None,
         "base_timestamp": base_ts.isoformat(),
         "original_duration_ms": original_duration_ms,
         "scaled_duration_ms": int(original_duration_ms * effective_scale),
@@ -1111,7 +1111,7 @@ def _to_naive_dt(ts):
 
 
 def _select_files(data_dir, start_dt, end_dt):
-    """Pick GLM5 parquets in ``[start_dt, end_dt)`` by filename timestamp,
+    """Pick production parquets in ``[start_dt, end_dt)`` by filename timestamp,
     plus the file immediately before ``start_dt`` because chunks may
     straddle the boundary -- the row-level filter handles the rest.
 
@@ -1232,7 +1232,7 @@ def _content_to_str(content) -> str:
 @app.local_entrypoint()
 def main(
     num_requests: int,
-    source: str = SOURCE_GLM5,
+    source: str = SOURCE_PROD,
     start_time: str = "",
     output_path: str = "",
     end_time: str = "",
@@ -1260,7 +1260,7 @@ def main(
 ):
     """CLI wrapper for ``build_mooncake_trace``. Empty-string sentinels map
     to ``None`` because Modal local_entrypoints don't accept ``Optional``
-    natively. ``--source glm5`` (default) keeps existing GLM5 behavior;
+    natively. ``--source prod`` (default) keeps existing production behavior;
     ``--source lmsys`` and ``--source wildchat`` read HF datasets and
     synthesize Poisson arrivals where needed.
 

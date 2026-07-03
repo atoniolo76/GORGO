@@ -11,18 +11,18 @@ fresh engines/proxies and tears them down before the next phase starts.
 Usage — full run (tune + 2 evals):
     modal run --detach --env=alessio-dev experiment_runner/sequencer.py::main \\
         --tuning-spec-path specs/c64/tuning/policy_matrix_c64_tuning_p95ttft.json \\
-        --tuning-manifest-path specs/c64/manifests/manifest_glm5_apr2_0030_0100.json \\
+        --tuning-manifest-path specs/c64/manifests/manifest_prod_apr2_0030_0100.json \\
         --eval-spec-path specs/c64/eval/policy_matrix_c64_eval_p95ttft.json \\
-        --eval-manifest-paths "specs/c64/manifests/manifest_glm5_apr2_0100_0130.json,specs/c64/manifests/manifest_glm5_apr2_1230_1300.json" \\
-        --experiment-id glm5_c64_tuning_p95ttft_v6 \\
-        --output-dir /results/policy_matrix_sweep/c64/glm5_c64_tuning_p95ttft_v6
+        --eval-manifest-paths "specs/c64/manifests/manifest_prod_apr2_0100_0130.json,specs/c64/manifests/manifest_prod_apr2_1230_1300.json" \\
+        --experiment-id prod_c64_tuning_p95ttft_v6 \\
+        --output-dir /results/policy_matrix_sweep/c64/prod_c64_tuning_p95ttft_v6
 
 Resume evals only (tuning already completed, weights on volume):
     modal run --detach --env=alessio-dev experiment_runner/sequencer.py::main \\
         --eval-spec-path specs/c64/eval/policy_matrix_c64_eval_p95ttft.json \\
-        --eval-manifest-paths "specs/c64/manifests/manifest_glm5_apr2_1230_1300.json" \\
-        --experiment-id glm5_c64_tuning_p95ttft_v6 \\
-        --output-dir /results/policy_matrix_sweep/c64/glm5_c64_tuning_p95ttft_v6 \\
+        --eval-manifest-paths "specs/c64/manifests/manifest_prod_apr2_1230_1300.json" \\
+        --experiment-id prod_c64_tuning_p95ttft_v6 \\
+        --output-dir /results/policy_matrix_sweep/c64/prod_c64_tuning_p95ttft_v6 \\
         --skip-tuning
 """
 

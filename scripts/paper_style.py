@@ -28,7 +28,7 @@ REGION_COLORS = {
 
 # Dataset comparison
 DATASET_COLORS = {
-    "GLM-5.1": "#1b3a5c",
+    "ART-Chat-2.5M": "#1b3a5c",
     "WildChat-4.8M": "#6a9fd8",
     "LMSYS-Chat-1M": "#a8cce8",
 }

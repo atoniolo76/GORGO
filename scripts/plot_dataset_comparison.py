@@ -20,13 +20,13 @@ import numpy as np
 
 
 DATASETS = {
-    "GLM-5.1": "data_processing/prefix_trie_results/glm-5.1-completions/stats.json",
+    "ART-Chat-2.5M": "data_processing/prefix_trie_results/art-chat-2.5m/stats.json",
     "LMSYS-Chat-1M": "data_processing/prefix_trie_results/lmsys-chat-1m/stats.json",
     "WildChat-4.8M": "data_processing/prefix_trie_results/wildchat/stats.json",
 }
 
 COLORS = {
-    "GLM-5.1": "#d62728",
+    "ART-Chat-2.5M": "#d62728",
     "LMSYS-Chat-1M": "#1f77b4",
     "WildChat-4.8M": "#2ca02c",
 }
@@ -156,7 +156,7 @@ def main() -> None:
     axes[2].set_ylim(0, 70)
     axes[2].grid(axis="y", alpha=0.3)
 
-    fig.suptitle("Dataset Characteristics: GLM-5.1 vs Public Chat Datasets", fontsize=13)
+    fig.suptitle("Dataset Characteristics: ART-Chat-2.5M vs Public Chat Datasets", fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     path1 = args.out_dir / "dataset_comparison.png"
     fig.savefig(path1, dpi=180)

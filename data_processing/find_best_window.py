@@ -1,5 +1,5 @@
 """Find the 30-minute window with the highest user diversity and multi-turn
-density across the 7-day GLM-5.1 trace.
+density across the 7-day production trace.
 
 Scans raw parquets extracting only lightweight metadata (no tokenization):
 timestamp, token_hash, message count, and prompt_tokens from usage stats.

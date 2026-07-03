@@ -1,4 +1,4 @@
-"""Massively parallel Mooncake trace curation sweeps over GLM 5.1 windows.
+"""Massively parallel Mooncake trace curation sweeps over production windows.
 
 The sweep is intentionally just orchestration around
 ``build_mooncake_trace``: each window/config pair is independent, so we use

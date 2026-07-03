@@ -71,11 +71,11 @@ modal run proxy/workload.py --proxy-url https://... \
 The experiment runner spawns isolated per-policy engine fleets + proxies across regions, replays a Mooncake trace, and saves results. See `experiment_runner/BENCHMARK_PLAN.md` for full methodology.
 
 ```bash
-# 1. Build a trace (GLM-5.1 example; also supports --source lmsys / --source wildchat)
+# 1. Build a trace (production example; also supports --source lmsys / --source wildchat)
 modal run --env=alessio-dev data_processing/build_mooncake_trace.py::main \
-  --source glm5 --start-time 2026-04-01T00:30:00 --end-time 2026-04-01T01:00:00 \
+  --source prod --start-time 2026-04-01T00:30:00 --end-time 2026-04-01T01:00:00 \
   --num-requests 200000 --include-bodies --max-input-tokens 24000 --time-scale 1.0 \
-  --output-path mooncake_traces/my_trace/with_bodies/glm5.jsonl
+  --output-path mooncake_traces/my_trace/with_bodies/prod.jsonl
 
 # 2. Launch (spec defines policies/regions/concurrency; manifest points at the trace)
 modal run --detach --env=alessio-dev experiment_runner/policy_matrix_app.py::main \

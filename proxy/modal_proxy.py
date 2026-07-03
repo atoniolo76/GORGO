@@ -2124,7 +2124,7 @@ def proxy(registry_key: str = ""):
             }
         )
         return {
-            "source": _parse_optional_str(data, "source", "glm5") or "glm5",
+            "source": _parse_optional_str(data, "source", "prod") or "prod",
             "data_path": _parse_optional_str(data, "data_path", ""),
             "arrival_mode": _parse_optional_str(data, "arrival_mode", "bounded") or "bounded",
             "time_scale": _parse_float(data, "time_scale", 1.0),

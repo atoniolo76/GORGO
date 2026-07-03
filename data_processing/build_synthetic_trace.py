@@ -1,4 +1,4 @@
-"""Build synthetic Mooncake traces from GLM-5.1 metadata only.
+"""Build synthetic Mooncake traces from production metadata only.
 
 Reads tokenized parquet metadata (token_hash, per-message token counts,
 timestamps) and generates random token IDs that preserve the multi-turn
