@@ -1,4 +1,0 @@
-replica,region,rtt_mean_ms,rtt_std_ms,rtt_min_ms,rtt_max_ms,rtt_cv_pct,scrape_mean_ms,scrape_max_ms,n_samples
-ta-01kqtxa4z59a8vh6nfj5dg9k5r-,us-east,25.6,3.8,19.8,42.3,14.9,26.8,44.6,63
-ta-01kqtxa4e6xe1qrny42znj8255-,us-east,232.0,72.0,124.9,498.7,31.0,162.8,516.2,63
-ta-01kqtxa49nxjyzdskbpysv0rsy-,us-east,465.9,138.4,237.8,873.4,29.7,373.1,1700.8,63

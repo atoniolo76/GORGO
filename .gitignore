@@ -39,3 +39,6 @@ results/*.png
 
 # Temp traces pulled for ad-hoc analysis
 /tmp/gorgo_*
+
+# Results
+results/

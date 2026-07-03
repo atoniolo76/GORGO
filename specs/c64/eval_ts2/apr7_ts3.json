@@ -1,0 +1,51 @@
+{
+  "_note": "HELD-OUT EVAL on the apr7 19:45-20:15 high-diversity decoded window at time_scale=3.0 -- the within-capacity 5-policy comparison. apr7 @ ts2 put the concentrating/cache-blind baselines (session-affinity, least-request, prefix-cache) past their saturation knee (prefix-cache slip 181s); ts3 lowers offered load to ~the single-replica ceiling so all policies should be within capacity for a clean apples-to-apples routing-quality comparison (pairs with apr6 @ ts2). Frozen gorgo weights from the decoded_v9 apr5 16:15-16:45 hillclimb tuning (rtt=0.276, queue=0.5; prefill_rate=queue_rate=1.0 -> score=rtt*rtt_ms+uncached+queue*queued). Deploy-and-freeze, no tuning. Full 5-policy set = 5 engines/region, fits the 5-container/region budget exactly. NOTE: prefix-cache may still be borderline at ts3 (lowest effective capacity); report its slip.",
+  "run_id": "glm5_c64_eval_ts3_apr7",
+  "trace_path": "",
+  "start_delay_seconds": 30,
+  "concurrency": 64,
+  "stream": true,
+  "max_tokens": 128,
+  "max_input_tokens": 24000,
+  "arrival_mode": "open-loop",
+  "time_scale": 3.0,
+  "poll_interval_seconds": 60,
+  "fleet_regions": [
+    "ap-seoul-1",
+    "eu-frankfurt-1",
+    "us-ashburn-1"
+  ],
+  "policies": [
+    {
+      "name": "simple-session-affinity"
+    },
+    {
+      "name": "least-request"
+    },
+    {
+      "name": "least-load"
+    },
+    {
+      "name": "prefix-cache"
+    },
+    {
+      "name": "gorgo-2d",
+      "label": "gorgo-static-p95-2d",
+      "hyperparameters": {
+        "rtt_weight": 0.276,
+        "queue_weight": 0.5,
+        "prefill_rate": 1.0,
+        "queue_rate": 1.0
+      }
+    }
+  ],
+  "replica_homogeneity_check": {
+    "enabled": true,
+    "warmup_requests_per_replica": 16,
+    "warmup_requests": 4,
+    "prompt_size_tokens": 4000,
+    "max_tokens": 16,
+    "max_ttft_ratio": 3.0,
+    "on_violation": "warn"
+  }
+}

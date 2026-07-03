@@ -301,12 +301,64 @@ def main(
 DEFAULT_BLOCK_SIZE = 256
 
 CANDIDATE_WORDS = [
-    "the", "of", "and", "to", "in", "is", "for", "that", "it", "as", "was",
-    "with", "be", "by", "on", "not", "he", "are", "from", "or", "his", "an",
-    "at", "but", "they", "have", "had", "her", "she", "my", "we", "all", "if",
-    "so", "no", "up", "one", "its", "out", "do", "who", "when", "been", "can",
-    "more", "will", "has", "just", "new", "than", "may", "any", "our", "now",
-    "get", "use", "how", "each",
+    "the",
+    "of",
+    "and",
+    "to",
+    "in",
+    "is",
+    "for",
+    "that",
+    "it",
+    "as",
+    "was",
+    "with",
+    "be",
+    "by",
+    "on",
+    "not",
+    "he",
+    "are",
+    "from",
+    "or",
+    "his",
+    "an",
+    "at",
+    "but",
+    "they",
+    "have",
+    "had",
+    "her",
+    "she",
+    "my",
+    "we",
+    "all",
+    "if",
+    "so",
+    "no",
+    "up",
+    "one",
+    "its",
+    "out",
+    "do",
+    "who",
+    "when",
+    "been",
+    "can",
+    "more",
+    "will",
+    "has",
+    "just",
+    "new",
+    "than",
+    "may",
+    "any",
+    "our",
+    "now",
+    "get",
+    "use",
+    "how",
+    "each",
 ]
 
 
@@ -369,7 +421,9 @@ def decode_file(
             # Build the flat per-token string list, one RNG seed per block.
             flat: list[str] = []
             for bi, digest in enumerate(hash_ids):
-                blk = block_size if bi < n_blocks - 1 else input_length - block_size * (n_blocks - 1)
+                blk = (
+                    block_size if bi < n_blocks - 1 else input_length - block_size * (n_blocks - 1)
+                )
                 if blk <= 0:
                     continue
                 rng_b = random.Random(int(digest, 16))
@@ -465,7 +519,11 @@ def week_decode(
     output_dir: str = "/data/mooncake_traces/decoded_week",
     limit: int = 0,
 ):
-    print(json.dumps(decode_week.remote(input_dir=input_dir, output_dir=output_dir, limit=limit), indent=2))
+    print(
+        json.dumps(
+            decode_week.remote(input_dir=input_dir, output_dir=output_dir, limit=limit), indent=2
+        )
+    )
 
 
 @app.function(image=image, memory=1024 * 8, timeout=1800, volumes={"/data": completions_volume})

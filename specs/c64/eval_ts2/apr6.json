@@ -1,0 +1,51 @@
+{
+  "_note": "HELD-OUT EVAL on the apr6 15:05-15:35 high-diversity decoded window at time_scale=2.0 (within-capacity stress; ts1/full load is over capacity for all policies, slip=minutes, so 2.0 is the cleanest valid stress point). Frozen gorgo weights from the decoded_v9 apr5 16:15-16:45 hillclimb tuning (rtt=0.276, queue=0.5; prefill_rate=queue_rate=1.0 -> score=rtt*rtt_ms+uncached+queue*queued). No tuning here -- deploy-and-freeze. Paired with eval_ts2/apr7.json (same config, other held-out window). Full 5-policy baseline set (session-affinity, least-request, least-load, prefix-cache, gorgo) = 5 engines/region, fits the 5-container/region budget exactly.",
+  "run_id": "glm5_c64_eval_ts2_apr6",
+  "trace_path": "",
+  "start_delay_seconds": 30,
+  "concurrency": 64,
+  "stream": true,
+  "max_tokens": 128,
+  "max_input_tokens": 24000,
+  "arrival_mode": "open-loop",
+  "time_scale": 2.0,
+  "poll_interval_seconds": 60,
+  "fleet_regions": [
+    "ap-seoul-1",
+    "eu-frankfurt-1",
+    "us-ashburn-1"
+  ],
+  "policies": [
+    {
+      "name": "simple-session-affinity"
+    },
+    {
+      "name": "least-request"
+    },
+    {
+      "name": "least-load"
+    },
+    {
+      "name": "prefix-cache"
+    },
+    {
+      "name": "gorgo-2d",
+      "label": "gorgo-static-p95-2d",
+      "hyperparameters": {
+        "rtt_weight": 0.276,
+        "queue_weight": 0.5,
+        "prefill_rate": 1.0,
+        "queue_rate": 1.0
+      }
+    }
+  ],
+  "replica_homogeneity_check": {
+    "enabled": true,
+    "warmup_requests_per_replica": 16,
+    "warmup_requests": 4,
+    "prompt_size_tokens": 4000,
+    "max_tokens": 16,
+    "max_ttft_ratio": 3.0,
+    "on_violation": "warn"
+  }
+}
