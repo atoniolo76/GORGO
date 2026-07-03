@@ -54,7 +54,7 @@ def package_day(day: str, shards: list[str], global_min_ms: int) -> dict:
 
     os.makedirs(JSONL_OUT_DIR, exist_ok=True)
     os.makedirs(PARQUET_OUT_DIR, exist_ok=True)
-    jsonl_path = os.path.join(JSONL_OUT_DIR, f"glm5_artchat_week_{day}.jsonl")
+    jsonl_path = os.path.join(JSONL_OUT_DIR, f"artchat_week_{day}.jsonl")
     parquet_path = os.path.join(PARQUET_OUT_DIR, f"{day}.parquet")
 
     if os.path.exists(jsonl_path) and os.path.exists(parquet_path):

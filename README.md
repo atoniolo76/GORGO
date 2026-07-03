@@ -97,19 +97,19 @@ python scripts/plot_policy_summary.py --results-dir results --run-prefix <run_pr
 
 ### Using the public ART-Chat-2.5M dataset
 
-The paper's traces above live on a private Modal volume, but [ART-Chat-2.5M](https://huggingface.co/datasets/alessiotoniolo/ART-Chat-2.5M) ships the same data publicly as one Mooncake FAST'25 JSONL per day (`jsonl/glm5_artchat_week_<YYYYMMDD>.jsonl`, April 1st–7th 2026) — already in the `request`/`timestamp`/`hash_ids` shape the proxy replays directly, so no conversion script is needed.
+The paper's traces above live on a private Modal volume, but [ART-Chat-2.5M](https://huggingface.co/datasets/alessiotoniolo/ART-Chat-2.5M) ships the same data publicly as one Mooncake FAST'25 JSONL per day (`jsonl/artchat_week_<YYYYMMDD>.jsonl`, April 1st–7th 2026) — already in the `request`/`timestamp`/`hash_ids` shape the proxy replays directly, so no conversion script is needed.
 
 ```bash
 # 1. Download a day's trace and land it on the GORGO-hf-datasets volume
 huggingface-cli download alessiotoniolo/ART-Chat-2.5M \
-  jsonl/glm5_artchat_week_20260405.jsonl --repo-type dataset --local-dir /tmp/art-chat
+  jsonl/artchat_week_20260405.jsonl --repo-type dataset --local-dir /tmp/art-chat
 modal volume put --env=alessio-dev GORGO-hf-datasets \
-  /tmp/art-chat/jsonl/glm5_artchat_week_20260405.jsonl \
-  mooncake_traces/art_chat/glm5_artchat_week_20260405.jsonl
+  /tmp/art-chat/jsonl/artchat_week_20260405.jsonl \
+  mooncake_traces/art_chat/artchat_week_20260405.jsonl
 
 # 2. Point a manifest at it (mirrors the shape of specs/c64/manifests/*.json)
 cat > specs/c64/manifests/manifest_hf_apr5.json <<'EOF'
-{"top": [{"result": {"output_path": "/datasets/mooncake_traces/art_chat/glm5_artchat_week_20260405.jsonl"}}]}
+{"top": [{"result": {"output_path": "/datasets/mooncake_traces/art_chat/artchat_week_20260405.jsonl"}}]}
 EOF
 
 # 3. Launch with any spec from specs/c64/, same as above
