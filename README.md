@@ -72,13 +72,13 @@ The experiment runner spawns isolated per-policy engine fleets + proxies across 
 
 ```bash
 # 1. Build a trace (production example; also supports --source lmsys / --source wildchat)
-modal run --env=alessio-dev data_processing/build_mooncake_trace.py::main \
+modal run  data_processing/build_mooncake_trace.py::main \
   --source prod --start-time 2026-04-01T00:30:00 --end-time 2026-04-01T01:00:00 \
   --num-requests 200000 --include-bodies --max-input-tokens 24000 --time-scale 1.0 \
   --output-path mooncake_traces/my_trace/with_bodies/prod.jsonl
 
 # 2. Launch (spec defines policies/regions/concurrency; manifest points at the trace)
-modal run --detach --env=alessio-dev experiment_runner/policy_matrix_app.py::main \
+modal run --detach  experiment_runner/policy_matrix_app.py::main \
   --base-spec-path specs/c64/tuning/policy_matrix_c64_tuning_p95ttft_2d.json \
   --sweep-manifest-path specs/c64/manifests/manifest_prod_decoded_apr5_1615_1645.json \
   --experiment-id my_experiment_v1 --start-index 0 --top-k 1 \
@@ -88,7 +88,7 @@ python scripts/experiment_status.py --experiment-id my_experiment_v1 --env aless
 python scripts/stop_experiment.py --experiment-id my_experiment_v1  # saves partial results
 
 # 4. Pull + analyze
-modal volume get --env=alessio-dev --force GORGO-bench-results /workload_runs results/
+modal volume get  --force GORGO-bench-results /workload_runs results/
 python scripts/analyze_results.py --prefix <run_prefix> --label "My Run"
 python scripts/plot_policy_summary.py --results-dir results --run-prefix <run_prefix> --out results/analysis/summary.png
 ```
@@ -103,7 +103,7 @@ The paper's traces above live on a private Modal volume, but [ART-Chat-2.5M](htt
 # 1. Download a day's trace and land it on the GORGO-hf-datasets volume
 huggingface-cli download alessiotoniolo/ART-Chat-2.5M \
   jsonl/artchat_week_20260405.jsonl --repo-type dataset --local-dir /tmp/art-chat
-modal volume put --env=alessio-dev GORGO-hf-datasets \
+modal volume put  GORGO-hf-datasets \
   /tmp/art-chat/jsonl/artchat_week_20260405.jsonl \
   mooncake_traces/art_chat/artchat_week_20260405.jsonl
 
@@ -113,7 +113,7 @@ cat > specs/c64/manifests/manifest_hf_apr5.json <<'EOF'
 EOF
 
 # 3. Launch with any spec from specs/c64/, same as above
-modal run --detach --env=alessio-dev experiment_runner/policy_matrix_app.py::main \
+modal run --detach  experiment_runner/policy_matrix_app.py::main \
   --base-spec-path specs/c64/tuning/policy_matrix_c64_tuning_p95ttft_2d.json \
   --sweep-manifest-path specs/c64/manifests/manifest_hf_apr5.json \
   --experiment-id my_hf_run --start-index 0 --top-k 1 \
