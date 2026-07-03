@@ -7,7 +7,7 @@
   </p>
 
   [![arXiv](https://img.shields.io/badge/arXiv-2602.11688-b31b1b.svg)](https://arxiv.org/abs/2602.11688)
-  [![Dataset on HF](https://huggingface.co/datasets/huggingface/badges/resolve/main/dataset-on-hf-md.svg)](https://huggingface.co/datasets/alessiotoniolo/ART-Chat-2.5M)
+  [![Dataset on HF](https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-ART--Chat--2.5M-yellow.svg)](https://huggingface.co/datasets/alessiotoniolo/ART-Chat-2.5M)
 </div>
 <br/>
 
